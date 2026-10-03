@@ -525,7 +525,7 @@ namespace {
 		state.Log << "live_world_state_transport=" << (liveSnapshotTransportPassed ? "passed" : "failed") << '\n' << std::flush;
 		const bool utf8GlyphRenderPassed = g_FrameMan.DidDebugUTF8GlyphProbePass();
 		state.Log << "utf8_unicode_font_loaded=" << (g_FrameMan.DidDebugUTF8GlyphFontLoad() ? "yes" : "no") << '\n' << std::flush;
-		const std::string unicodeFontPath = g_PresetMan.GetFullModulePath("Base.rte/GUIS/Fonts/Roboto-Medium.ttf");
+		const std::string unicodeFontPath = g_PresetMan.GetFullModulePath("Base.rte/GUIs/Fonts/Roboto-Medium.ttf");
 		std::filesystem::path unicodeFontFilePath = std::filesystem::u8path(unicodeFontPath);
 		if (unicodeFontFilePath.is_relative()) {
 			unicodeFontFilePath = std::filesystem::u8path(System::GetWorkingDirectory()) / unicodeFontFilePath;

@@ -125,7 +125,7 @@ bool GUIFont::Load(GUIScreen* Screen, const std::string& Filename) {
 	// Unicode font only for characters which the 8-bit atlas cannot represent.
 	m_TrueTypeFont = s_TrueTypeFonts[m_FontHeight].lock();
 	if (!m_TrueTypeFont) {
-		const std::string unicodeFontPath = g_PresetMan.GetFullModulePath("Base.rte/GUIS/Fonts/Roboto-Medium.ttf");
+		const std::string unicodeFontPath = g_PresetMan.GetFullModulePath("Base.rte/GUIs/Fonts/Roboto-Medium.ttf");
 		std::filesystem::path unicodeFontFilePath = std::filesystem::u8path(unicodeFontPath);
 		if (unicodeFontFilePath.is_relative()) {
 			unicodeFontFilePath = std::filesystem::u8path(System::GetWorkingDirectory()) / unicodeFontFilePath;
