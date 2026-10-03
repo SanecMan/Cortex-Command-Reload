@@ -5,9 +5,9 @@
 
 using namespace RTE;
 
-bool WorldStateServerSession::Start(const std::string& bindAddress, unsigned short port, unsigned short maxPlayers, const std::string& logPath) {
+bool WorldStateServerSession::Start(const std::string& bindAddress, unsigned short port, unsigned short maxPlayers, const std::string& logPath, bool truncateLog) {
 	Stop();
-	m_Log.open(logPath, std::ios::out | std::ios::app);
+	m_Log.open(logPath, std::ios::out | (truncateLog ? std::ios::trunc : std::ios::app));
 	if (!m_Log || !m_Transport.StartServer(port, maxPlayers, bindAddress.c_str())) {
 		Log("ERROR: could not bind world-state server socket");
 		Stop();

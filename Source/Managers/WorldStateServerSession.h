@@ -14,7 +14,7 @@ namespace RTE {
 	/// it is not a headless server and does not yet apply client input commands.
 	class WorldStateServerSession {
 	public:
-		bool Start(const std::string& bindAddress, unsigned short port, unsigned short maxPlayers, const std::string& logPath);
+		bool Start(const std::string& bindAddress, unsigned short port, unsigned short maxPlayers, const std::string& logPath, bool truncateLog = false);
 		void Stop();
 		void Update(std::uint32_t simulationTick);
 		bool IsStarted() const { return m_Transport.IsStarted(); }

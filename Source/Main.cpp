@@ -94,6 +94,7 @@ namespace {
 	bool worldStateServerRequested = false;
 	unsigned short worldStateServerPort = 8000;
 	unsigned short worldStateServerMaxPlayers = 8;
+	std::string worldStateServerBindAddress = "0.0.0.0";
 	std::unique_ptr<WorldStateServerSession> worldStateServer;
 	std::uint32_t worldStateServerSimulationTick = 0;
 
@@ -652,6 +653,18 @@ void HandleMainArgs(int argCount, char** argValue) {
 				}
 			}
 		}
+		if (!lastArg && currentArg == "-world-state-bind") {
+			worldStateServerBindAddress = argValue[++i];
+		}
+		if (!lastArg && currentArg == "-world-state-players") {
+			unsigned int players = 0;
+			const std::string_view playerArgument(argValue[i + 1]);
+			const auto parsed = std::from_chars(playerArgument.data(), playerArgument.data() + playerArgument.size(), players);
+			if (parsed.ec == std::errc{} && parsed.ptr == playerArgument.data() + playerArgument.size() && players > 0 && players <= 64) {
+				worldStateServerMaxPlayers = static_cast<unsigned short>(players);
+			}
+			++i;
+		}
 
 		if (currentArg == "-cout") {
 			System::EnableLoggingToCLI();
@@ -1016,7 +1029,9 @@ int main(int argc, char** argv) {
 		if (worldStateServerRequested) {
 			worldStateServer = std::make_unique<WorldStateServerSession>();
 			const unsigned short serverPort = debugRun ? 0 : worldStateServerPort;
-			if (!worldStateServer->Start("0.0.0.0", serverPort, worldStateServerMaxPlayers, "WorldStateServer.log")) {
+			const std::string serverLogPath = debugRun ? (GetDebugRunState().OutputDirectory / "WorldStateServer.log").string() : "WorldStateServer.log";
+			const std::string bindAddress = debugRun ? "0.0.0.0" : worldStateServerBindAddress;
+			if (!worldStateServer->Start(bindAddress, serverPort, worldStateServerMaxPlayers, serverLogPath, debugRun)) {
 				worldStateServer.reset();
 				DestroyManagers();
 				allegro_exit();
