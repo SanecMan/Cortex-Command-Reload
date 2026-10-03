@@ -118,4 +118,60 @@ inline std::size_t Advance(std::string_view text, std::size_t offset, std::size_
 	return offset;
 }
 
+inline bool IsValid(std::string_view text) {
+	for (std::size_t offset = 0; offset < text.size();) {
+		std::uint32_t codePoint = 0;
+		std::size_t byteCount = 1;
+		if (!Decode(text, offset, codePoint, byteCount)) {
+			return false;
+		}
+		offset += byteCount;
+	}
+	return true;
+}
+
+inline void AppendCodepoint(std::string& output, std::uint32_t codePoint) {
+	if (codePoint <= 0x7F) {
+		output += static_cast<char>(codePoint);
+	} else if (codePoint <= 0x7FF) {
+		output += static_cast<char>(0xC0 | (codePoint >> 6));
+		output += static_cast<char>(0x80 | (codePoint & 0x3F));
+	} else {
+		output += static_cast<char>(0xE0 | (codePoint >> 12));
+		output += static_cast<char>(0x80 | ((codePoint >> 6) & 0x3F));
+		output += static_cast<char>(0x80 | (codePoint & 0x3F));
+	}
+}
+
+// Preserve old text-based .rte files when they contain Windows-1251 bytes.
+// Valid UTF-8 remains byte-for-byte unchanged; malformed sequences trigger a
+// whole-string Windows-1251 fallback, matching the legacy file encoding.
+inline std::string PreserveLegacyWindows1251(std::string_view text) {
+	if (IsValid(text)) {
+		return std::string(text);
+	}
+	static constexpr std::uint16_t c_Windows1251LowBytes[] = {
+		0x0402, 0x0403, 0x201A, 0x0453, 0x201E, 0x2026, 0x2020, 0x2021,
+		0x20AC, 0x2030, 0x0409, 0x2039, 0x040A, 0x040C, 0x040B, 0x040F,
+		0x0452, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2013, 0x2014,
+		0xFFFD, 0x2122, 0x0459, 0x203A, 0x045A, 0x045C, 0x045B, 0x045F,
+		0x00A0, 0x040E, 0x045E, 0x0408, 0x00A4, 0x0490, 0x00A6, 0x00A7,
+		0x0401, 0x00A9, 0x0404, 0x00AB, 0x00AC, 0x00AD, 0x00AE, 0x0407,
+		0x00B0, 0x00B1, 0x0406, 0x0456, 0x0491, 0x00B5, 0x00B6, 0x00B7,
+		0x0451, 0x2116, 0x0454, 0x00BB, 0x0458, 0x0405, 0x0455, 0x0457
+	};
+	std::string converted;
+	converted.reserve(text.size() * 2);
+	for (unsigned char byte : text) {
+		std::uint32_t codePoint = byte;
+		if (byte >= 0xC0) {
+			codePoint = byte <= 0xDF ? 0x0410 + byte - 0xC0 : 0x0430 + byte - 0xE0;
+		} else if (byte >= 0x80) {
+			codePoint = c_Windows1251LowBytes[byte - 0x80];
+		}
+		AppendCodepoint(converted, codePoint);
+	}
+	return converted;
+}
+
 } // namespace RTE::UTF8

@@ -170,6 +170,12 @@ namespace {
 		if (!utf8DecodePassed) {
 			return false;
 		}
+		const std::string legacyCyrillicProbe("\xCF\xF0\xE8\xE2\xE5\xF2", 6);
+		const bool legacyEncodingPassed = UTF8::PreserveLegacyWindows1251(legacyCyrillicProbe) == "Привет" && UTF8::PreserveLegacyWindows1251("Already UTF-8: Привет") == "Already UTF-8: Привет";
+		state.Log << "legacy_windows_1251_smoke=" << (legacyEncodingPassed ? "passed" : "failed") << '\n' << std::flush;
+		if (!legacyEncodingPassed) {
+			return false;
+		}
 		std::istringstream bomStream("\xEF\xBB\xBF" "ModuleName = UTF-8");
 		UTF8::SkipByteOrderMark(bomStream);
 		const bool utf8BOMPassed = bomStream.peek() == 'M';

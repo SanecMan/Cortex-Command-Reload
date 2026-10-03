@@ -139,7 +139,7 @@ std::string Reader::ReadLine() {
 		retString.append(1, temp);
 		peek = static_cast<char>(m_Stream->peek());
 	}
-	return TrimString(retString);
+	return UTF8::PreserveLegacyWindows1251(TrimString(retString));
 }
 
 std::string Reader::ReadPropName() {
@@ -172,7 +172,7 @@ std::string Reader::ReadPropName() {
 		retString.append(1, temp);
 	}
 	// Trim the string of whitespace
-	retString = TrimString(retString);
+	retString = UTF8::PreserveLegacyWindows1251(TrimString(retString));
 
 	// If the property name turns out to be the special IncludeFile,and we're not skipping include files then open that file and read the first property from it instead.
 	if (retString == "IncludeFile") {
