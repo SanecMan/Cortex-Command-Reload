@@ -4,7 +4,6 @@ namespace RTE {
 
 	class GUIControlManager;
 	class GUICollectionBox;
-	class GUIButton;
 	class GUICheckbox;
 	class GUILabel;
 	class GUISlider;
@@ -46,14 +45,11 @@ namespace RTE {
 		GUICheckbox* m_DiscordPresenceCheckbox;
 		GUILabel* m_SceneBackgroundAutoScaleLabel;
 		GUISlider* m_SceneBackgroundAutoScaleSlider;
-		GUIButton* m_LanguageButton;
 
 #pragma region Misc Settings Handling
 		/// Updates the Scene background auto-scale label according to the setting.
 		void UpdateSceneBackgroundAutoScaleLabel();
 
-		/// Updates the language selector to show the currently active language.
-		void UpdateLanguageButton();
 #pragma endregion
 
 		// Disallow the use of some implicit methods.

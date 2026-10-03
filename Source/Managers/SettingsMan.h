@@ -37,12 +37,6 @@ namespace RTE {
 		/// @return Whether Settings.ini needs to be overwritten with the complete list of settings or not.
 		bool SettingsNeedOverwrite() const { return m_SettingsNeedOverwrite; }
 
-		/// Gets the selected UI language code ("en" or "ru").
-		const std::string& GetLanguage() const { return m_Language; }
-
-		/// Sets the selected UI language. Unknown values fall back to English.
-		void SetLanguage(std::string language) { m_Language = (language == "ru" || language == "Russian") ? "ru" : "en"; }
-
 		/// Gets whether Discord Rich Presence is enabled.
 		bool DiscordPresenceEnabled() const { return m_DiscordPresenceEnabled; }
 
@@ -376,7 +370,6 @@ namespace RTE {
 
 	protected:
 		bool m_SettingsNeedOverwrite; //!< Whether the settings file was generated with minimal defaults and needs to be overwritten to be fully populated.
-		std::string m_Language; //!< Selected interface language code.
 		bool m_DiscordPresenceEnabled; //!< Whether Discord Rich Presence should be published.
 
 		bool m_ShowForeignItems; //!< Do not show foreign items in buy menu.

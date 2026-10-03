@@ -4,16 +4,11 @@
 #include "LuaBindingRegisterDefinitions.h"
 #include "ThreadMan.h"
 #include "System.h"
-#include "Localization.h"
 
 #include "tracy/Tracy.hpp"
 #include "tracy/TracyLua.hpp"
 
 using namespace RTE;
-
-static std::string GetLocalizedStringForLua(const std::string& englishText) {
-	return Localization::Get(englishText);
-}
 
 const std::unordered_set<std::string> LuaMan::c_FileAccessModes = {"r", "r+", "w", "w+", "a", "a+", "rt", "wt"};
 
@@ -246,7 +241,6 @@ void LuaStateWrapper::Initialize() {
 	luabind::globals(m_State)["ConsoleMan"] = &g_ConsoleMan;
 	luabind::globals(m_State)["LuaMan"] = this;
 	luabind::globals(m_State)["SettingsMan"] = &g_SettingsMan;
-	luabind::module(m_State, "Localization")[luabind::def("Get", &GetLocalizedStringForLua)];
 
 	const uint64_t seed = RandomNum<uint64_t>(0, std::numeric_limits<uint64_t>::max());
 	m_RandomGenerator.Seed(seed);

@@ -17,7 +17,6 @@ const std::string SettingsMan::c_ClassName = "SettingsMan";
 void SettingsMan::Clear() {
 	m_SettingsPath = System::GetUserdataDirectory() + "Settings.ini";
 	m_SettingsNeedOverwrite = false;
-	m_Language = "en";
 	m_DiscordPresenceEnabled = true;
 
 	m_FlashOnBrainDamage = true;
@@ -110,7 +109,6 @@ int SettingsMan::ReadProperty(const std::string_view& propName, Reader& reader) 
 	StartPropertyList(return Serializable::ReadProperty(propName, reader));
 
 	MatchProperty("PaletteFile", { reader >> g_FrameMan.m_PaletteFile; });
-	MatchProperty("Language", { std::string language; reader >> language; SetLanguage(language); });
 	MatchProperty("DiscordPresenceEnabled", { reader >> m_DiscordPresenceEnabled; });
 	MatchProperty("ResolutionX", { reader >> g_WindowMan.m_ResX; });
 	MatchProperty("ResolutionY", { reader >> g_WindowMan.m_ResY; });
@@ -218,7 +216,6 @@ int SettingsMan::Save(Writer& writer) const {
 	writer.NewLineString("// Display Settings", false);
 	writer.NewLine(false);
 	writer.NewPropertyWithValue("PaletteFile", g_FrameMan.m_PaletteFile);
-	writer.NewPropertyWithValue("Language", m_Language);
 	writer.NewPropertyWithValue("DiscordPresenceEnabled", m_DiscordPresenceEnabled);
 	writer.NewPropertyWithValue("ResolutionX", g_WindowMan.m_ResX);
 	writer.NewPropertyWithValue("ResolutionY", g_WindowMan.m_ResY);

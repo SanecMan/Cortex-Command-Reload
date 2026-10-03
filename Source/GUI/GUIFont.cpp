@@ -1,8 +1,4 @@
 #include "GUI.h"
-#include "Localization.h"
-#include "PresetMan.h"
-
-#include <filesystem>
 
 #include <cassert>
 
@@ -28,26 +24,8 @@ bool GUIFont::Load(GUIScreen* Screen, const std::string& Filename) {
 
 	m_Screen = Screen;
 
-	// Prefer the shipped Cyrillic-capable atlas for built-in fonts. Custom mod
-	// fonts keep their original path unless a matching atlas is supplied.
-	std::string cyrillicFilename;
-	const size_t pathSeparator = Filename.find_last_of("/\\");
-	const size_t extension = Filename.find_last_of('.');
-	const std::string fontName = Filename.substr(pathSeparator == std::string::npos ? 0 : pathSeparator + 1, (extension == std::string::npos ? Filename.size() : extension) - (pathSeparator == std::string::npos ? 0 : pathSeparator + 1));
-	if (fontName == "FontMainMenu" || fontName == "FontConsoleMonospace") {
-		cyrillicFilename = Filename.substr(0, pathSeparator == std::string::npos ? 0 : pathSeparator + 1) + "FontLarge_ru.bmp";
-	} else if (extension != std::string::npos) {
-		cyrillicFilename = Filename.substr(0, extension) + "_ru.bmp";
-	}
-	if (!cyrillicFilename.empty()) {
-		const std::string resolvedCyrillicPath = g_PresetMan.GetFullModulePath(cyrillicFilename);
-		if (std::filesystem::exists(resolvedCyrillicPath)) {
-			m_Font = m_Screen->CreateBitmap(resolvedCyrillicPath);
-		}
-	}
-	if (!m_Font) {
-		m_Font = m_Screen->CreateBitmap(Filename);
-	}
+	// Load the font image
+	m_Font = m_Screen->CreateBitmap(Filename);
 	if (!m_Font) {
 		return false;
 	}
@@ -127,7 +105,6 @@ bool GUIFont::Load(GUIScreen* Screen, const std::string& Filename) {
 }
 
 void GUIFont::Draw(GUIBitmap* Bitmap, int X, int Y, const std::string& Text, unsigned long Shadow) {
-	const std::string localizedText = Localization::ForBitmapFont(Text);
 	unsigned char c;
 	GUIRect Rect;
 	GUIBitmap* Surf = m_CurrentBitmap;
@@ -146,8 +123,8 @@ void GUIFont::Draw(GUIBitmap* Bitmap, int X, int Y, const std::string& Text, uns
 	}
 
 	// Go through every character
-	for (int i = 0; i < localizedText.length(); i++) {
-		c = localizedText.at(i);
+	for (int i = 0; i < Text.length(); i++) {
+		c = Text.at(i);
 
 		if (c == '\n') {
 			Y += m_FontHeight;
@@ -277,14 +254,13 @@ void GUIFont::SetColor(unsigned long Color) {
 }
 
 int GUIFont::CalculateWidth(const std::string& Text) {
-	const std::string localizedText = Localization::ForBitmapFont(Text);
 	unsigned char c;
 	int Width = 0;
 	int WidestLine = 0;
 
 	// Go through every character
-	for (int i = 0; i < localizedText.length(); i++) {
-		c = localizedText.at(i);
+	for (int i = 0; i < Text.length(); i++) {
+		c = Text.at(i);
 		// Reset line counting if newline encountered
 		if (c == '\n') {
 			if (Width > WidestLine) {
@@ -324,15 +300,14 @@ int GUIFont::CalculateHeight(const std::string& Text, int MaxWidth) {
 	if (Text.empty()) {
 		return 0;
 	}
-	const std::string localizedText = Localization::ForBitmapFont(Text);
 	unsigned char c;
 	int Width = 0;
 	int Height = m_FontHeight;
 	int lastSpacePos = 0;
 
 	// Go through every character
-	for (int i = 0; i < localizedText.length(); i++) {
-		c = localizedText.at(i);
+	for (int i = 0; i < Text.length(); i++) {
+		c = Text.at(i);
 
 		// Add the new line's height if newline encountered
 		if (c == '\n') {

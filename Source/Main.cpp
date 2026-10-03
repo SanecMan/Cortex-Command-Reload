@@ -52,7 +52,6 @@
 #include "LuaMan.h"
 #include "MusicMan.h"
 #include "System.h"
-#include "Localization.h"
 #include "DiscordPresence.h"
 
 #include "RenderTarget.h"
@@ -100,7 +99,6 @@ void InitializeManagers() {
 
 	g_ThreadMan.Initialize();
 	g_SettingsMan.Initialize();
-	Localization::Initialize(std::filesystem::path(System::GetWorkingDirectory()) / "Data/Base.rte/Languages/ru.tsv", g_SettingsMan.GetLanguage());
 	g_WindowMan.Initialize();
 	g_GLResourceMan.Initialize();
 
@@ -253,7 +251,7 @@ void RunMenuLoop() {
 	g_UInputMan.TrapMousePos(false);
 
 	while (!System::IsSetToQuit()) {
-		DiscordPresence::SetActivity(Localization::Get("At the main menu"), "Cortex Command Reload");
+		DiscordPresence::SetActivity("At the main menu", "Cortex Command Reload");
 		g_WindowMan.ClearBackbuffer();
 		PollSDLEvents();
 
@@ -319,9 +317,9 @@ void RunGameLoop() {
 
 	while (!System::IsSetToQuit()) {
 		if (const Activity* activity = g_ActivityMan.GetActivity(); g_ActivityMan.IsInActivity() && activity) {
-			DiscordPresence::SetActivity(Localization::Get("Playing ") + activity->GetPresetName(), "Cortex Command Reload");
+			DiscordPresence::SetActivity("Playing " + activity->GetPresetName(), "Cortex Command Reload");
 		} else {
-			DiscordPresence::SetActivity(Localization::Get("At the main menu"), "Cortex Command Reload");
+			DiscordPresence::SetActivity("At the main menu", "Cortex Command Reload");
 		}
 		bool serverUpdated = false;
 		updateStartTime = g_TimerMan.GetAbsoluteTime();

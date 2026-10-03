@@ -1,13 +1,11 @@
 #include "SettingsMiscGUI.h"
 #include "SettingsMan.h"
-#include "Localization.h"
 #include "ConsoleMan.h"
 #include "PerformanceMan.h"
 #include "DiscordPresence.h"
 
 #include "GUI.h"
 #include "GUICollectionBox.h"
-#include "GUIButton.h"
 #include "GUICheckbox.h"
 #include "GUILabel.h"
 #include "GUISlider.h"
@@ -48,14 +46,8 @@ SettingsMiscGUI::SettingsMiscGUI(GUIControlManager* parentControlManager) :
 	m_SceneBackgroundAutoScaleSlider = dynamic_cast<GUISlider*>(m_GUIControlManager->GetControl("SliderSceneBackgroundAutoScale"));
 	m_SceneBackgroundAutoScaleSlider->SetValue(g_SettingsMan.GetSceneBackgroundAutoScaleMode());
 
-	m_LanguageButton = dynamic_cast<GUIButton*>(m_GUIControlManager->GetControl("ButtonLanguage"));
-	UpdateLanguageButton();
 	m_DiscordPresenceCheckbox = dynamic_cast<GUICheckbox*>(m_GUIControlManager->GetControl("CheckboxDiscordPresence"));
 	m_DiscordPresenceCheckbox->SetCheck(g_SettingsMan.DiscordPresenceEnabled());
-}
-
-void SettingsMiscGUI::UpdateLanguageButton() {
-	m_LanguageButton->SetText(Localization::GetLanguage() == "ru" ? Localization::Get("Russian") : "English");
 }
 
 void SettingsMiscGUI::SetEnabled(bool enable) const {
@@ -78,14 +70,6 @@ void SettingsMiscGUI::UpdateSceneBackgroundAutoScaleLabel() {
 }
 
 void SettingsMiscGUI::HandleInputEvents(GUIEvent& guiEvent) {
-	if (guiEvent.GetType() == GUIEvent::Command && guiEvent.GetControl() == m_LanguageButton) {
-		const std::string newLanguage = g_SettingsMan.GetLanguage() == "ru" ? "en" : "ru";
-		g_SettingsMan.SetLanguage(newLanguage);
-		Localization::SetLanguage(newLanguage);
-		g_SettingsMan.UpdateSettingsFile();
-		UpdateLanguageButton();
-		return;
-	}
 	if (guiEvent.GetType() == GUIEvent::Notification) {
 		if (guiEvent.GetControl() == m_SkipIntroCheckbox) {
 			g_SettingsMan.SetSkipIntro(m_SkipIntroCheckbox->GetCheck());
