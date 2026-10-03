@@ -64,6 +64,7 @@
 #endif
 
 #include <algorithm>
+#include <array>
 #include <charconv>
 #include <chrono>
 #include <fstream>
@@ -87,6 +88,8 @@ namespace {
 		int RenderedFrames = 0;
 		int InitialActorCount = 0;
 		int InitialParticleCount = 0;
+		double TotalFrameTimeMilliseconds = 0.0;
+		double TotalRenderTimeMilliseconds = 0.0;
 		bool InitialScreenshotCaptured = false;
 		bool MidpointScreenshotCaptured = false;
 		bool FinalScreenshotCaptured = false;
@@ -215,8 +218,17 @@ namespace {
 		          << "\nsimulation_seconds=" << simulationSeconds
 		          << "\nmodule_load_seconds=" << std::chrono::duration<double>(state.ModuleLoadEndTime - state.ModuleLoadStartTime).count()
 		          << "\naverage_frame_ms=" << (state.RenderedFrames > 0 ? simulationSeconds * 1000.0 / state.RenderedFrames : 0.0)
+		          << "\naverage_frame_work_ms=" << (state.RenderedFrames > 0 ? state.TotalFrameTimeMilliseconds / state.RenderedFrames : 0.0)
+		          << "\naverage_render_ms=" << (state.RenderedFrames > 0 ? state.TotalRenderTimeMilliseconds / state.RenderedFrames : 0.0)
 		          << "\nsimulation_updates_per_second=" << (simulationSeconds > 0.0 ? state.SimulationUpdates / simulationSeconds : 0.0)
 		          << "\nactors=" << g_MovableMan.GetActorCount() << "\nparticles=" << g_MovableMan.GetParticleCount() << '\n';
+		for (const auto& [name, counter] : std::array<std::pair<const char*, PerformanceMan::PerformanceCounters>, 8>{ {
+		         {"simulation", PerformanceMan::SimTotal}, {"ai", PerformanceMan::ActorsAI}, {"actor_travel", PerformanceMan::ActorsTravel},
+		         {"actor_update", PerformanceMan::ActorsUpdate}, {"particle_travel", PerformanceMan::ParticlesTravel}, {"particle_update", PerformanceMan::ParticlesUpdate},
+		         {"activity", PerformanceMan::ActivityUpdate}, {"lua_scripts", PerformanceMan::ScriptsUpdate}
+	         } }) {
+			state.Log << "average_" << name << "_ms=" << static_cast<double>(g_PerformanceMan.GetAveragePerformanceTime(counter)) / 1000.0 << '\n';
+		}
 		state.Log.flush();
 		g_ConsoleMan.SaveAllText((state.OutputDirectory / "LogConsole.txt").string());
 		for (const char* logName : {"LogLoading.txt", "LogLoadingWarning.txt"}) {
@@ -597,10 +609,15 @@ void RunGameLoop() {
 		g_FrameMan.Draw();
 		g_WindowMan.DrawPostProcessBuffer();
 		g_WindowMan.UploadFrame();
-		CaptureDebugRunFrame();
 
 		drawTotalTime = g_TimerMan.GetAbsoluteTime() - drawStartTime;
+		if (System::IsDebugRun()) {
+			DebugRunState& debugRunState = GetDebugRunState();
+			debugRunState.TotalFrameTimeMilliseconds += static_cast<double>(updateTotalTime + drawTotalTime) / 1000.0;
+			debugRunState.TotalRenderTimeMilliseconds += static_cast<double>(drawTotalTime) / 1000.0;
+		}
 		g_PerformanceMan.UpdateMSPF(updateTotalTime, drawTotalTime);
+		CaptureDebugRunFrame();
 	}
 }
 

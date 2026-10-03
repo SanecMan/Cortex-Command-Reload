@@ -4,8 +4,12 @@
 #include "LuaMan.h"
 #include "GameVersion.h"
 #include "System.h"
+#include "ConsoleMan.h"
+#include "SettingsMan.h"
 
 #include <System/Semver200/semver200.h>
+
+#include <chrono>
 
 using namespace RTE;
 
@@ -67,12 +71,20 @@ int DataModule::Create(const std::string& moduleName, const ProgressCallback& pr
 	}
 
 	// If the module is a mod, read only its `index.ini` to validate its SupportedGameVersion.
-	if (m_ModuleID >= g_PresetMan.GetOfficialModuleCount() && !m_IsUserdata && ReadModuleProperties(moduleName, progressCallback) >= 0) {
-		CheckSupportedGameVersion();
+	std::chrono::milliseconds propertiesDuration{0};
+	if (m_ModuleID >= g_PresetMan.GetOfficialModuleCount() && !m_IsUserdata) {
+		const auto propertiesStart = std::chrono::steady_clock::now();
+		const int propertiesResult = ReadModuleProperties(moduleName, progressCallback);
+		propertiesDuration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - propertiesStart);
+		if (propertiesResult >= 0) {
+			CheckSupportedGameVersion();
+		}
 	}
 
 	if (reader.Create(indexPath, true, progressCallback) >= 0) {
+		const auto indexLoadStart = std::chrono::steady_clock::now();
 		int result = Serializable::Create(reader);
+		const auto indexLoadDuration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - indexLoadStart);
 
 		// Print an empty line to separate the end of a module from the beginning of the next one in the loading progress log.
 		if (progressCallback) {
@@ -80,7 +92,14 @@ int DataModule::Create(const std::string& moduleName, const ProgressCallback& pr
 		}
 
 		if (m_ScanFolderContents) {
+			const auto folderScanStart = std::chrono::steady_clock::now();
 			result = FindAndRead(progressCallback);
+			if (g_SettingsMan.IsMeasuringModuleLoadTime()) {
+				const auto folderScanDuration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - folderScanStart);
+				g_ConsoleMan.PrintString("Module phases [" + m_FileName + "]: properties=" + std::to_string(propertiesDuration.count()) + "ms, index=" + std::to_string(indexLoadDuration.count()) + "ms, folder_scan=" + std::to_string(folderScanDuration.count()) + "ms");
+			}
+		} else if (g_SettingsMan.IsMeasuringModuleLoadTime()) {
+			g_ConsoleMan.PrintString("Module phases [" + m_FileName + "]: properties=" + std::to_string(propertiesDuration.count()) + "ms, index=" + std::to_string(indexLoadDuration.count()) + "ms, folder_scan=0ms");
 		}
 
 		return result;

@@ -80,6 +80,9 @@ namespace RTE {
 		/// Gets the average of the MSPF reading buffer, calculated each frame.
 		/// @return The average value of the MSPF reading buffer.
 		float GetMSPFAverage() const { return m_MSPFAverage; }
+
+		/// Gets the average recent duration of a simulation performance counter in microseconds.
+		uint64_t GetAveragePerformanceTime(PerformanceCounters counter) const { return GetPerformanceCounterAverage(counter); }
 #pragma endregion
 
 #pragma region Performance Counter Handling

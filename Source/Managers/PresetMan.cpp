@@ -19,6 +19,7 @@
 #include "System.h"
 
 #include <array>
+#include <chrono>
 
 using namespace RTE;
 
@@ -108,7 +109,13 @@ bool PresetMan::LoadDataModule(const std::string& moduleName, bool official, boo
 		m_DataModuleIDs.try_emplace(lowercaseName, m_pDataModules.size() - 1);
 	}
 
-	if (newModule->Create(moduleName, progressCallback) < 0) {
+	const auto moduleLoadStartTime = g_SettingsMan.IsMeasuringModuleLoadTime() ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+	const int moduleCreateResult = newModule->Create(moduleName, progressCallback);
+	if (g_SettingsMan.IsMeasuringModuleLoadTime()) {
+		const auto moduleLoadDuration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - moduleLoadStartTime);
+		g_ConsoleMan.PrintString("Module load [" + moduleName + "] duration: " + std::to_string(moduleLoadDuration.count()) + "ms");
+	}
+	if (moduleCreateResult < 0) {
 		RTEAbort("Failed to find the " + moduleName + " Data Module!");
 		return false;
 	}
