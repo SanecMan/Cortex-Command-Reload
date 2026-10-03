@@ -234,6 +234,14 @@ namespace {
 		if (!utf8DecodePassed) {
 			return false;
 		}
+		std::u16string unmatchedSurrogate = u"bad ";
+		unmatchedSurrogate.push_back(static_cast<char16_t>(0xD800));
+		unmatchedSurrogate += u" surrogate";
+		const bool utf16BridgePassed = UTF8::EncodeUTF16(u"Сбой 🙂") == "Сбой 🙂" && UTF8::EncodeUTF16(unmatchedSurrogate) == "bad � surrogate";
+		state.Log << "utf8_utf16_bridge_smoke=" << (utf16BridgePassed ? "passed" : "failed") << '\n' << std::flush;
+		if (!utf16BridgePassed) {
+			return false;
+		}
 		WorldStateProtocol::Snapshot networkSnapshot;
 		networkSnapshot.Tick = 1234;
 		networkSnapshot.SceneRevision = 7;

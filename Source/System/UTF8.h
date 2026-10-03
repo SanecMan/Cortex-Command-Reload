@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <istream>
+#include <string>
 #include <string_view>
 
 namespace RTE::UTF8 {
@@ -148,6 +149,23 @@ inline void AppendCodepoint(std::string& output, std::uint32_t codePoint) {
 	} else {
 		output += "\xEF\xBF\xBD";
 	}
+}
+
+// Convert UTF-16 text (including Windows system messages) to UTF-8. Unpaired
+// surrogates are replaced with U+FFFD rather than producing malformed output.
+inline std::string EncodeUTF16(std::u16string_view text) {
+	std::string encoded;
+	encoded.reserve(text.size() * 3);
+	for (std::size_t i = 0; i < text.size(); ++i) {
+		std::uint32_t codePoint = text[i];
+		if (codePoint >= 0xD800 && codePoint <= 0xDBFF && i + 1 < text.size() && text[i + 1] >= 0xDC00 && text[i + 1] <= 0xDFFF) {
+			codePoint = 0x10000 + ((codePoint - 0xD800) << 10) + (text[++i] - 0xDC00);
+		} else if (codePoint >= 0xD800 && codePoint <= 0xDFFF) {
+			codePoint = 0xFFFD;
+		}
+		AppendCodepoint(encoded, codePoint);
+	}
+	return encoded;
 }
 
 // Preserve old text-based .rte files when they contain Windows-1251 bytes.

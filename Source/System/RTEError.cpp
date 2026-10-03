@@ -5,6 +5,7 @@
 #include "ConsoleMan.h"
 #include "ActivityMan.h"
 #include "System.h"
+#include "UTF8.h"
 
 #include <SDL3/SDL_messagebox.h>
 
@@ -71,31 +72,12 @@ static LONG WINAPI RTEWindowsExceptionHandler([[maybe_unused]] EXCEPTION_POINTER
 		if (messageSize == 0 || !messageBuffer) {
 			return "Windows error " + std::to_string(errorMessageID);
 		}
-		std::string message;
-		message.reserve(messageSize * 3);
+		std::u16string utf16Message;
+		utf16Message.reserve(messageSize);
 		for (DWORD i = 0; i < messageSize; ++i) {
-			std::uint32_t codePoint = messageBuffer[i];
-			if (codePoint >= 0xD800 && codePoint <= 0xDBFF && i + 1 < messageSize && messageBuffer[i + 1] >= 0xDC00 && messageBuffer[i + 1] <= 0xDFFF) {
-				codePoint = 0x10000 + ((codePoint - 0xD800) << 10) + (messageBuffer[++i] - 0xDC00);
-			} else if (codePoint >= 0xD800 && codePoint <= 0xDFFF) {
-				codePoint = 0xFFFD;
-			}
-			if (codePoint <= 0x7F) {
-				message.push_back(static_cast<char>(codePoint));
-			} else if (codePoint <= 0x7FF) {
-				message.push_back(static_cast<char>(0xC0 | (codePoint >> 6)));
-				message.push_back(static_cast<char>(0x80 | (codePoint & 0x3F)));
-			} else if (codePoint <= 0xFFFF) {
-				message.push_back(static_cast<char>(0xE0 | (codePoint >> 12)));
-				message.push_back(static_cast<char>(0x80 | ((codePoint >> 6) & 0x3F)));
-				message.push_back(static_cast<char>(0x80 | (codePoint & 0x3F)));
-			} else {
-				message.push_back(static_cast<char>(0xF0 | (codePoint >> 18)));
-				message.push_back(static_cast<char>(0x80 | ((codePoint >> 12) & 0x3F)));
-				message.push_back(static_cast<char>(0x80 | ((codePoint >> 6) & 0x3F)));
-				message.push_back(static_cast<char>(0x80 | (codePoint & 0x3F)));
-			}
+			utf16Message.push_back(static_cast<char16_t>(messageBuffer[i]));
 		}
+		const std::string message = UTF8::EncodeUTF16(utf16Message);
 		LocalFree(messageBuffer);
 		return message;
 	};
