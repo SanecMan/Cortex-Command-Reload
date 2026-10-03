@@ -78,6 +78,7 @@
 #include <fstream>
 #include <filesystem>
 #include <list>
+#include <span>
 #include <sstream>
 #include <string_view>
 #include <thread>
@@ -245,58 +246,6 @@ namespace {
 		if (!networkRoundTripPassed || !malformedNetworkRejected) {
 			return false;
 		}
-		bool transportLoopbackPassed = false;
-		bool transportServerStarted = false;
-		bool transportClientStarted = false;
-		std::size_t transportSendCount = 0;
-		std::size_t transportServerPacketCount = 0;
-		std::size_t transportClientPacketCount = 0;
-		std::uint16_t transportBoundPort = 0;
-		{
-			WorldStateTransport serverTransport;
-			WorldStateTransport clientTransport;
-			transportServerStarted = serverTransport.StartServer(0, 1, "127.0.0.1");
-			if (transportServerStarted) {
-				const unsigned short port = serverTransport.GetBoundPort();
-				transportBoundPort = port;
-				transportClientStarted = port != 0 && clientTransport.StartClient("127.0.0.1", port);
-				if (transportClientStarted) {
-					const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-					while (std::chrono::steady_clock::now() < deadline && !transportLoopbackPassed) {
-						std::vector<WorldStateTransport::ReceivedPacket> serverPackets;
-						std::vector<WorldStateTransport::ReceivedPacket> clientPackets;
-						serverTransport.Poll(serverPackets);
-						clientTransport.Poll(clientPackets);
-						transportServerPacketCount += serverPackets.size();
-						transportClientPacketCount += clientPackets.size();
-						for (const WorldStateTransport::ReceivedPacket& received : serverPackets) {
-							if (received.Identifier == ID_NEW_INCOMING_CONNECTION && serverTransport.SendWorldState(received.Sender, networkPacket)) {
-								++transportSendCount;
-							}
-						}
-						for (const WorldStateTransport::ReceivedPacket& received : clientPackets) {
-							if (received.Identifier != ID_CCR_WORLD_STATE) {
-								continue;
-							}
-							WorldStateProtocol::Snapshot transportedSnapshot;
-							transportLoopbackPassed = WorldStateProtocol::DecodeSnapshot(received.Payload, transportedSnapshot) &&
-							                         transportedSnapshot.Tick == networkSnapshot.Tick &&
-							                         transportedSnapshot.Objects.size() == networkSnapshot.Objects.size() &&
-							                         transportedSnapshot.Objects.front().PresetName == networkActor.PresetName;
-							break;
-						}
-						std::this_thread::sleep_for(std::chrono::milliseconds(1));
-					}
-				}
-			}
-		}
-		state.Log << "world_state_transport_setup=server:" << transportServerStarted << ",port:" << transportBoundPort
-		          << ",client:" << transportClientStarted << ",server_packets:" << transportServerPacketCount
-		          << ",client_packets:" << transportClientPacketCount << ",sends:" << transportSendCount
-		          << ",loopback:" << (transportLoopbackPassed ? "passed" : "failed") << '\n' << std::flush;
-		if (!transportLoopbackPassed) {
-			return false;
-		}
 		const std::string legacyCyrillicProbe("\xCF\xF0\xE8\xE2\xE5\xF2", 6);
 		const bool legacyEncodingPassed = UTF8::PreserveLegacyWindows1251(legacyCyrillicProbe) == "Привет" && UTF8::PreserveLegacyWindows1251("Already UTF-8: Привет") == "Already UTF-8: Привет";
 		state.Log << "legacy_windows_1251_smoke=" << (legacyEncodingPassed ? "passed" : "failed") << '\n' << std::flush;
@@ -399,6 +348,59 @@ namespace {
 		return snapshot;
 	}
 
+	bool VerifyWorldStateTransportLoopback(std::span<const std::uint8_t> packet, const WorldStateProtocol::Snapshot& expectedSnapshot, std::ofstream& log) {
+		bool loopbackPassed = false;
+		bool serverStarted = false;
+		bool clientStarted = false;
+		std::size_t sendCount = 0;
+		std::size_t serverPacketCount = 0;
+		std::size_t clientPacketCount = 0;
+		std::uint16_t boundPort = 0;
+		{
+			WorldStateTransport serverTransport;
+			WorldStateTransport clientTransport;
+			serverStarted = serverTransport.StartServer(0, 1, "127.0.0.1");
+			if (serverStarted) {
+				boundPort = serverTransport.GetBoundPort();
+				clientStarted = boundPort != 0 && clientTransport.StartClient("127.0.0.1", boundPort);
+				if (clientStarted) {
+					const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+					while (std::chrono::steady_clock::now() < deadline && !loopbackPassed) {
+						std::vector<WorldStateTransport::ReceivedPacket> serverPackets;
+						std::vector<WorldStateTransport::ReceivedPacket> clientPackets;
+						serverTransport.Poll(serverPackets);
+						clientTransport.Poll(clientPackets);
+						serverPacketCount += serverPackets.size();
+						clientPacketCount += clientPackets.size();
+						for (const WorldStateTransport::ReceivedPacket& received : serverPackets) {
+							if (received.Identifier == ID_NEW_INCOMING_CONNECTION && serverTransport.SendWorldState(received.Sender, packet)) {
+								++sendCount;
+							}
+						}
+		for (const WorldStateTransport::ReceivedPacket& received : clientPackets) {
+			if (received.Identifier != ID_CCR_WORLD_STATE) {
+				continue;
+			}
+			WorldStateProtocol::Snapshot transportedSnapshot;
+							loopbackPassed = WorldStateProtocol::DecodeSnapshot(received.Payload, transportedSnapshot) &&
+							                 transportedSnapshot.Tick == expectedSnapshot.Tick &&
+							                 transportedSnapshot.ScenePreset == expectedSnapshot.ScenePreset &&
+							                 transportedSnapshot.Objects.size() == expectedSnapshot.Objects.size() &&
+							                 (transportedSnapshot.Objects.empty() || transportedSnapshot.Objects.front().PresetName == expectedSnapshot.Objects.front().PresetName);
+							break;
+						}
+						std::this_thread::sleep_for(std::chrono::milliseconds(1));
+					}
+				}
+			}
+		}
+		log << "world_state_transport_setup=server:" << serverStarted << ",port:" << boundPort
+		    << ",client:" << clientStarted << ",server_packets:" << serverPacketCount
+		    << ",client_packets:" << clientPacketCount << ",sends:" << sendCount
+		    << ",loopback:" << (loopbackPassed ? "passed" : "failed") << '\n' << std::flush;
+		return loopbackPassed;
+	}
+
 	void FinishDebugRun(bool success) {
 		DebugRunState& state = GetDebugRunState();
 		if (!state.Enabled || System::IsSetToQuit()) {
@@ -413,7 +415,8 @@ namespace {
 		state.Log << "captured_world_snapshot_objects=" << worldSnapshot.Objects.size()
 		          << " bytes=" << worldSnapshotPacket.size()
 		          << " result=" << (worldSnapshotPassed ? "passed" : "failed") << '\n' << std::flush;
-		success = success && worldSnapshotPassed;
+		const bool liveSnapshotTransportPassed = worldSnapshotPassed && VerifyWorldStateTransportLoopback(worldSnapshotPacket, decodedWorldSnapshot, state.Log);
+		success = success && worldSnapshotPassed && liveSnapshotTransportPassed;
 		const double elapsedSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - state.StartTime).count();
 		const double simulationSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - state.SimulationStartTime).count();
 		state.Log << "result=" << (success ? "passed" : "failed") << "\nupdates_done=" << state.SimulationUpdates
@@ -422,10 +425,10 @@ namespace {
 		          << "\nmodule_load_seconds=" << std::chrono::duration<double>(state.ModuleLoadEndTime - state.ModuleLoadStartTime).count()
 		          << "\naverage_frame_ms=" << (state.RenderedFrames > 0 ? simulationSeconds * 1000.0 / state.RenderedFrames : 0.0)
 		          << "\naverage_frame_work_ms=" << (state.RenderedFrames > 0 ? state.TotalFrameTimeMilliseconds / state.RenderedFrames : 0.0)
-			          << "\naverage_render_ms=" << (state.RenderedFrames > 0 ? state.TotalRenderTimeMilliseconds / state.RenderedFrames : 0.0)
-			          << "\nsimulation_updates_per_second=" << (simulationSeconds > 0.0 ? state.SimulationUpdates / simulationSeconds : 0.0)
-			          << "\nprocess_resident_memory_bytes=" << GetProcessResidentMemoryBytes()
-			          << "\nactors=" << g_MovableMan.GetActorCount() << "\nparticles=" << g_MovableMan.GetParticleCount() << '\n';
+		          << "\naverage_render_ms=" << (state.RenderedFrames > 0 ? state.TotalRenderTimeMilliseconds / state.RenderedFrames : 0.0)
+		          << "\nsimulation_updates_per_second=" << (simulationSeconds > 0.0 ? state.SimulationUpdates / simulationSeconds : 0.0)
+		          << "\nprocess_resident_memory_bytes=" << GetProcessResidentMemoryBytes()
+		          << "\nactors=" << g_MovableMan.GetActorCount() << "\nparticles=" << g_MovableMan.GetParticleCount() << '\n';
 		for (const auto& [name, counter] : std::array<std::pair<const char*, PerformanceMan::PerformanceCounters>, 8>{ {
 		         {"simulation", PerformanceMan::SimTotal}, {"ai", PerformanceMan::ActorsAI}, {"actor_travel", PerformanceMan::ActorsTravel},
 		         {"actor_update", PerformanceMan::ActorsUpdate}, {"particle_travel", PerformanceMan::ParticlesTravel}, {"particle_update", PerformanceMan::ParticlesUpdate},
