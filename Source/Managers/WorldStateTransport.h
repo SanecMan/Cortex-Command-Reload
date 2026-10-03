@@ -1,6 +1,7 @@
 #pragma once
 
 #include "RakPeerInterface.h"
+#include "PacketPriority.h"
 
 // RakNet includes Windows.h, whose GetClassName macro collides with Entity's method.
 #undef GetClassName
@@ -43,7 +44,7 @@ namespace RTE {
 		void Poll(std::vector<ReceivedPacket>& packets);
 
 	private:
-		bool Send(const RakNet::AddressOrGUID& target, std::span<const std::uint8_t> packet, bool broadcast);
+		bool Send(const RakNet::AddressOrGUID& target, std::span<const std::uint8_t> packet, bool broadcast, PacketReliability reliability = RELIABLE_ORDERED);
 
 		RakNet::RakPeerInterface* m_Peer = nullptr;
 	};

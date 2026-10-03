@@ -71,15 +71,15 @@ bool WorldStateTransport::BroadcastWorldState(std::span<const std::uint8_t> pack
 
 bool WorldStateTransport::SendSnapshot(const RakNet::AddressOrGUID& target, const WorldStateProtocol::Snapshot& snapshot, std::uint32_t sequence) {
 	std::vector<std::uint8_t> packet;
-	return WorldStateProtocol::EncodeSnapshot(snapshot, sequence, packet) && SendWorldState(target, packet);
+	return WorldStateProtocol::EncodeSnapshot(snapshot, sequence, packet) && Send(target, packet, false, UNRELIABLE_SEQUENCED);
 }
 
 bool WorldStateTransport::BroadcastSnapshot(const WorldStateProtocol::Snapshot& snapshot, std::uint32_t sequence) {
 	std::vector<std::uint8_t> packet;
-	return WorldStateProtocol::EncodeSnapshot(snapshot, sequence, packet) && BroadcastWorldState(packet);
+	return WorldStateProtocol::EncodeSnapshot(snapshot, sequence, packet) && Send(RakNet::UNASSIGNED_SYSTEM_ADDRESS, packet, true, UNRELIABLE_SEQUENCED);
 }
 
-bool WorldStateTransport::Send(const RakNet::AddressOrGUID& target, std::span<const std::uint8_t> packet, bool broadcast) {
+bool WorldStateTransport::Send(const RakNet::AddressOrGUID& target, std::span<const std::uint8_t> packet, bool broadcast, PacketReliability reliability) {
 	if (!m_Peer || packet.empty() || packet.size() > WorldStateProtocol::c_MaxPacketSize) {
 		return false;
 	}
@@ -87,7 +87,7 @@ bool WorldStateTransport::Send(const RakNet::AddressOrGUID& target, std::span<co
 	wirePacket.reserve(packet.size() + 1);
 	wirePacket.push_back(static_cast<char>(ID_CCR_WORLD_STATE));
 	wirePacket.insert(wirePacket.end(), packet.begin(), packet.end());
-	return m_Peer->Send(wirePacket.data(), static_cast<int>(wirePacket.size()), HIGH_PRIORITY, RELIABLE_ORDERED, 0, target, broadcast);
+	return m_Peer->Send(wirePacket.data(), static_cast<int>(wirePacket.size()), HIGH_PRIORITY, reliability, 0, target, broadcast);
 }
 
 void WorldStateTransport::Poll(std::vector<ReceivedPacket>& packets) {
