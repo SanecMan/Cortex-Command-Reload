@@ -6,6 +6,7 @@
 #include "RTETools.h"
 #include "System.h"
 #include "FrameMan.h"
+#include "UTF8.h"
 
 #include "png.h"
 #include "fmod/fmod.hpp"
@@ -125,7 +126,7 @@ int ContentFile::GetImageFileInfo(ImageFileInfoType infoTypeToGet) {
 			}
 		}
 
-		FILE* imageFile = fopen(m_DataPath.c_str(), "rb");
+		FILE* imageFile = UTF8::OpenFile(m_DataPath, "rb");
 		RTEAssert(imageFile, "Failed to open file prior to reading info of image file with following path and name:\n\n" + m_DataPath + "\n\nThe file may not exist or be corrupt.");
 
 		if (m_DataPathExtension == ".png") {

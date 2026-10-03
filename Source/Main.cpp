@@ -82,6 +82,7 @@
 #include <charconv>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <fstream>
 #include <limits>
 #include <filesystem>
@@ -240,6 +241,28 @@ namespace {
 		const bool utf16BridgePassed = UTF8::EncodeUTF16(u"Сбой 🙂") == "Сбой 🙂" && UTF8::EncodeUTF16(unmatchedSurrogate) == "bad � surrogate";
 		state.Log << "utf8_utf16_bridge_smoke=" << (utf16BridgePassed ? "passed" : "failed") << '\n' << std::flush;
 		if (!utf16BridgePassed) {
+			return false;
+		}
+		const std::string unicodePath = System::GetWorkingDirectory() + System::GetScreenshotDirectory() + "DebugRuns/тест-🙂.tmp";
+		constexpr std::string_view fileProbe = "UTF-8 file path round trip";
+		FILE* unicodeFile = UTF8::OpenFile(unicodePath, "wb");
+		bool unicodeFileWritten = unicodeFile && std::fwrite(fileProbe.data(), 1, fileProbe.size(), unicodeFile) == fileProbe.size();
+		if (unicodeFile && std::fclose(unicodeFile) != 0) {
+			unicodeFileWritten = false;
+		}
+		unicodeFile = unicodeFileWritten ? UTF8::OpenFile(unicodePath, "rb") : nullptr;
+		std::array<char, fileProbe.size()> fileContents{};
+		const bool unicodeFileRead = unicodeFile && std::fread(fileContents.data(), 1, fileContents.size(), unicodeFile) == fileContents.size() &&
+		                             std::string_view(fileContents.data(), fileContents.size()) == fileProbe;
+		if (unicodeFile) {
+			std::fclose(unicodeFile);
+		}
+		const bool unicodePathResolved = unicodeFileWritten && System::PathExistsCaseSensitive(unicodePath);
+		std::error_code unicodeFileCleanupError;
+		std::filesystem::remove(std::filesystem::u8path(unicodePath), unicodeFileCleanupError);
+		const bool unicodeFilePathPassed = unicodeFileWritten && unicodeFileRead && unicodePathResolved && !unicodeFileCleanupError;
+		state.Log << "utf8_file_path_smoke=" << (unicodeFilePathPassed ? "passed" : "failed") << '\n' << std::flush;
+		if (!unicodeFilePathPassed) {
 			return false;
 		}
 		WorldStateProtocol::Snapshot networkSnapshot;

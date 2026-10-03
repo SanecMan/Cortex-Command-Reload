@@ -2,11 +2,36 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
+#include <filesystem>
 #include <istream>
 #include <string>
 #include <string_view>
 
 namespace RTE::UTF8 {
+
+// Open a file whose path is UTF-8 on every platform. Narrow fopen uses the
+// active Windows code page and cannot reliably open Cyrillic paths.
+inline std::FILE* OpenFile(std::string_view fileName, std::string_view mode) {
+	const std::string terminatedFileName(fileName);
+	const std::string terminatedMode(mode);
+#ifdef _WIN32
+	const std::filesystem::path nativeFileName = std::filesystem::u8path(terminatedFileName);
+	const std::filesystem::path nativeMode = std::filesystem::u8path(terminatedMode);
+	return _wfopen(nativeFileName.c_str(), nativeMode.c_str());
+#else
+	return std::fopen(terminatedFileName.c_str(), terminatedMode.c_str());
+#endif
+}
+
+inline std::filesystem::path PathFromString(std::string_view path) {
+	return std::filesystem::u8path(path.begin(), path.end());
+}
+
+inline std::string PathToString(const std::filesystem::path& path) {
+	const std::u8string utf8Path = path.generic_u8string();
+	return std::string(reinterpret_cast<const char*>(utf8Path.data()), utf8Path.size());
+}
 
 inline void SkipByteOrderMark(std::istream& stream) {
 	const std::streampos beginning = stream.tellg();

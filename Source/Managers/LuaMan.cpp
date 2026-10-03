@@ -4,6 +4,7 @@
 #include "LuaBindingRegisterDefinitions.h"
 #include "ThreadMan.h"
 #include "System.h"
+#include "UTF8.h"
 
 #include "tracy/Tracy.hpp"
 #include "tracy/TracyLua.hpp"
@@ -1081,11 +1082,11 @@ int LuaMan::FileOpen(const std::string& path, const std::string& accessMode) {
 	std::string fullPath = System::GetWorkingDirectory() + g_PresetMan.GetFullModulePath(path);
 	if (IsValidModulePath(fullPath)) {
 #ifdef _WIN32
-		FILE* file = fopen(fullPath.c_str(), accessMode.c_str());
+		FILE* file = UTF8::OpenFile(fullPath, accessMode);
 #else
 		FILE* file = [&fullPath, &accessMode]() -> FILE* {
 			if (std::filesystem::exists(fullPath)) {
-				return fopen(fullPath.c_str(), accessMode.c_str());
+				return UTF8::OpenFile(fullPath, accessMode);
 			}
 
 			std::filesystem::path inspectedPath = System::GetWorkingDirectory();
@@ -1110,7 +1111,7 @@ int LuaMan::FileOpen(const std::string& path, const std::string& accessMode) {
 				if (!pathPartExists) {
 					// If this is the last part, then all directories in relativeFilePath exist, but the file doesn't
 					if (std::next(relativeFilePathIterator) == relativeFilePath.end()) {
-						return fopen((inspectedPath / relativeFilePath.filename()).generic_string().c_str(), accessMode.c_str());
+						return UTF8::OpenFile((inspectedPath / relativeFilePath.filename()).generic_string(), accessMode);
 					}
 
 					// Some directory in relativeFilePath doesn't exist, so the file can't be created
@@ -1119,7 +1120,7 @@ int LuaMan::FileOpen(const std::string& path, const std::string& accessMode) {
 			}
 
 			// If the file exists, open it
-			return fopen(inspectedPath.generic_string().c_str(), accessMode.c_str());
+			return UTF8::OpenFile(inspectedPath.generic_string(), accessMode);
 		}();
 #endif
 		if (file) {

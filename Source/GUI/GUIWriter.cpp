@@ -1,4 +1,5 @@
 #include "GUIWriter.h"
+#include "System/UTF8.h"
 
 #include <iostream>
 
@@ -24,7 +25,7 @@ int GUIWriter::Create(const std::string& fileName, bool append) {
 	m_FileName = m_FilePath.substr(slashPos + 1);
 	m_FolderPath = m_FilePath.substr(0, slashPos + 1);
 
-	m_Stream = std::make_unique<std::ofstream>(fileName, append ? (std::ios::out | std::ios::app | std::ios::ate) : (std::ios::out | std::ios::trunc));
+	m_Stream = std::make_unique<std::ofstream>(UTF8::PathFromString(fileName), append ? (std::ios::out | std::ios::app | std::ios::ate) : (std::ios::out | std::ios::trunc));
 
 	if (!m_Stream->good()) {
 		return -1;

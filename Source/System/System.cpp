@@ -8,6 +8,7 @@
 #endif
 
 #include "RTEError.h"
+#include "UTF8.h"
 
 // Convenience macro to not have to write this out.
 #define _LINUX_OR_MACOSX_ (__unix__ || (__APPLE__ && __MACH__))
@@ -55,7 +56,7 @@ const std::unordered_set<std::string> System::s_SupportedExtensions = {".ini", "
 void System::Initialize(const char* thisExePathAndName) {
 	s_ThisExePathAndName = std::filesystem::path(thisExePathAndName).generic_string();
 
-	s_WorkingDirectory = std::filesystem::current_path().generic_string();
+	s_WorkingDirectory = UTF8::PathToString(std::filesystem::current_path());
 
 #ifdef __APPLE__
 	// Get a reference to the main bundle
@@ -132,9 +133,10 @@ void System::Initialize(const char* thisExePathAndName) {
 }
 
 bool System::MakeDirectory(const std::string& pathToMake) {
-	bool createResult = std::filesystem::create_directory(pathToMake);
+	const std::filesystem::path nativePath = UTF8::PathFromString(pathToMake);
+	bool createResult = std::filesystem::create_directory(nativePath);
 	if (createResult) {
-		std::filesystem::permissions(pathToMake, std::filesystem::perms::owner_all | std::filesystem::perms::group_read | std::filesystem::perms::group_exec | std::filesystem::perms::others_read | std::filesystem::perms::others_exec, std::filesystem::perm_options::add);
+		std::filesystem::permissions(nativePath, std::filesystem::perms::owner_all | std::filesystem::perms::group_read | std::filesystem::perms::group_exec | std::filesystem::perms::others_read | std::filesystem::perms::others_exec, std::filesystem::perm_options::add);
 	}
 	return createResult;
 }
@@ -143,19 +145,20 @@ bool System::PathExistsCaseSensitive(const std::string& pathToCheck) {
 	// Use Hash for compiler independent hashing.
 	if (s_CaseSensitive) {
 		if (s_WorkingTree.empty()) {
-			for (const std::filesystem::directory_entry& directoryEntry: std::filesystem::recursive_directory_iterator(s_WorkingDirectory, std::filesystem::directory_options::follow_directory_symlink)) {
-				s_WorkingTree.emplace(Hash(directoryEntry.path().generic_string().substr(s_WorkingDirectory.length())));
+			const std::filesystem::path workingDirectory = UTF8::PathFromString(s_WorkingDirectory);
+			for (const std::filesystem::directory_entry& directoryEntry: std::filesystem::recursive_directory_iterator(workingDirectory, std::filesystem::directory_options::follow_directory_symlink)) {
+				s_WorkingTree.emplace(Hash(UTF8::PathToString(directoryEntry.path().lexically_relative(workingDirectory))));
 			}
 		}
 		if (s_WorkingTree.contains(Hash(pathToCheck))) {
 			return true;
-		} else if (std::filesystem::exists(pathToCheck) && std::filesystem::last_write_time(pathToCheck) > s_ProgramStartTime) {
+		} else if (std::filesystem::exists(UTF8::PathFromString(pathToCheck)) && std::filesystem::last_write_time(UTF8::PathFromString(pathToCheck)) > s_ProgramStartTime) {
 			s_WorkingTree.emplace(Hash(pathToCheck));
 			return true;
 		}
 		return false;
 	}
-	return std::filesystem::exists(pathToCheck);
+	return std::filesystem::exists(UTF8::PathFromString(pathToCheck));
 }
 
 void System::EnableLoggingToCLI() {
@@ -325,7 +328,7 @@ std::string System::ExtractZippedDataModule(const std::string& zippedModulePath)
 		if (unzOpenCurrentFile(zippedModule) != UNZ_OK) {
 			extractionProgressReport << "\tSkipped file: " + zippedModuleName + " - Could not open file!\n";
 		} else {
-			FILE* outputFile = fopen(outputFileName.c_str(), "wb");
+			FILE* outputFile = UTF8::OpenFile(outputFileName, "wb");
 			if (outputFile == nullptr) {
 				extractionProgressReport << "\tSkipped file: " + outputFileName + " - Could not open/create destination file!\n";
 			} else {
@@ -376,11 +379,11 @@ std::string System::ExtractZippedDataModule(const std::string& zippedModulePath)
 }
 
 int System::ASCIIFileContainsString(const std::string& filePath, const std::string_view& findString) {
-	std::ifstream inputStream(filePath, std::ios::binary);
+	std::ifstream inputStream(std::filesystem::u8path(filePath), std::ios::binary);
 	if (!inputStream.is_open()) {
 		return -1;
 	} else {
-		size_t fileSize = static_cast<size_t>(std::filesystem::file_size(filePath));
+		size_t fileSize = static_cast<size_t>(std::filesystem::file_size(std::filesystem::u8path(filePath)));
 		std::vector<unsigned char> rawData(fileSize);
 		inputStream.read(reinterpret_cast<char*>(&rawData[0]), fileSize);
 		inputStream.close();
