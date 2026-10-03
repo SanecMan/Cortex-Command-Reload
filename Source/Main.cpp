@@ -52,6 +52,8 @@
 #include "LuaMan.h"
 #include "MusicMan.h"
 #include "System.h"
+#include "Localization.h"
+#include "DiscordPresence.h"
 
 #include "RenderTarget.h"
 #include "tracy/Tracy.hpp"
@@ -98,6 +100,7 @@ void InitializeManagers() {
 
 	g_ThreadMan.Initialize();
 	g_SettingsMan.Initialize();
+	Localization::Initialize(std::filesystem::path(System::GetWorkingDirectory()) / "Data/Base.rte/Languages/ru.tsv", g_SettingsMan.GetLanguage());
 	g_WindowMan.Initialize();
 	g_GLResourceMan.Initialize();
 
@@ -250,6 +253,7 @@ void RunMenuLoop() {
 	g_UInputMan.TrapMousePos(false);
 
 	while (!System::IsSetToQuit()) {
+		DiscordPresence::SetActivity(Localization::Get("At the main menu"), "Cortex Command Reload");
 		g_WindowMan.ClearBackbuffer();
 		PollSDLEvents();
 
@@ -314,6 +318,11 @@ void RunGameLoop() {
 	long long drawTotalTime = 0;
 
 	while (!System::IsSetToQuit()) {
+		if (const Activity* activity = g_ActivityMan.GetActivity(); g_ActivityMan.IsInActivity() && activity) {
+			DiscordPresence::SetActivity(Localization::Get("Playing ") + activity->GetPresetName(), "Cortex Command Reload");
+		} else {
+			DiscordPresence::SetActivity(Localization::Get("At the main menu"), "Cortex Command Reload");
+		}
 		bool serverUpdated = false;
 		updateStartTime = g_TimerMan.GetAbsoluteTime();
 
@@ -440,6 +449,8 @@ int main(int argc, char** argv) {
 	SeedRNG();
 
 	InitializeManagers();
+	DiscordPresence::SetEnabled(g_SettingsMan.DiscordPresenceEnabled());
+	DiscordPresence::Initialize();
 
 	HandleMainArgs(argc, argv);
 
@@ -470,6 +481,7 @@ int main(int argc, char** argv) {
 
 	g_ThreadMan.GetPriorityThreadPool().wait_for_tasks();
 	g_ThreadMan.GetBackgroundThreadPool().wait_for_tasks();
+	DiscordPresence::Shutdown();
 
 	DestroyManagers();
 

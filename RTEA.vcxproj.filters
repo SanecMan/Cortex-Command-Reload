@@ -700,6 +700,9 @@
     <ClCompile Include="Source\System\MicroPather\micropather.cpp">
       <Filter>System\MicroPather</Filter>
     </ClCompile>
+    <ClInclude Include="Source\Managers\DiscordPresence.h">
+      <Filter>Managers</Filter>
+    </ClInclude>
     <ClCompile Include="Source\Managers\AchievementMan.cpp">
       <Filter>Managers</Filter>
     </ClCompile>
@@ -710,6 +713,9 @@
       <Filter>Managers</Filter>
     </ClCompile>
     <ClCompile Include="Source\Managers\ConsoleMan.cpp">
+      <Filter>Managers</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Managers\DiscordPresence.cpp">
       <Filter>Managers</Filter>
     </ClCompile>
     <ClCompile Include="Source\Managers\FrameMan.cpp">

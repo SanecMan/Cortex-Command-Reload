@@ -1366,10 +1366,12 @@
     <ClCompile Include="Source\System\Timer.cpp" />
     <ClCompile Include="Source\System\Vector.cpp" />
     <ClCompile Include="Source\System\Writer.cpp" />
+    <ClInclude Include="Source\Managers\DiscordPresence.h" />
     <ClCompile Include="Source\Managers\AchievementMan.cpp" />
     <ClCompile Include="Source\Managers\ActivityMan.cpp" />
     <ClCompile Include="Source\Managers\AudioMan.cpp" />
     <ClCompile Include="Source\Managers\ConsoleMan.cpp" />
+    <ClCompile Include="Source\Managers\DiscordPresence.cpp" />
     <ClCompile Include="Source\Managers\FrameMan.cpp" />
     <ClCompile Include="Source\Managers\MetaMan.cpp" />
     <ClCompile Include="Source\Managers\MovableMan.cpp" />
