@@ -38,6 +38,10 @@ Keep one simulation and introduce a server-authoritative replication layer:
 
 The preferred outcome is one shared simulation library used by the client and server, with separate client presentation and server hosting executables. A first deliverable can reuse the existing simulation and `.rte` loading while disabling presentation; true authoritative world-state multiplayer follows after the object protocol exists. Linux support is plausible because the repository has a Meson build and cross-platform engine code, but it is not currently established for the network target: networking is excluded from Meson and must be repaired before a Linux server build can be claimed.
 
+## Verified build status
+
+The current development branch builds the Linux x86_64 client with Meson/Ninja, and its `-debug-run 60` smoke test passes using SDL's offscreen video driver without X11/Wayland. This confirms the Linux client build and hidden diagnostic path only. The process still initializes the renderer/OpenGL context; it is not a dedicated server, does not prove GPU-free simulation, and does not validate network replication.
+
 ## Completion checks
 
 - Server target builds on Windows x64 and Linux x64.
