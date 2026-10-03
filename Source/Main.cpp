@@ -56,6 +56,7 @@
 #include "System/UTF8.h"
 #include "System/WorldStateProtocol.h"
 #include "WorldStateTransport.h"
+#include "WorldStateSnapshotBuilder.h"
 #include "NetworkMessages.h"
 #include "DiscordPresence.h"
 
@@ -77,12 +78,10 @@
 #include <chrono>
 #include <fstream>
 #include <filesystem>
-#include <list>
 #include <span>
 #include <sstream>
 #include <string_view>
 #include <thread>
-#include <unordered_set>
 
 extern "C" {
 FILE __iob_func[3] = {*stdin, *stdout, *stderr};
@@ -316,49 +315,8 @@ namespace {
 	}
 
 	WorldStateProtocol::Snapshot CaptureDebugWorldStateSnapshot() {
-		WorldStateProtocol::Snapshot snapshot;
-		snapshot.Tick = static_cast<std::uint32_t>(GetDebugRunState().SimulationUpdates);
-		if (const Activity* activity = g_ActivityMan.GetActivity()) {
-			snapshot.ActivityPreset = activity->GetPresetName();
-		}
-		if (const Scene* scene = g_SceneMan.GetScene()) {
-			snapshot.ScenePreset = scene->GetPresetName();
-		}
-
-		std::list<SceneObject*> objects;
-		g_MovableMan.GetAllActors(false, objects);
-		g_MovableMan.GetAllItems(false, objects);
-		g_MovableMan.GetAllParticles(false, objects);
-		std::unordered_set<std::uint64_t> includedObjectIds;
-		includedObjectIds.reserve(objects.size());
-		snapshot.Objects.reserve(objects.size());
-		for (const SceneObject* sceneObject : objects) {
-			const MovableObject* movableObject = dynamic_cast<const MovableObject*>(sceneObject);
-			if (!movableObject) {
-				continue;
-			}
-			const std::uint64_t networkId = static_cast<std::uint64_t>(movableObject->GetUniqueID());
-			if (networkId == 0 || !includedObjectIds.insert(networkId).second) {
-				continue;
-			}
-			WorldStateProtocol::ObjectState object;
-			object.NetworkId = networkId;
-			object.ClassName = movableObject->GetClass().GetName();
-			object.ModuleName = movableObject->GetModuleName();
-			object.PresetName = movableObject->GetPresetName();
-			object.PositionX = movableObject->GetPos().GetX();
-			object.PositionY = movableObject->GetPos().GetY();
-			object.VelocityX = movableObject->GetVel().GetX();
-			object.VelocityY = movableObject->GetVel().GetY();
-			object.Rotation = movableObject->GetRotAngle();
-			object.AngularVelocity = movableObject->GetAngularVel();
-			if (const auto* actor = dynamic_cast<const Actor*>(movableObject)) {
-				object.Health = actor->GetHealth();
-			}
-			object.Team = static_cast<std::int16_t>(movableObject->GetTeam());
-			snapshot.Objects.push_back(std::move(object));
-		}
-		return snapshot;
+		static WorldStateSnapshotBuilder snapshotBuilder;
+		return snapshotBuilder.Capture(static_cast<std::uint32_t>(GetDebugRunState().SimulationUpdates));
 	}
 
 	bool VerifyWorldStateTransportLoopback(std::span<const std::uint8_t> packet, const WorldStateProtocol::Snapshot& expectedSnapshot, std::ofstream& log) {
@@ -437,6 +395,13 @@ namespace {
 			return;
 		}
 		const WorldStateProtocol::Snapshot worldSnapshot = CaptureDebugWorldStateSnapshot();
+		const WorldStateProtocol::Snapshot repeatedWorldSnapshot = CaptureDebugWorldStateSnapshot();
+		bool worldIdentityStable = worldSnapshot.SceneRevision == repeatedWorldSnapshot.SceneRevision &&
+		                          worldSnapshot.Objects.size() == repeatedWorldSnapshot.Objects.size();
+		for (std::size_t index = 0; worldIdentityStable && index < worldSnapshot.Objects.size(); ++index) {
+			worldIdentityStable = worldSnapshot.Objects[index].NetworkId == repeatedWorldSnapshot.Objects[index].NetworkId;
+		}
+		state.Log << "world_state_identity_smoke=" << (worldIdentityStable ? "passed" : "failed") << '\n' << std::flush;
 		std::vector<std::uint8_t> worldSnapshotPacket;
 		WorldStateProtocol::Snapshot decodedWorldSnapshot;
 		const bool worldSnapshotPassed = WorldStateProtocol::EncodeSnapshot(worldSnapshot, state.SimulationUpdates, worldSnapshotPacket) &&
@@ -447,7 +412,7 @@ namespace {
 		          << " bytes=" << worldSnapshotPacket.size()
 		          << " result=" << (worldSnapshotPassed ? "passed" : "failed") << '\n' << std::flush;
 		state.Log << "live_world_state_transport=" << (liveSnapshotTransportPassed ? "passed" : "failed") << '\n' << std::flush;
-		success = success && worldSnapshotPassed && liveSnapshotTransportPassed;
+		success = success && worldIdentityStable && worldSnapshotPassed && liveSnapshotTransportPassed;
 		const double elapsedSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - state.StartTime).count();
 		const double simulationSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - state.SimulationStartTime).count();
 		state.Log << "result=" << (success ? "passed" : "failed") << "\nupdates_done=" << state.SimulationUpdates

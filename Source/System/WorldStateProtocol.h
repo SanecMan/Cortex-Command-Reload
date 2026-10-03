@@ -22,6 +22,9 @@ inline constexpr std::size_t c_HeaderSize = 16;
 inline constexpr std::size_t c_MaxPacketSize = 4 * 1024 * 1024;
 inline constexpr std::size_t c_MaxObjects = 65535;
 inline constexpr std::size_t c_MaxStringBytes = 1024;
+inline constexpr std::uint16_t c_ObjectFlagActor = 0x0001;
+inline constexpr std::uint16_t c_ObjectFlagItem = 0x0002;
+inline constexpr std::uint16_t c_ObjectFlagParticle = 0x0004;
 
 enum class MessageType : std::uint8_t {
 	ClientHello = 1,

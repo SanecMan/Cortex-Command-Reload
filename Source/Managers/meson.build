@@ -24,6 +24,7 @@ sources += files(
 'TimerMan.cpp',
 'UInputMan.cpp',
 'WorldStateTransport.cpp',
+'WorldStateSnapshotBuilder.cpp',
 'WindowMan.cpp'
 )
 luaman_cpp_args = preprocessor_flags
