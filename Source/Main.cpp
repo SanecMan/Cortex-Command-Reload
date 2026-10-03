@@ -521,7 +521,7 @@ void InitializeManagers() {
 	g_PostProcessMan.Initialize();
 	g_PerformanceMan.Initialize();
 
-	if (g_AudioMan.Initialize()) {
+	if (!System::IsDebugRun() && g_AudioMan.Initialize()) {
 		g_GUISound.Initialize();
 		g_MusicMan.Initialize();
 	}

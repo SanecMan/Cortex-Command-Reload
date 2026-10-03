@@ -6,7 +6,7 @@ Run the Windows client from the game directory:
 & '.\Cortex Command.exe' -debug-run 600
 ```
 
-The optional number is the target number of simulation updates (60–36,000; default 600). The run creates a hidden SDL window, loads the built-in Tutorial Bunker activity, spawns actor and particle batches at the start and halfway point, records module-load time, frame/simulation/render/Lua/AI/object counters and process resident memory, captures and codec-round-trips the final world state, saves initial/stress/final screenshots, then exits. Before loading content it also verifies UTF-8 helpers and exchanges a representative snapshot between local RakNet server/client peers. It still needs a working graphics driver because the current engine creates an OpenGL context even when its window is hidden.
+The optional number is the target number of simulation updates (60–36,000; default 600). The run creates a hidden SDL window, disables audio, loads the built-in Tutorial Bunker activity, spawns actor and particle batches at the start and halfway point, records module-load time, frame/simulation/render/Lua/AI/object counters and process resident memory, captures and codec-round-trips the final world state, saves initial/stress/final screenshots, then exits. Before loading content it also verifies UTF-8 helpers and exchanges a representative snapshot between local RakNet server/client peers. It still needs a working graphics driver because the current engine creates an OpenGL context even when its window is hidden.
 
 Output is written to `ScreenShots/DebugRuns/`. Starting another debug run clears only the files owned by this tool in that directory, then replaces its log copies. The main report is `DebugRun.log`; loading and console logs are copied alongside it.
 
