@@ -94,6 +94,7 @@ namespace {
 	struct DebugRunState {
 		bool Enabled = false;
 		bool StressStarted = false;
+		bool Passed = false;
 		int UpdateLimit = 600;
 		int SimulationUpdates = 0;
 		int RenderedFrames = 0;
@@ -450,6 +451,7 @@ namespace {
 			state.Log << "average_" << name << "_ms=" << static_cast<double>(g_PerformanceMan.GetAveragePerformanceTime(counter)) / 1000.0 << '\n';
 		}
 		state.Log.flush();
+		state.Passed = success;
 		g_ConsoleMan.SaveAllText((state.OutputDirectory / "LogConsole.txt").string());
 		for (const char* logName : {"LogLoading.txt", "LogLoadingWarning.txt"}) {
 			const std::filesystem::path source = std::filesystem::path(System::GetWorkingDirectory()) / logName;
@@ -949,7 +951,7 @@ int main(int argc, char** argv) {
 	allegro_exit();
 	SDL_Quit();
 
-	return EXIT_SUCCESS;
+	return debugRun && !GetDebugRunState().Passed ? EXIT_FAILURE : EXIT_SUCCESS;
 }
 
 #ifdef _WIN32
