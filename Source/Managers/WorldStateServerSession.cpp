@@ -70,6 +70,11 @@ void WorldStateServerSession::Update(std::uint32_t simulationTick) {
 					break;
 				}
 			}
+			WorldStateProtocol::ClientAssignment assignment;
+			assignment.PlayerSlot = assignedPlayer == Players::NoPlayer ? -1 : static_cast<std::int8_t>(assignedPlayer);
+			if (!m_Transport.SendClientAssignment(packet.Sender, assignment, simulationTick)) {
+				Log("ERROR: could not send client player-slot assignment to " + clientAddress);
+			}
 			Log("INFO: client connected from " + clientAddress + " (" + std::to_string(m_ConnectedClients) + " connected, input slot " +
 			    (assignedPlayer == Players::NoPlayer ? std::string("none") : std::to_string(assignedPlayer)) + ")");
 		} else if (packet.Identifier == ID_DISCONNECTION_NOTIFICATION || packet.Identifier == ID_CONNECTION_LOST) {

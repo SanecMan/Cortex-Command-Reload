@@ -98,6 +98,11 @@ bool WorldStateTransport::SendInputCommand(const WorldStateProtocol::InputComman
 	return Send(serverAddress, packet, false, RELIABLE_ORDERED);
 }
 
+bool WorldStateTransport::SendClientAssignment(const RakNet::AddressOrGUID& target, const WorldStateProtocol::ClientAssignment& assignment, std::uint32_t sequence) {
+	std::vector<std::uint8_t> packet;
+	return WorldStateProtocol::EncodeClientAssignment(assignment, sequence, packet) && Send(target, packet, false, RELIABLE_ORDERED);
+}
+
 bool WorldStateTransport::Send(const RakNet::AddressOrGUID& target, std::span<const std::uint8_t> packet, bool broadcast, PacketReliability reliability) {
 	if (!m_Peer || packet.empty() || packet.size() > WorldStateProtocol::c_MaxPacketSize) {
 		return false;

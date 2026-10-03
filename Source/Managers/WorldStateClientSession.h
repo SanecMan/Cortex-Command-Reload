@@ -16,6 +16,8 @@ namespace RTE {
 		void Disconnect();
 	void Update();
 	bool SendInputCommand(const WorldStateProtocol::InputCommand& command);
+	int GetAssignedPlayerSlot() const { return m_AssignedPlayerSlot; }
+	bool HasPlayerAssignment() const { return m_HasPlayerAssignment; }
 		bool IsConnected() const { return m_Connected; }
 		bool HasSnapshot() const { return m_HasSnapshot; }
 		std::uint32_t GetReceivedSnapshotCount() const { return m_ReceivedSnapshotCount; }
@@ -27,6 +29,8 @@ namespace RTE {
 		std::uint32_t m_LastSequence = 0;
 	std::uint32_t m_ReceivedSnapshotCount = 0;
 	std::uint32_t m_InputCommandSequence = 0;
+	int m_AssignedPlayerSlot = -1;
+	bool m_HasPlayerAssignment = false;
 		bool m_Connected = false;
 		bool m_HasSnapshot = false;
 	};

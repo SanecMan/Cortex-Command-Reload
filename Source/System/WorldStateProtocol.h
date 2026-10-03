@@ -29,6 +29,7 @@ inline constexpr std::uint16_t c_ObjectFlagTransientPixel = 0x0008;
 inline constexpr std::int16_t c_NoTeam = -1;
 inline constexpr std::int16_t c_MaxTeamCount = 4;
 inline constexpr std::uint32_t c_InputElementCount = 34;
+inline constexpr std::uint8_t c_PlayerSlotCount = 4;
 inline constexpr std::int32_t c_MaxMouseDelta = 8192;
 inline constexpr std::int16_t c_MaxMouseWheelDelta = 16;
 
@@ -36,7 +37,8 @@ enum class MessageType : std::uint8_t {
 	ClientHello = 1,
 	InputCommand = 2,
 	WorldSnapshot = 3,
-	Disconnect = 4
+	Disconnect = 4,
+	ClientAssignment = 5
 };
 
 struct ObjectState {
@@ -86,6 +88,10 @@ struct InputCommand {
 	std::int16_t AnalogAimY = 0;
 	bool ResetActivityVote = false;
 	bool RestartActivityVote = false;
+};
+
+struct ClientAssignment {
+	std::int8_t PlayerSlot = -1; // -1 means connected as a spectator.
 };
 
 namespace Detail {
@@ -149,6 +155,44 @@ namespace Detail {
 		       object.PixelColorIndex <= 255 && std::isfinite(object.PixelMass) && object.PixelMass >= 0.0F && std::isfinite(object.PixelSharpness);
 	}
 } // namespace Detail
+
+inline bool EncodeClientAssignment(const ClientAssignment& assignment, std::uint32_t sequence, std::vector<std::uint8_t>& packet) {
+	if (assignment.PlayerSlot < -1 || assignment.PlayerSlot >= c_PlayerSlotCount) {
+		return false;
+	}
+	packet.clear();
+	packet.reserve(c_HeaderSize + 1);
+	Detail::WriteUnsigned(packet, c_Magic, sizeof(c_Magic));
+	Detail::WriteUnsigned(packet, c_Version, sizeof(c_Version));
+	Detail::WriteUnsigned(packet, static_cast<std::uint8_t>(MessageType::ClientAssignment), sizeof(std::uint8_t));
+	Detail::WriteUnsigned(packet, 0, sizeof(std::uint8_t));
+	Detail::WriteUnsigned(packet, sequence, sizeof(sequence));
+	Detail::WriteUnsigned(packet, 1, sizeof(std::uint32_t));
+	Detail::WriteUnsigned(packet, assignment.PlayerSlot < 0 ? 0xFF : static_cast<std::uint8_t>(assignment.PlayerSlot), sizeof(std::uint8_t));
+	return true;
+}
+
+inline bool DecodeClientAssignment(std::span<const std::uint8_t> packet, ClientAssignment& assignment, std::uint32_t* sequence = nullptr) {
+	if (packet.size() != c_HeaderSize + 1) {
+		return false;
+	}
+	std::size_t offset = 0;
+	std::uint64_t magic = 0, version = 0, messageType = 0, reserved = 0, sequenceValue = 0, payloadSize = 0, slot = 0;
+	if (!Detail::ReadUnsigned(packet, offset, sizeof(c_Magic), magic) || magic != c_Magic ||
+	    !Detail::ReadUnsigned(packet, offset, sizeof(c_Version), version) || version != c_Version ||
+	    !Detail::ReadUnsigned(packet, offset, sizeof(std::uint8_t), messageType) || messageType != static_cast<std::uint8_t>(MessageType::ClientAssignment) ||
+	    !Detail::ReadUnsigned(packet, offset, sizeof(std::uint8_t), reserved) || reserved != 0 ||
+	    !Detail::ReadUnsigned(packet, offset, sizeof(std::uint32_t), sequenceValue) ||
+	    !Detail::ReadUnsigned(packet, offset, sizeof(std::uint32_t), payloadSize) || payloadSize != 1 ||
+	    !Detail::ReadUnsigned(packet, offset, sizeof(std::uint8_t), slot) || (slot != 0xFF && slot >= c_PlayerSlotCount)) {
+		return false;
+	}
+	assignment.PlayerSlot = slot == 0xFF ? -1 : static_cast<std::int8_t>(slot);
+	if (sequence) {
+		*sequence = static_cast<std::uint32_t>(sequenceValue);
+	}
+	return true;
+}
 
 inline bool EncodeInputCommand(const InputCommand& command, std::uint32_t sequence, std::vector<std::uint8_t>& packet) {
 	constexpr std::uint64_t validElementMask = (std::uint64_t{1} << c_InputElementCount) - 1;

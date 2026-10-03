@@ -351,13 +351,21 @@ namespace {
 		                                        decodedInputCommand.AnalogAimX == inputCommand.AnalogAimX &&
 		                                        decodedInputCommand.AnalogAimY == inputCommand.AnalogAimY &&
 		                                        decodedInputCommand.RestartActivityVote && !decodedInputCommand.ResetActivityVote;
+		WorldStateProtocol::ClientAssignment assignment{Players::PlayerTwo};
+		std::vector<std::uint8_t> assignmentPacket;
+		WorldStateProtocol::ClientAssignment decodedAssignment;
+		std::uint32_t assignmentSequence = 0;
+		const bool assignmentRoundTripPassed = WorldStateProtocol::EncodeClientAssignment(assignment, 20, assignmentPacket) &&
+		                                      WorldStateProtocol::DecodeClientAssignment(assignmentPacket, decodedAssignment, &assignmentSequence) &&
+		                                      decodedAssignment.PlayerSlot == Players::PlayerTwo && assignmentSequence == 20;
 		WorldStateProtocol::InputCommand invalidInputCommand = inputCommand;
 		invalidInputCommand.MouseDeltaX = WorldStateProtocol::c_MaxMouseDelta + 1;
 		std::vector<std::uint8_t> invalidInputPacket;
 		const bool invalidInputRejected = !WorldStateProtocol::EncodeInputCommand(invalidInputCommand, 19, invalidInputPacket) &&
 		                                 !inputPacket.empty() && !WorldStateProtocol::DecodeInputCommand(std::span(inputPacket).first(inputPacket.size() - 1), decodedInputCommand);
 		state.Log << "world_state_input_codec_smoke=" << (inputCommandRoundTripPassed && invalidInputRejected ? "passed" : "failed") << '\n' << std::flush;
-		if (!inputCommandRoundTripPassed || !invalidInputRejected || WorldStateProtocol::c_InputElementCount != InputElements::INPUT_COUNT) {
+		state.Log << "world_state_assignment_codec_smoke=" << (assignmentRoundTripPassed ? "passed" : "failed") << '\n' << std::flush;
+		if (!inputCommandRoundTripPassed || !invalidInputRejected || !assignmentRoundTripPassed || WorldStateProtocol::c_InputElementCount != InputElements::INPUT_COUNT) {
 			return false;
 		}
 		if (!VerifyWorldStateTransportLoopback(networkSnapshot, state.Log)) {
@@ -523,6 +531,7 @@ namespace {
 		const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
 		while (std::chrono::steady_clock::now() < deadline &&
 		       (serverSession.GetConnectedClientCount() < expectedClientCount ||
+		        std::any_of(clients.begin(), clients.end(), [](const WorldStateClientSession& client) { return !client.HasPlayerAssignment(); }) ||
 		        std::any_of(clients.begin(), clients.end(), [](const WorldStateClientSession& client) { return !client.HasSnapshot(); }))) {
 			serverSession.Update(++worldStateServerSimulationTick);
 			for (WorldStateClientSession& client : clients) {
@@ -532,8 +541,14 @@ namespace {
 		}
 		const bool allConnectedAndReceived = serverSession.GetConnectedClientCount() == expectedClientCount &&
 		                                    std::all_of(clients.begin(), clients.end(), [](const WorldStateClientSession& client) {
-		                                    return client.IsConnected() && client.HasSnapshot() && client.GetLatestSnapshot().Tick > 0;
+		                                    return client.IsConnected() && client.HasPlayerAssignment() && client.HasSnapshot() && client.GetLatestSnapshot().Tick > 0;
 		                                    });
+		std::array<int, expectedClientCount> assignedSlots{};
+		std::transform(clients.begin(), clients.end(), assignedSlots.begin(), [](const WorldStateClientSession& client) {
+			return client.GetAssignedPlayerSlot();
+		});
+		std::sort(assignedSlots.begin(), assignedSlots.end());
+		const bool playerAssignmentsPassed = assignedSlots == std::array<int, expectedClientCount>{Players::NoPlayer, Players::PlayerTwo, Players::PlayerThree, Players::PlayerFour};
 		const std::size_t clientsReceivedSnapshotCount = std::count_if(clients.begin(), clients.end(), [](const WorldStateClientSession& client) {
 			return client.GetReceivedSnapshotCount() > 0;
 		});
@@ -573,7 +588,7 @@ namespace {
 				clients.front().Update();
 				std::this_thread::sleep_for(std::chrono::milliseconds(5));
 			}
-			networkInputApplied = networkInputPlayer == Players::PlayerTwo && serverSession.GetInputCommandCount() >= initialInputCount + 2 &&
+			networkInputApplied = networkInputPlayer == clients.front().GetAssignedPlayerSlot() && serverSession.GetInputCommandCount() >= initialInputCount + 2 &&
 			                      g_UInputMan.ElementReleased(networkInputPlayer, InputElements::INPUT_FIRE) &&
 			                      g_UInputMan.MouseButtonReleased(MouseButtons::MOUSE_LEFT, networkInputPlayer);
 		}
@@ -586,10 +601,11 @@ namespace {
 			std::this_thread::sleep_for(std::chrono::milliseconds(5));
 		}
 		const bool remainedAvailableAfterDisconnect = serverSession.IsStarted() && serverSession.GetConnectedClientCount() == 0;
-		const bool passed = idleServerSkippedSnapshot && allConnectedAndReceived && networkInputApplied && remainedAvailableAfterDisconnect;
+		const bool passed = idleServerSkippedSnapshot && allConnectedAndReceived && playerAssignmentsPassed && networkInputApplied && remainedAvailableAfterDisconnect;
 		log << "world_state_host_session_smoke=" << (passed ? "passed" : "failed")
 		    << " clients_accepted=" << expectedClientCount
 		    << " clients_received=" << clientsReceivedSnapshotCount
+		    << " assignments=" << playerAssignmentsPassed
 		    << " idle_snapshot_count=" << (idleServerSkippedSnapshot ? 0 : serverSession.GetSnapshotBroadcastCount())
 		    << " input_applied=" << networkInputApplied << " input_slot=" << networkInputPlayer
 		    << " server_alive_after_disconnect=" << remainedAvailableAfterDisconnect << '\n' << std::flush;

@@ -20,6 +20,8 @@ void WorldStateClientSession::Disconnect() {
 	m_LastSequence = 0;
 	m_ReceivedSnapshotCount = 0;
 	m_InputCommandSequence = 0;
+	m_AssignedPlayerSlot = -1;
+	m_HasPlayerAssignment = false;
 	m_LatestSnapshot = {};
 }
 
@@ -44,6 +46,12 @@ void WorldStateClientSession::Update() {
 			continue;
 		}
 		if (packet.Identifier != ID_CCR_WORLD_STATE) {
+			continue;
+		}
+		WorldStateProtocol::ClientAssignment assignment;
+		if (WorldStateProtocol::DecodeClientAssignment(packet.Payload, assignment)) {
+			m_AssignedPlayerSlot = assignment.PlayerSlot;
+			m_HasPlayerAssignment = true;
 			continue;
 		}
 		std::vector<std::uint8_t> decompressedPacket;
