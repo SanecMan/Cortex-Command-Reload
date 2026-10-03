@@ -197,7 +197,14 @@ namespace {
 			return false;
 		}
 		const std::string utf8Probe = "Aя🙂";
-		const bool utf8DecodePassed = UTF8::CountCodepoints(utf8Probe) == 3 && UTF8::NextBoundary(utf8Probe, 1) == 3 && UTF8::PreviousBoundary(utf8Probe, 3) == 1 && UTF8::CountCodepoints("\xF0\x28\x8C\x28") == 4;
+		std::string utf8EncodedProbe;
+		UTF8::AppendCodepoint(utf8EncodedProbe, 0x1F642);
+		std::uint32_t decodedEmoji = 0;
+		std::size_t decodedEmojiBytes = 0;
+		const bool utf8DecodePassed = UTF8::CountCodepoints(utf8Probe) == 3 && UTF8::NextBoundary(utf8Probe, 1) == 3 &&
+		                              UTF8::PreviousBoundary(utf8Probe, 3) == 1 && UTF8::CountCodepoints("\xF0\x28\x8C\x28") == 4 &&
+		                              utf8EncodedProbe == "🙂" && UTF8::Decode(utf8EncodedProbe, 0, decodedEmoji, decodedEmojiBytes) &&
+		                              decodedEmoji == 0x1F642 && decodedEmojiBytes == 4;
 		state.Log << "utf8_decoder_smoke=" << (utf8DecodePassed ? "passed" : "failed") << '\n' << std::flush;
 		if (!utf8DecodePassed) {
 			return false;
