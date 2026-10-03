@@ -17,7 +17,7 @@
 namespace RTE::WorldStateProtocol {
 
 inline constexpr std::uint32_t c_Magic = 0x31524343; // "CCR1" on the wire.
-inline constexpr std::uint16_t c_Version = 1;
+inline constexpr std::uint16_t c_Version = 2;
 inline constexpr std::size_t c_HeaderSize = 16;
 inline constexpr std::size_t c_MaxPacketSize = 4 * 1024 * 1024;
 inline constexpr std::size_t c_MaxObjects = 65535;
@@ -52,7 +52,10 @@ struct ObjectState {
 struct Snapshot {
 	std::uint32_t Tick = 0;
 	std::uint32_t SceneRevision = 0;
+	std::string ActivityClassName;
 	std::string ActivityPreset;
+	std::string ActivityModuleName;
+	std::string SceneModuleName;
 	std::string ScenePreset;
 	std::vector<ObjectState> Objects;
 };
@@ -119,8 +122,10 @@ namespace Detail {
 
 inline bool EncodeSnapshot(const Snapshot& snapshot, std::uint32_t sequence, std::vector<std::uint8_t>& packet) {
 	packet.clear();
-	if (snapshot.Objects.size() > c_MaxObjects || snapshot.ActivityPreset.size() > c_MaxStringBytes || snapshot.ScenePreset.size() > c_MaxStringBytes ||
-	    !UTF8::IsValid(snapshot.ActivityPreset) || !UTF8::IsValid(snapshot.ScenePreset)) {
+	if (snapshot.Objects.size() > c_MaxObjects || snapshot.ActivityClassName.size() > c_MaxStringBytes || snapshot.ActivityPreset.size() > c_MaxStringBytes ||
+	    snapshot.ActivityModuleName.size() > c_MaxStringBytes || snapshot.SceneModuleName.size() > c_MaxStringBytes || snapshot.ScenePreset.size() > c_MaxStringBytes ||
+	    !UTF8::IsValid(snapshot.ActivityClassName) || !UTF8::IsValid(snapshot.ActivityPreset) || !UTF8::IsValid(snapshot.ActivityModuleName) ||
+	    !UTF8::IsValid(snapshot.SceneModuleName) || !UTF8::IsValid(snapshot.ScenePreset)) {
 		return false;
 	}
 
@@ -130,7 +135,9 @@ inline bool EncodeSnapshot(const Snapshot& snapshot, std::uint32_t sequence, std
 	payload.reserve(32 + snapshot.Objects.size() * 64);
 	Detail::WriteUnsigned(payload, snapshot.Tick, sizeof(snapshot.Tick));
 	Detail::WriteUnsigned(payload, snapshot.SceneRevision, sizeof(snapshot.SceneRevision));
-	if (!Detail::WriteString(payload, snapshot.ActivityPreset) || !Detail::WriteString(payload, snapshot.ScenePreset)) {
+	if (!Detail::WriteString(payload, snapshot.ActivityClassName) || !Detail::WriteString(payload, snapshot.ActivityPreset) ||
+	    !Detail::WriteString(payload, snapshot.ActivityModuleName) || !Detail::WriteString(payload, snapshot.SceneModuleName) ||
+	    !Detail::WriteString(payload, snapshot.ScenePreset)) {
 		return false;
 	}
 	Detail::WriteUnsigned(payload, snapshot.Objects.size(), sizeof(std::uint32_t));
@@ -188,7 +195,9 @@ inline bool DecodeSnapshot(std::span<const std::uint8_t> packet, Snapshot& snaps
 	decoded.Tick = static_cast<std::uint32_t>(value);
 	if (!Detail::ReadUnsigned(packet, offset, sizeof(decoded.SceneRevision), value)) return false;
 	decoded.SceneRevision = static_cast<std::uint32_t>(value);
-	if (!Detail::ReadString(packet, offset, decoded.ActivityPreset) || !Detail::ReadString(packet, offset, decoded.ScenePreset) ||
+	if (!Detail::ReadString(packet, offset, decoded.ActivityClassName) || !Detail::ReadString(packet, offset, decoded.ActivityPreset) ||
+	    !Detail::ReadString(packet, offset, decoded.ActivityModuleName) || !Detail::ReadString(packet, offset, decoded.SceneModuleName) ||
+	    !Detail::ReadString(packet, offset, decoded.ScenePreset) ||
 	    !Detail::ReadUnsigned(packet, offset, sizeof(std::uint32_t), value) || value > c_MaxObjects) {
 		return false;
 	}

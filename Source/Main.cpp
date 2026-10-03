@@ -222,7 +222,10 @@ namespace {
 		WorldStateProtocol::Snapshot networkSnapshot;
 		networkSnapshot.Tick = 1234;
 		networkSnapshot.SceneRevision = 7;
+		networkSnapshot.ActivityClassName = "GATutorial";
 		networkSnapshot.ActivityPreset = "Tutorial Mission";
+		networkSnapshot.ActivityModuleName = "Base.rte";
+		networkSnapshot.SceneModuleName = "Base.rte";
 		networkSnapshot.ScenePreset = "Tutorial Bunker";
 		WorldStateProtocol::ObjectState networkActor;
 		networkActor.NetworkId = 0x1020304050607080ULL;
@@ -244,8 +247,13 @@ namespace {
 		std::uint32_t decodedSequence = 0;
 		const bool networkRoundTripPassed = WorldStateProtocol::EncodeSnapshot(networkSnapshot, 99, networkPacket) &&
 		                                   WorldStateProtocol::DecodeSnapshot(networkPacket, decodedSnapshot, &decodedSequence) &&
-		                                   decodedSequence == 99 && decodedSnapshot.Tick == networkSnapshot.Tick &&
-		                                   decodedSnapshot.SceneRevision == networkSnapshot.SceneRevision && decodedSnapshot.Objects.size() == 1 &&
+			                                   decodedSequence == 99 && decodedSnapshot.Tick == networkSnapshot.Tick &&
+			                                   decodedSnapshot.SceneRevision == networkSnapshot.SceneRevision && decodedSnapshot.Objects.size() == 1 &&
+			                                   decodedSnapshot.ActivityClassName == networkSnapshot.ActivityClassName &&
+			                                   decodedSnapshot.ActivityPreset == networkSnapshot.ActivityPreset &&
+			                                   decodedSnapshot.ActivityModuleName == networkSnapshot.ActivityModuleName &&
+			                                   decodedSnapshot.SceneModuleName == networkSnapshot.SceneModuleName &&
+			                                   decodedSnapshot.ScenePreset == networkSnapshot.ScenePreset &&
 		                                   decodedSnapshot.Objects.front().NetworkId == networkActor.NetworkId &&
 		                                   decodedSnapshot.Objects.front().PresetName == networkActor.PresetName &&
 		                                   decodedSnapshot.Objects.front().PositionX == networkActor.PositionX &&
@@ -380,6 +388,10 @@ namespace {
 							clientReceivedSnapshot[clientIndex] = WorldStateProtocol::DecodeSnapshot(received.Payload, transportedSnapshot, &receivedSequence) &&
 							                                         receivedSequence == expectedSnapshot.Tick &&
 							                                         transportedSnapshot.Tick == expectedSnapshot.Tick &&
+							                                         transportedSnapshot.ActivityClassName == expectedSnapshot.ActivityClassName &&
+							                                         transportedSnapshot.ActivityPreset == expectedSnapshot.ActivityPreset &&
+							                                         transportedSnapshot.ActivityModuleName == expectedSnapshot.ActivityModuleName &&
+							                                         transportedSnapshot.SceneModuleName == expectedSnapshot.SceneModuleName &&
 							                                         transportedSnapshot.ScenePreset == expectedSnapshot.ScenePreset &&
 							                                         transportedSnapshot.Objects.size() == expectedSnapshot.Objects.size() &&
 							                                         (transportedSnapshot.Objects.empty() || transportedSnapshot.Objects.front().PresetName == expectedSnapshot.Objects.front().PresetName);
@@ -459,6 +471,11 @@ namespace {
 		const WorldStateProtocol::Snapshot worldSnapshot = CaptureDebugWorldStateSnapshot();
 		const WorldStateProtocol::Snapshot repeatedWorldSnapshot = CaptureDebugWorldStateSnapshot();
 		bool worldIdentityStable = worldSnapshot.SceneRevision == repeatedWorldSnapshot.SceneRevision &&
+		                          worldSnapshot.ActivityClassName == repeatedWorldSnapshot.ActivityClassName &&
+		                          worldSnapshot.ActivityPreset == repeatedWorldSnapshot.ActivityPreset &&
+		                          worldSnapshot.ActivityModuleName == repeatedWorldSnapshot.ActivityModuleName &&
+		                          worldSnapshot.SceneModuleName == repeatedWorldSnapshot.SceneModuleName &&
+		                          worldSnapshot.ScenePreset == repeatedWorldSnapshot.ScenePreset &&
 		                          worldSnapshot.Objects.size() == repeatedWorldSnapshot.Objects.size();
 		for (std::size_t index = 0; worldIdentityStable && index < worldSnapshot.Objects.size(); ++index) {
 			worldIdentityStable = worldSnapshot.Objects[index].NetworkId == repeatedWorldSnapshot.Objects[index].NetworkId;
@@ -468,6 +485,11 @@ namespace {
 		WorldStateProtocol::Snapshot decodedWorldSnapshot;
 		const bool worldSnapshotPassed = WorldStateProtocol::EncodeSnapshot(worldSnapshot, state.SimulationUpdates, worldSnapshotPacket) &&
 		                                 WorldStateProtocol::DecodeSnapshot(worldSnapshotPacket, decodedWorldSnapshot) &&
+		                                 decodedWorldSnapshot.ActivityClassName == worldSnapshot.ActivityClassName &&
+		                                 decodedWorldSnapshot.ActivityPreset == worldSnapshot.ActivityPreset &&
+		                                 decodedWorldSnapshot.ActivityModuleName == worldSnapshot.ActivityModuleName &&
+		                                 decodedWorldSnapshot.SceneModuleName == worldSnapshot.SceneModuleName &&
+		                                 decodedWorldSnapshot.ScenePreset == worldSnapshot.ScenePreset &&
 		                                 decodedWorldSnapshot.Objects.size() == worldSnapshot.Objects.size();
 		const bool liveSnapshotTransportPassed = worldSnapshotPassed && VerifyWorldStateTransportLoopback(worldSnapshot, state.Log);
 		state.Log << "captured_world_snapshot_objects=" << worldSnapshot.Objects.size()

@@ -20,15 +20,20 @@ WorldStateProtocol::Snapshot WorldStateSnapshotBuilder::Capture(std::uint32_t ti
 	const Activity* activity = g_ActivityMan.GetActivity();
 	const Scene* scene = g_SceneMan.GetScene();
 	if (activity) {
+		snapshot.ActivityClassName = activity->GetClass().GetName();
 		snapshot.ActivityPreset = activity->GetPresetName();
+		snapshot.ActivityModuleName = activity->GetModuleName();
 	}
 	if (scene) {
+		snapshot.SceneModuleName = scene->GetModuleName();
 		snapshot.ScenePreset = scene->GetPresetName();
 	}
 	const std::uintptr_t activityAddress = reinterpret_cast<std::uintptr_t>(activity);
 	const std::uintptr_t sceneAddress = reinterpret_cast<std::uintptr_t>(scene);
 
-	if (sceneAddress != m_LastSceneAddress || activityAddress != m_LastActivityAddress || snapshot.ScenePreset != m_LastScenePreset || snapshot.ActivityPreset != m_LastActivityPreset) {
+	if (sceneAddress != m_LastSceneAddress || activityAddress != m_LastActivityAddress || snapshot.ScenePreset != m_LastScenePreset ||
+	    snapshot.ActivityClassName != m_LastActivityClassName || snapshot.ActivityPreset != m_LastActivityPreset ||
+	    snapshot.ActivityModuleName != m_LastActivityModuleName || snapshot.SceneModuleName != m_LastSceneModuleName) {
 		++m_SceneRevision;
 		if (m_SceneRevision == 0) {
 			m_SceneRevision = 1;
@@ -36,7 +41,10 @@ WorldStateProtocol::Snapshot WorldStateSnapshotBuilder::Capture(std::uint32_t ti
 		m_LastSceneAddress = sceneAddress;
 		m_LastActivityAddress = activityAddress;
 		m_LastScenePreset = snapshot.ScenePreset;
+		m_LastActivityClassName = snapshot.ActivityClassName;
 		m_LastActivityPreset = snapshot.ActivityPreset;
+		m_LastActivityModuleName = snapshot.ActivityModuleName;
+		m_LastSceneModuleName = snapshot.SceneModuleName;
 	}
 	snapshot.SceneRevision = m_SceneRevision;
 

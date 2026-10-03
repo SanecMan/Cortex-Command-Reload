@@ -18,8 +18,11 @@ namespace RTE {
 		std::uint32_t m_SceneRevision = 0;
 		std::uintptr_t m_LastActivityAddress = 0;
 		std::uintptr_t m_LastSceneAddress = 0;
+		std::string m_LastActivityClassName;
 		std::string m_LastScenePreset;
 		std::string m_LastActivityPreset;
+		std::string m_LastActivityModuleName;
+		std::string m_LastSceneModuleName;
 		std::unordered_map<long, std::uint64_t> m_NetworkIdsByRuntimeId;
 		std::uint64_t m_NextNetworkId = 1;
 	};
