@@ -451,6 +451,13 @@ int GUIFont::GetKerning() const {
 	return m_Kerning;
 }
 
+bool GUIFont::SupportsCodepoint(std::uint32_t codePoint) {
+	if (codePoint < m_CharIndexCap) {
+		return codePoint >= 32 && m_Characters[codePoint].m_Width > 0;
+	}
+	return m_TrueTypeFont && stbtt_FindGlyphIndex(&m_TrueTypeFont->m_Info, static_cast<int>(codePoint)) != 0 && GetTrueTypeGlyph(codePoint);
+}
+
 const GUIFont::TrueTypeGlyph* GUIFont::GetTrueTypeGlyph(std::uint32_t codePoint) {
 	if (!m_TrueTypeFont) {
 		return nullptr;

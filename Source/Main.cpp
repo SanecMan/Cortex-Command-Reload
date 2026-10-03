@@ -474,7 +474,9 @@ namespace {
 		          << " bytes=" << worldSnapshotPacket.size()
 		          << " result=" << (worldSnapshotPassed ? "passed" : "failed") << '\n' << std::flush;
 		state.Log << "live_world_state_transport=" << (liveSnapshotTransportPassed ? "passed" : "failed") << '\n' << std::flush;
-		success = success && state.HostSessionTestPassed && worldIdentityStable && worldSnapshotPassed && liveSnapshotTransportPassed;
+		const bool utf8GlyphRenderPassed = g_FrameMan.DidDebugUTF8GlyphProbePass();
+		state.Log << "utf8_glyph_render_smoke=" << (utf8GlyphRenderPassed ? "passed" : "failed") << '\n' << std::flush;
+		success = success && utf8GlyphRenderPassed && state.HostSessionTestPassed && worldIdentityStable && worldSnapshotPassed && liveSnapshotTransportPassed;
 		const double elapsedSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - state.StartTime).count();
 		const double simulationSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - state.SimulationStartTime).count();
 		state.Log << "result=" << (success ? "passed" : "failed") << "\nupdates_done=" << state.SimulationUpdates

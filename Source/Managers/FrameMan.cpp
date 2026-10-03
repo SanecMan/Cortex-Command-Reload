@@ -64,6 +64,8 @@ FrameMan::~FrameMan() {
 }
 
 void FrameMan::Clear() {
+	m_DebugUTF8GlyphProbePassed = false;
+	m_DebugUTF8GlyphProbeDrawn = false;
 	m_HSplit = false;
 	m_VSplit = false;
 	m_TwoPlayerVSplit = false;
@@ -893,13 +895,17 @@ void FrameMan::Draw() {
 		// Enable clipping on the draw bitmap
 		set_clip_state(drawScreen, 1);
 
-		DrawScreenText(playerScreen, playerGUIBitmap);
-		if (System::IsDebugRun()) {
+		if (System::IsDebugRun() && !m_DebugUTF8GlyphProbeDrawn) {
 			GUIFont* debugFont = GetLargeFont();
-			playerGUIBitmap.DrawRectangle(10, 30, 230, debugFont->GetFontHeight() + 8, 0, true);
-			debugFont->SetColor(15);
-			debugFont->Draw(&playerGUIBitmap, 14, 34, "UTF-8 test: Привет, Ёжик!");
+			const std::string probe = "UTF-8 test: Привет, Ёжик!";
+			m_DebugUTF8GlyphProbePassed = debugFont && debugFont->SupportsCodepoint(0x041F) && debugFont->SupportsCodepoint(0x0451) &&
+			                              debugFont->SupportsCodepoint(0x0436);
+			m_ScreenText[playerScreen] = probe;
+			m_TextCentered[playerScreen] = false;
+			m_TextDuration[playerScreen] = -1;
+			m_DebugUTF8GlyphProbeDrawn = true;
 		}
+		DrawScreenText(playerScreen, playerGUIBitmap);
 
 		// The position of the current draw screen on the backbuffer
 		Vector screenOffset;
