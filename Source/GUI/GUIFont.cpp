@@ -1,5 +1,6 @@
 #include "GUI.h"
 #include "../Managers/PresetMan.h"
+#include "../System/System.h"
 #include "../System/UTF8.h"
 
 #include <cassert>
@@ -125,7 +126,11 @@ bool GUIFont::Load(GUIScreen* Screen, const std::string& Filename) {
 	m_TrueTypeFont = s_TrueTypeFonts[m_FontHeight].lock();
 	if (!m_TrueTypeFont) {
 		const std::string unicodeFontPath = g_PresetMan.GetFullModulePath("Base.rte/GUIS/Fonts/Roboto-Medium.ttf");
-		std::ifstream unicodeFontStream(std::filesystem::u8path(unicodeFontPath), std::ios::binary);
+		std::filesystem::path unicodeFontFilePath = std::filesystem::u8path(unicodeFontPath);
+		if (unicodeFontFilePath.is_relative()) {
+			unicodeFontFilePath = std::filesystem::u8path(System::GetWorkingDirectory()) / unicodeFontFilePath;
+		}
+		std::ifstream unicodeFontStream(unicodeFontFilePath, std::ios::binary);
 		if (unicodeFontStream) {
 			auto unicodeFont = std::make_shared<TrueTypeFont>();
 			unicodeFont->m_Data.assign(std::istreambuf_iterator<char>(unicodeFontStream), std::istreambuf_iterator<char>());

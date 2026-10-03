@@ -526,8 +526,12 @@ namespace {
 		const bool utf8GlyphRenderPassed = g_FrameMan.DidDebugUTF8GlyphProbePass();
 		state.Log << "utf8_unicode_font_loaded=" << (g_FrameMan.DidDebugUTF8GlyphFontLoad() ? "yes" : "no") << '\n' << std::flush;
 		const std::string unicodeFontPath = g_PresetMan.GetFullModulePath("Base.rte/GUIS/Fonts/Roboto-Medium.ttf");
-		std::ifstream unicodeFontProbe(std::filesystem::u8path(unicodeFontPath), std::ios::binary);
-		state.Log << "utf8_unicode_font_path=" << unicodeFontPath << " exists=" << (unicodeFontProbe ? "yes" : "no") << '\n' << std::flush;
+		std::filesystem::path unicodeFontFilePath = std::filesystem::u8path(unicodeFontPath);
+		if (unicodeFontFilePath.is_relative()) {
+			unicodeFontFilePath = std::filesystem::u8path(System::GetWorkingDirectory()) / unicodeFontFilePath;
+		}
+		std::ifstream unicodeFontProbe(unicodeFontFilePath, std::ios::binary);
+		state.Log << "utf8_unicode_font_path=" << unicodeFontFilePath.generic_string() << " exists=" << (unicodeFontProbe ? "yes" : "no") << '\n' << std::flush;
 		state.Log << "utf8_glyph_render_smoke=" << (utf8GlyphRenderPassed ? "passed" : "failed") << '\n' << std::flush;
 		success = success && utf8GlyphRenderPassed && state.HostSessionTestPassed && worldIdentityStable && replicaSmokePassed && worldSnapshotPassed && liveSnapshotTransportPassed;
 		const double elapsedSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - state.StartTime).count();
