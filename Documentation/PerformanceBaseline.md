@@ -82,3 +82,5 @@ The phase comparison uses an earlier instrumented baseline rather than the exact
 ## Linux offscreen smoke run
 
 On 2026-10-03, commit `b32ac660e` built successfully on Ubuntu 24.04 x86_64 with the repository's Meson/Ninja build. `ldd` found no unresolved shared dependencies. Running `SDL_VIDEODRIVER=offscreen ./build/CortexCommand -debug-run 60` also passed without an X11/Wayland display and produced all three debug screenshots. The run reported 12.27 s module loading, 15.40 s total elapsed time, and 19.2 simulation updates/s. This uses the offscreen renderer and debug build, so its frame-rate and render-time counters are diagnostic only and are not comparable to normal GPU rendering or the Windows startup benchmark.
+
+After state-transport and memory instrumentation were enabled, Linux x86_64 rebuilt and passed the same offscreen smoke run, including a RakNet loopback snapshot exchange. That run reported 1,110,351,872 resident bytes. The Windows sample above reports 1,752,379,392 working-set bytes from a different build and runtime; these values should not be compared directly.
