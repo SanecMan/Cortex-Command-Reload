@@ -57,6 +57,7 @@
 #include "System/WorldStateProtocol.h"
 #include "WorldStateTransport.h"
 #include "WorldStateSnapshotBuilder.h"
+#include "WorldStateServerSession.h"
 #include "NetworkMessages.h"
 #include "DiscordPresence.h"
 
@@ -78,6 +79,7 @@
 #include <chrono>
 #include <fstream>
 #include <filesystem>
+#include <memory>
 #include <sstream>
 #include <string_view>
 #include <thread>
@@ -89,6 +91,12 @@ FILE __iob_func[3] = {*stdin, *stdout, *stderr};
 using namespace RTE;
 
 namespace {
+	bool worldStateServerRequested = false;
+	unsigned short worldStateServerPort = 8000;
+	unsigned short worldStateServerMaxPlayers = 8;
+	std::unique_ptr<WorldStateServerSession> worldStateServer;
+	std::uint32_t worldStateServerSimulationTick = 0;
+
 	struct DebugRunState {
 		bool Enabled = false;
 		bool StressStarted = false;
@@ -580,6 +588,18 @@ void HandleMainArgs(int argCount, char** argValue) {
 	for (int i = 0; i < argCount;) {
 		std::string currentArg = argValue[i];
 		bool lastArg = i + 1 == argCount;
+		if (currentArg == "-world-state-server") {
+			worldStateServerRequested = true;
+			if (!lastArg) {
+				unsigned int port = 0;
+				const std::string_view portArgument(argValue[i + 1]);
+				const auto parsed = std::from_chars(portArgument.data(), portArgument.data() + portArgument.size(), port);
+				if (parsed.ec == std::errc{} && parsed.ptr == portArgument.data() + portArgument.size() && port > 0 && port <= 65535) {
+					worldStateServerPort = static_cast<unsigned short>(port);
+					++i;
+				}
+			}
+		}
 
 		if (currentArg == "-cout") {
 			System::EnableLoggingToCLI();
@@ -773,6 +793,9 @@ void RunGameLoop() {
 
 			g_ActivityMan.LateUpdateGlobalScripts();
 			AdvanceDebugRunSimulation();
+			if (worldStateServer && worldStateServer->IsStarted()) {
+				worldStateServer->Update(++worldStateServerSimulationTick);
+			}
 
 			// This is to support hot reloading entities in SceneEditorGUI. It's a bit hacky to put it in Main like this, but PresetMan has no update in which to clear the value, and I didn't want to set up a listener for the job.
 			// It's in this spot to allow it to be set by UInputMan update and ConsoleMan update, and read from ActivityMan update.
@@ -786,11 +809,15 @@ void RunGameLoop() {
 					FinishDebugRun(false);
 					break;
 				}
-				g_TimerMan.PauseSim(true);
+				if (worldStateServerRequested) {
+					// Keep the host loop alive after an Activity ends so clients stay connected.
+				} else {
+					g_TimerMan.PauseSim(true);
 
-				if (!g_ActivityMan.ActivitySetToRestart()) {
-					g_MenuMan.HandleTransitionIntoMenuLoop();
-					RunMenuLoop();
+					if (!g_ActivityMan.ActivitySetToRestart()) {
+						g_MenuMan.HandleTransitionIntoMenuLoop();
+						RunMenuLoop();
+					}
 				}
 			}
 			if (g_ActivityMan.ActivitySetToRestart()) {
@@ -900,6 +927,11 @@ int main(int argc, char** argv) {
 	if (debugRun) {
 		g_ActivityMan.SetStartTutorialActivity();
 		g_ActivityMan.SetRestartActivity();
+	} else if (worldStateServerRequested) {
+		// Prototype host mode needs a real Activity to simulate. Tutorial provides a
+		// known built-in starting point until server config can select Activity/Scene.
+		g_ActivityMan.SetStartTutorialActivity();
+		g_ActivityMan.SetRestartActivity();
 	}
 
 	if (!System::IsInExternalModuleValidationMode()) {
@@ -918,8 +950,26 @@ int main(int argc, char** argv) {
 			}
 		}
 
-		if (!g_ActivityMan.Initialize() && !debugRun) {
-			RunMenuLoop();
+		const bool activityInitialized = g_ActivityMan.Initialize();
+		if (!activityInitialized && !debugRun) {
+			if (!worldStateServerRequested) {
+				RunMenuLoop();
+			} else {
+				DestroyManagers();
+				allegro_exit();
+				SDL_Quit();
+				return EXIT_FAILURE;
+			}
+		}
+		if (worldStateServerRequested) {
+			worldStateServer = std::make_unique<WorldStateServerSession>();
+			if (!worldStateServer->Start("0.0.0.0", worldStateServerPort, worldStateServerMaxPlayers, "WorldStateServer.log")) {
+				worldStateServer.reset();
+				DestroyManagers();
+				allegro_exit();
+				SDL_Quit();
+				return EXIT_FAILURE;
+			}
 		}
 
 		RunGameLoop();
@@ -927,6 +977,10 @@ int main(int argc, char** argv) {
 
 	g_ThreadMan.GetPriorityThreadPool().wait_for_tasks();
 	g_ThreadMan.GetBackgroundThreadPool().wait_for_tasks();
+	if (worldStateServer) {
+		worldStateServer->Stop();
+		worldStateServer.reset();
+	}
 	DiscordPresence::Shutdown();
 
 	DestroyManagers();

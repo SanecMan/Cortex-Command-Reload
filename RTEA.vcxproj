@@ -1034,6 +1034,7 @@
     <ClCompile Include="Source\Managers\WindowMan.cpp" />
     <ClCompile Include="Source\Managers\WorldStateTransport.cpp" />
     <ClCompile Include="Source\Managers\WorldStateSnapshotBuilder.cpp" />
+    <ClCompile Include="Source\Managers\WorldStateServerSession.cpp" />
     <ClCompile Include="Source\Menus\LoadingScreen.cpp" />
     <ClCompile Include="Source\Menus\ModManagerGUI.cpp" />
     <ClCompile Include="Source\Menus\PauseMenuGUI.cpp" />
@@ -1371,6 +1372,7 @@
     <ClInclude Include="Source\Managers\DiscordPresence.h" />
     <ClInclude Include="Source\Managers\WorldStateTransport.h" />
     <ClInclude Include="Source\Managers\WorldStateSnapshotBuilder.h" />
+    <ClInclude Include="Source\Managers\WorldStateServerSession.h" />
     <ClCompile Include="Source\Managers\AchievementMan.cpp" />
     <ClCompile Include="Source\Managers\ActivityMan.cpp" />
     <ClCompile Include="Source\Managers\AudioMan.cpp" />
