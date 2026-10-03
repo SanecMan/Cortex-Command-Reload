@@ -254,8 +254,10 @@ namespace {
 		networkActor.Rotation = 1.25F;
 		networkActor.AngularVelocity = -0.5F;
 		networkActor.Health = 83.0F;
+		networkActor.SpriteFrame = 3;
 		networkActor.Team = 1;
 		networkActor.Flags = WorldStateProtocol::c_ObjectFlagActor;
+		networkActor.HFlipped = true;
 		networkSnapshot.Objects.push_back(networkActor);
 		WorldStateProtocol::ObjectState transientPixel;
 		transientPixel.NetworkId = 0x8877665544332211ULL;
@@ -286,6 +288,7 @@ namespace {
 		                                   decodedSnapshot.Objects.front().PresetName == networkActor.PresetName &&
 		                                   decodedSnapshot.Objects.front().PositionX == networkActor.PositionX &&
 		                                   decodedSnapshot.Objects.front().Team == networkActor.Team && decodedSnapshot.Objects.front().Flags == networkActor.Flags &&
+		                                   decodedSnapshot.Objects.front().SpriteFrame == networkActor.SpriteFrame && decodedSnapshot.Objects.front().HFlipped == networkActor.HFlipped &&
 		                                   decodedSnapshot.Objects.back().PixelMaterialId == transientPixel.PixelMaterialId &&
 		                                   decodedSnapshot.Objects.back().PixelColorIndex == transientPixel.PixelColorIndex &&
 		                                   decodedSnapshot.Objects.back().PixelMass == transientPixel.PixelMass &&

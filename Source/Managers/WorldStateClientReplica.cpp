@@ -6,12 +6,14 @@
 #include "MOPixel.h"
 #include "MovableMan.h"
 #include "MovableObject.h"
+#include "MOSprite.h"
 #include "PresetMan.h"
 #include "SceneObject.h"
 #include "SceneMan.h"
 #include "Vector.h"
 
 #include <array>
+#include <algorithm>
 #include <deque>
 #include <list>
 #include <string>
@@ -80,6 +82,11 @@ namespace {
 		target.SetVel(Vector(state.VelocityX, state.VelocityY));
 		target.SetRotAngle(state.Rotation);
 		target.SetAngularVel(state.AngularVelocity);
+		if (auto* sprite = dynamic_cast<MOSprite*>(&target)) {
+			const unsigned int lastFrame = sprite->GetFrameCount() > 0 ? sprite->GetFrameCount() - 1 : 0;
+			sprite->SetFrame(std::min<unsigned int>(state.SpriteFrame, lastFrame));
+			sprite->SetHFlipped(state.HFlipped);
+		}
 		if (target.GetTeam() != state.Team) {
 			target.SetTeam(state.Team);
 		}

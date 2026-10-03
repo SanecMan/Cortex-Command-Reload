@@ -17,7 +17,7 @@
 namespace RTE::WorldStateProtocol {
 
 inline constexpr std::uint32_t c_Magic = 0x31524343; // "CCR1" on the wire.
-inline constexpr std::uint16_t c_Version = 4;
+inline constexpr std::uint16_t c_Version = 5;
 inline constexpr std::size_t c_HeaderSize = 16;
 inline constexpr std::size_t c_MaxPacketSize = 4 * 1024 * 1024;
 inline constexpr std::size_t c_MaxObjects = 65535;
@@ -51,8 +51,10 @@ struct ObjectState {
 	float Rotation = 0.0F;
 	float AngularVelocity = 0.0F;
 	float Health = 0.0F;
+	std::uint16_t SpriteFrame = 0;
 	std::int16_t Team = -1;
 	std::uint16_t Flags = 0;
+	bool HFlipped = false;
 	std::uint8_t PixelMaterialId = 0;
 	std::uint16_t PixelColorIndex = 0;
 	float PixelMass = 0.0F;
@@ -264,8 +266,10 @@ inline bool EncodeSnapshot(const Snapshot& snapshot, std::uint32_t sequence, std
 		Detail::WriteFloat(payload, object.Rotation);
 		Detail::WriteFloat(payload, object.AngularVelocity);
 		Detail::WriteFloat(payload, object.Health);
+		Detail::WriteUnsigned(payload, object.SpriteFrame, sizeof(object.SpriteFrame));
 		Detail::WriteUnsigned(payload, static_cast<std::uint16_t>(object.Team), sizeof(object.Team));
 		Detail::WriteUnsigned(payload, object.Flags, sizeof(object.Flags));
+		Detail::WriteUnsigned(payload, object.HFlipped ? 1 : 0, sizeof(std::uint8_t));
 		if (object.Flags == c_ObjectFlagTransientPixel) {
 			Detail::WriteUnsigned(payload, object.PixelMaterialId, sizeof(object.PixelMaterialId));
 			Detail::WriteUnsigned(payload, object.PixelColorIndex, sizeof(object.PixelColorIndex));
@@ -328,12 +332,16 @@ inline bool DecodeSnapshot(std::span<const std::uint8_t> packet, Snapshot& snaps
 		    !Detail::ReadFloat(packet, offset, object.PositionX) || !Detail::ReadFloat(packet, offset, object.PositionY) ||
 		    !Detail::ReadFloat(packet, offset, object.VelocityX) || !Detail::ReadFloat(packet, offset, object.VelocityY) ||
 		    !Detail::ReadFloat(packet, offset, object.Rotation) || !Detail::ReadFloat(packet, offset, object.AngularVelocity) ||
-		    !Detail::ReadFloat(packet, offset, object.Health) || !Detail::ReadUnsigned(packet, offset, sizeof(object.Team), value)) {
+		    !Detail::ReadFloat(packet, offset, object.Health) || !Detail::ReadUnsigned(packet, offset, sizeof(object.SpriteFrame), value)) {
 			return false;
 		}
+		object.SpriteFrame = static_cast<std::uint16_t>(value);
+		if (!Detail::ReadUnsigned(packet, offset, sizeof(object.Team), value)) return false;
 		object.Team = std::bit_cast<std::int16_t>(static_cast<std::uint16_t>(value));
 		if (!Detail::ReadUnsigned(packet, offset, sizeof(object.Flags), value)) return false;
 		object.Flags = static_cast<std::uint16_t>(value);
+		if (!Detail::ReadUnsigned(packet, offset, sizeof(std::uint8_t), value) || value > 1) return false;
+		object.HFlipped = value != 0;
 		if (object.Flags == c_ObjectFlagTransientPixel) {
 			if (!Detail::ReadUnsigned(packet, offset, sizeof(object.PixelMaterialId), value)) return false;
 			object.PixelMaterialId = static_cast<std::uint8_t>(value);

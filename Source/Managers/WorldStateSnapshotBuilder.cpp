@@ -7,9 +7,12 @@
 #include "MovableMan.h"
 #include "MovableObject.h"
 #include "MOPixel.h"
+#include "MOSprite.h"
 #include "Scene.h"
 #include "SceneMan.h"
 
+#include <algorithm>
+#include <limits>
 #include <list>
 #include <unordered_set>
 
@@ -91,6 +94,10 @@ WorldStateProtocol::Snapshot WorldStateSnapshotBuilder::Capture(std::uint32_t ti
 		object.VelocityY = movableObject->GetVel().GetY();
 		object.Rotation = movableObject->GetRotAngle();
 		object.AngularVelocity = movableObject->GetAngularVel();
+		if (const auto* sprite = dynamic_cast<const MOSprite*>(movableObject)) {
+			object.SpriteFrame = static_cast<std::uint16_t>(std::min(sprite->GetFrame(), static_cast<unsigned int>(std::numeric_limits<std::uint16_t>::max())));
+			object.HFlipped = sprite->IsHFlipped();
+		}
 		if (const auto* actor = dynamic_cast<const Actor*>(movableObject)) {
 			object.Health = actor->GetHealth();
 			object.Flags = WorldStateProtocol::c_ObjectFlagActor;
