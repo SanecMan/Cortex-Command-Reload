@@ -21,6 +21,9 @@ bool WorldStateServerSession::Start(const std::string& bindAddress, unsigned sho
 	m_LastInputSequenceByClient.clear();
 	m_PlayerSlotByClient.clear();
 	m_InputSlotsInUse.fill(false);
+	// This session runs inside the playable host client. Keep its local PlayerOne
+	// input independent from network peers; use PlayerTwo through PlayerFour remotely.
+	m_InputSlotsInUse[Players::PlayerOne] = true;
 	m_ConnectedClients = 0;
 	Log("INFO: world-state host listening on " + bindAddress + ":" + std::to_string(m_Transport.GetBoundPort()) +
 	    " (max clients " + std::to_string(maxPlayers) + ")");
@@ -59,7 +62,7 @@ void WorldStateServerSession::Update(std::uint32_t simulationTick) {
 			const std::string clientAddress(packet.Sender.ToString(true));
 			m_LastInputSequenceByClient.erase(clientAddress);
 			int assignedPlayer = Players::NoPlayer;
-			for (int player = Players::PlayerOne; player < Players::MaxPlayerCount; ++player) {
+			for (int player = Players::PlayerTwo; player < Players::MaxPlayerCount; ++player) {
 				if (!m_InputSlotsInUse[player]) {
 					m_InputSlotsInUse[player] = true;
 					m_PlayerSlotByClient[clientAddress] = player;

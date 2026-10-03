@@ -573,7 +573,7 @@ namespace {
 				clients.front().Update();
 				std::this_thread::sleep_for(std::chrono::milliseconds(5));
 			}
-			networkInputApplied = networkInputPlayer != Players::NoPlayer && serverSession.GetInputCommandCount() >= initialInputCount + 2 &&
+			networkInputApplied = networkInputPlayer == Players::PlayerTwo && serverSession.GetInputCommandCount() >= initialInputCount + 2 &&
 			                      g_UInputMan.ElementReleased(networkInputPlayer, InputElements::INPUT_FIRE) &&
 			                      g_UInputMan.MouseButtonReleased(MouseButtons::MOUSE_LEFT, networkInputPlayer);
 		}
