@@ -6,8 +6,10 @@ Run the Windows client from the game directory:
 & '.\Cortex Command.exe' -debug-run 600
 ```
 
-The optional number is the target number of simulation updates (60–36,000; default 600). The run creates a hidden SDL window, loads the built-in Tutorial Bunker activity, spawns actor and particle batches at the start and halfway point, records total module-load time plus simulation counters, saves initial/stress/final screenshots, then exits. It still needs a working graphics driver because the current engine creates an OpenGL context even when its window is hidden.
+The optional number is the target number of simulation updates (60–36,000; default 600). The run creates a hidden SDL window, loads the built-in Tutorial Bunker activity, spawns actor and particle batches at the start and halfway point, records module-load time, frame/simulation/render/Lua/AI/object counters and process resident memory, captures and round-trips a world-state snapshot, saves initial/stress/final screenshots, then exits. It also verifies UTF-8 helpers and a local RakNet client/server packet exchange. It still needs a working graphics driver because the current engine creates an OpenGL context even when its window is hidden.
 
 Output is written to `ScreenShots/DebugRuns/`. Starting another debug run clears only the files owned by this tool in that directory, then replaces its log copies. The main report is `DebugRun.log`; loading and console logs are copied alongside it.
+
+The resident-memory measurement is the Windows working set or Linux resident pages, in bytes; `0` means that the platform query failed or is not implemented. The network check runs two local peers and does not connect the simulation to remote clients.
 
 This is a repeatable smoke and stress run, not a headless server or a multi-scene benchmark yet. It uses real game content and the existing Lua object creation API.

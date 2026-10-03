@@ -66,6 +66,9 @@
 
 #ifdef _WIN32
 #include "windows.h"
+#include <psapi.h>
+#elif defined(__linux__)
+#include <unistd.h>
 #endif
 
 #include <algorithm>
@@ -111,6 +114,26 @@ namespace {
 	DebugRunState& GetDebugRunState() {
 		static DebugRunState state;
 		return state;
+	}
+
+	std::uint64_t GetProcessResidentMemoryBytes() {
+#ifdef _WIN32
+		PROCESS_MEMORY_COUNTERS_EX counters{};
+		if (GetProcessMemoryInfo(GetCurrentProcess(), reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&counters), sizeof(counters))) {
+			return static_cast<std::uint64_t>(counters.WorkingSetSize);
+		}
+#elif defined(__linux__)
+		std::ifstream statm("/proc/self/statm");
+		std::uint64_t totalPages = 0;
+		std::uint64_t residentPages = 0;
+		if (statm >> totalPages >> residentPages) {
+			const long pageSize = sysconf(_SC_PAGESIZE);
+			if (pageSize > 0) {
+				return residentPages * static_cast<std::uint64_t>(pageSize);
+			}
+		}
+#endif
+		return 0;
 	}
 
 	bool ParseDebugRunArguments(int argc, char** argv) {
@@ -399,9 +422,10 @@ namespace {
 		          << "\nmodule_load_seconds=" << std::chrono::duration<double>(state.ModuleLoadEndTime - state.ModuleLoadStartTime).count()
 		          << "\naverage_frame_ms=" << (state.RenderedFrames > 0 ? simulationSeconds * 1000.0 / state.RenderedFrames : 0.0)
 		          << "\naverage_frame_work_ms=" << (state.RenderedFrames > 0 ? state.TotalFrameTimeMilliseconds / state.RenderedFrames : 0.0)
-		          << "\naverage_render_ms=" << (state.RenderedFrames > 0 ? state.TotalRenderTimeMilliseconds / state.RenderedFrames : 0.0)
-		          << "\nsimulation_updates_per_second=" << (simulationSeconds > 0.0 ? state.SimulationUpdates / simulationSeconds : 0.0)
-		          << "\nactors=" << g_MovableMan.GetActorCount() << "\nparticles=" << g_MovableMan.GetParticleCount() << '\n';
+			          << "\naverage_render_ms=" << (state.RenderedFrames > 0 ? state.TotalRenderTimeMilliseconds / state.RenderedFrames : 0.0)
+			          << "\nsimulation_updates_per_second=" << (simulationSeconds > 0.0 ? state.SimulationUpdates / simulationSeconds : 0.0)
+			          << "\nprocess_resident_memory_bytes=" << GetProcessResidentMemoryBytes()
+			          << "\nactors=" << g_MovableMan.GetActorCount() << "\nparticles=" << g_MovableMan.GetParticleCount() << '\n';
 		for (const auto& [name, counter] : std::array<std::pair<const char*, PerformanceMan::PerformanceCounters>, 8>{ {
 		         {"simulation", PerformanceMan::SimTotal}, {"ai", PerformanceMan::ActorsAI}, {"actor_travel", PerformanceMan::ActorsTravel},
 		         {"actor_update", PerformanceMan::ActorsUpdate}, {"particle_travel", PerformanceMan::ParticlesTravel}, {"particle_update", PerformanceMan::ParticlesUpdate},

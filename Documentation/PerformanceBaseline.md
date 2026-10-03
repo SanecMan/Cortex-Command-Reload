@@ -38,6 +38,8 @@ A later run with stage counters enabled used `Debug Minimal|x64` on the same mac
 
 These counters overlap where one measurement runs inside another (for example, Lua callbacks during actor work), so their durations must not be summed. Per-module timing located the dominant `.rte` packages and a phase-level follow-up timed their parsing paths.
 
+After adding process-memory reporting, a later `Debug Minimal|x64` 60-update run reported a Windows working set of 1,752,379,392 bytes at exit (49 actors, 310 particles, 362 top-level snapshot objects). This is a single debug-build sample, not a release-memory target; use repeated runs with the same modules, scene, build configuration, and stress batches before attributing a change to an optimization.
+
 The same diagnostic build measured these module totals while loading, before phase-level breakdown was added:
 
 | Module | Load time |
