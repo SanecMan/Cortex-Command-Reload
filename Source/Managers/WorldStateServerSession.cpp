@@ -2,6 +2,7 @@
 
 #include "MessageIdentifiers.h"
 #include "NetworkMessages.h"
+#include "UInputMan.h"
 
 using namespace RTE;
 
@@ -16,6 +17,10 @@ bool WorldStateServerSession::Start(const std::string& bindAddress, unsigned sho
 	m_LastBroadcastTick = 0;
 	m_Sequence = 0;
 	m_SnapshotBroadcastCount = 0;
+	m_InputCommandCount = 0;
+	m_LastInputSequenceByClient.clear();
+	m_PlayerSlotByClient.clear();
+	m_InputSlotsInUse.fill(false);
 	m_ConnectedClients = 0;
 	Log("INFO: world-state host listening on " + bindAddress + ":" + std::to_string(m_Transport.GetBoundPort()) +
 	    " (max clients " + std::to_string(maxPlayers) + ")");
@@ -23,6 +28,12 @@ bool WorldStateServerSession::Start(const std::string& bindAddress, unsigned sho
 }
 
 void WorldStateServerSession::Stop() {
+	for (const auto& [clientAddress, player] : m_PlayerSlotByClient) {
+		g_UInputMan.ClearNetworkInputState(player);
+	}
+	m_PlayerSlotByClient.clear();
+	m_LastInputSequenceByClient.clear();
+	m_InputSlotsInUse.fill(false);
 	if (m_Transport.IsStarted()) {
 		m_Transport.Stop();
 		Log("INFO: world-state host stopped");
@@ -37,17 +48,64 @@ void WorldStateServerSession::Update(std::uint32_t simulationTick) {
 	if (!m_Transport.IsStarted()) {
 		return;
 	}
+	for (const auto& [clientAddress, player] : m_PlayerSlotByClient) {
+		g_UInputMan.ClearNetworkInputImpulse(player);
+	}
 	std::vector<WorldStateTransport::ReceivedPacket> packets;
 	m_Transport.Poll(packets);
 	for (const WorldStateTransport::ReceivedPacket& packet : packets) {
 		if (packet.Identifier == ID_NEW_INCOMING_CONNECTION) {
 			++m_ConnectedClients;
-			Log("INFO: client connected from " + std::string(packet.Sender.ToString(true)) + " (" + std::to_string(m_ConnectedClients) + " connected)");
+			const std::string clientAddress(packet.Sender.ToString(true));
+			m_LastInputSequenceByClient.erase(clientAddress);
+			int assignedPlayer = Players::NoPlayer;
+			for (int player = Players::PlayerOne; player < Players::MaxPlayerCount; ++player) {
+				if (!m_InputSlotsInUse[player]) {
+					m_InputSlotsInUse[player] = true;
+					m_PlayerSlotByClient[clientAddress] = player;
+					assignedPlayer = player;
+					break;
+				}
+			}
+			Log("INFO: client connected from " + clientAddress + " (" + std::to_string(m_ConnectedClients) + " connected, input slot " +
+			    (assignedPlayer == Players::NoPlayer ? std::string("none") : std::to_string(assignedPlayer)) + ")");
 		} else if (packet.Identifier == ID_DISCONNECTION_NOTIFICATION || packet.Identifier == ID_CONNECTION_LOST) {
 			m_ConnectedClients = m_ConnectedClients > 0 ? static_cast<unsigned short>(m_ConnectedClients - 1) : 0;
-			Log("INFO: client disconnected from " + std::string(packet.Sender.ToString(true)) + " (" + std::to_string(m_ConnectedClients) + " connected)");
+			const std::string clientAddress(packet.Sender.ToString(true));
+			m_LastInputSequenceByClient.erase(clientAddress);
+			if (auto slot = m_PlayerSlotByClient.find(clientAddress); slot != m_PlayerSlotByClient.end()) {
+				g_UInputMan.ClearNetworkInputState(slot->second);
+				m_InputSlotsInUse[slot->second] = false;
+				m_PlayerSlotByClient.erase(slot);
+			}
+			Log("INFO: client disconnected from " + clientAddress + " (" + std::to_string(m_ConnectedClients) + " connected)");
 		} else if (packet.Identifier == ID_CCR_WORLD_STATE) {
-			Log("WARNING: client world-state/input packet rejected; client command handling is not enabled yet");
+			WorldStateProtocol::InputCommand command;
+			std::uint32_t sequence = 0;
+			const std::string clientAddress(packet.Sender.ToString(true));
+			auto previous = m_LastInputSequenceByClient.find(clientAddress);
+			if (!WorldStateProtocol::DecodeInputCommand(packet.Payload, command, &sequence) ||
+			    (previous != m_LastInputSequenceByClient.end() && static_cast<std::int32_t>(sequence - previous->second) <= 0)) {
+				Log("WARNING: rejected invalid or stale client input command from " + clientAddress);
+				continue;
+			}
+			auto playerSlot = m_PlayerSlotByClient.find(clientAddress);
+			if (playerSlot == m_PlayerSlotByClient.end()) {
+				Log("WARNING: rejected gameplay input from spectator " + clientAddress + " (no free player slot)");
+				continue;
+			}
+			m_LastInputSequenceByClient[clientAddress] = sequence;
+			++m_InputCommandCount;
+			constexpr float c_AnalogScale = 1.0F / 32767.0F;
+			const Vector mouseMovement(static_cast<float>(command.MouseDeltaX), static_cast<float>(command.MouseDeltaY));
+			const Vector analogMove(command.AnalogMoveX * c_AnalogScale, command.AnalogMoveY * c_AnalogScale);
+			const Vector analogAim(command.AnalogAimX * c_AnalogScale, command.AnalogAimY * c_AnalogScale);
+			g_UInputMan.SetNetworkInputState(playerSlot->second, command.HeldElements, mouseMovement, command.MouseWheelDelta,
+			                                command.MouseButtonsHeld, analogMove, analogAim);
+			if (m_InputCommandCount == 1 || m_InputCommandCount % 120 == 0) {
+				Log("INFO: applied " + std::to_string(m_InputCommandCount) + " client input commands to player slot " +
+				    std::to_string(playerSlot->second) + "; latest held mask=" + std::to_string(command.HeldElements));
+			}
 		}
 	}
 

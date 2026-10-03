@@ -115,7 +115,8 @@ float Controller::GetDigitalAimSpeed() const {
 }
 
 bool Controller::IsMouseControlled() const {
-	return m_Player != Players::NoPlayer && g_UInputMan.GetControlScheme(m_Player)->GetDevice() == InputDevice::DEVICE_MOUSE_KEYB;
+	return m_Player != Players::NoPlayer && (g_UInputMan.IsNetworkInputActive(m_Player) ||
+	                                         g_UInputMan.GetControlScheme(m_Player)->GetDevice() == InputDevice::DEVICE_MOUSE_KEYB);
 }
 
 bool Controller::IsKeyboardOnlyControlled() const {

@@ -86,6 +86,18 @@ bool WorldStateTransport::BroadcastSnapshot(const WorldStateProtocol::Snapshot& 
 	       Send(RakNet::UNASSIGNED_SYSTEM_ADDRESS, wirePacket, true, UNRELIABLE_SEQUENCED);
 }
 
+bool WorldStateTransport::SendInputCommand(const WorldStateProtocol::InputCommand& command, std::uint32_t sequence) {
+	if (!m_Peer || m_Peer->NumberOfConnections() == 0) {
+		return false;
+	}
+	std::vector<std::uint8_t> packet;
+	if (!WorldStateProtocol::EncodeInputCommand(command, sequence, packet)) {
+		return false;
+	}
+	const RakNet::SystemAddress serverAddress = m_Peer->GetSystemAddressFromIndex(0);
+	return Send(serverAddress, packet, false, RELIABLE_ORDERED);
+}
+
 bool WorldStateTransport::Send(const RakNet::AddressOrGUID& target, std::span<const std::uint8_t> packet, bool broadcast, PacketReliability reliability) {
 	if (!m_Peer || packet.empty() || packet.size() > WorldStateProtocol::c_MaxPacketSize) {
 		return false;

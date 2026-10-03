@@ -19,7 +19,12 @@ void WorldStateClientSession::Disconnect() {
 	m_HasSnapshot = false;
 	m_LastSequence = 0;
 	m_ReceivedSnapshotCount = 0;
+	m_InputCommandSequence = 0;
 	m_LatestSnapshot = {};
+}
+
+bool WorldStateClientSession::SendInputCommand(const WorldStateProtocol::InputCommand& command) {
+	return m_Connected && m_Transport.SendInputCommand(command, ++m_InputCommandSequence);
 }
 
 void WorldStateClientSession::Update() {

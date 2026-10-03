@@ -39,8 +39,9 @@ namespace RTE {
 
 		bool SendWorldState(const RakNet::AddressOrGUID& target, std::span<const std::uint8_t> packet);
 		bool BroadcastWorldState(std::span<const std::uint8_t> packet);
-		bool SendSnapshot(const RakNet::AddressOrGUID& target, const WorldStateProtocol::Snapshot& snapshot, std::uint32_t sequence);
-		bool BroadcastSnapshot(const WorldStateProtocol::Snapshot& snapshot, std::uint32_t sequence);
+	bool SendSnapshot(const RakNet::AddressOrGUID& target, const WorldStateProtocol::Snapshot& snapshot, std::uint32_t sequence);
+	bool BroadcastSnapshot(const WorldStateProtocol::Snapshot& snapshot, std::uint32_t sequence);
+	bool SendInputCommand(const WorldStateProtocol::InputCommand& command, std::uint32_t sequence);
 		void Poll(std::vector<ReceivedPacket>& packets);
 
 	private:

@@ -80,6 +80,7 @@
 #include <array>
 #include <charconv>
 #include <chrono>
+#include <cmath>
 #include <fstream>
 #include <limits>
 #include <filesystem>
@@ -306,6 +307,43 @@ namespace {
 		if (!networkRoundTripPassed || !malformedNetworkRejected) {
 			return false;
 		}
+		WorldStateProtocol::InputCommand inputCommand;
+		inputCommand.ClientTick = 345;
+		inputCommand.HeldElements = (std::uint64_t{1} << InputElements::INPUT_FIRE) | (std::uint64_t{1} << InputElements::INPUT_L_UP);
+		inputCommand.MouseDeltaX = -125;
+		inputCommand.MouseDeltaY = 72;
+		inputCommand.MouseWheelDelta = 1;
+		inputCommand.MouseButtonsHeld = static_cast<std::uint8_t>(1U << MouseButtons::MOUSE_LEFT);
+		inputCommand.AnalogMoveX = 16384;
+		inputCommand.AnalogMoveY = -8192;
+		inputCommand.AnalogAimX = -32767;
+		inputCommand.AnalogAimY = 32767;
+		inputCommand.RestartActivityVote = true;
+		std::vector<std::uint8_t> inputPacket;
+		WorldStateProtocol::InputCommand decodedInputCommand;
+		std::uint32_t decodedInputSequence = 0;
+		const bool inputCommandRoundTripPassed = WorldStateProtocol::EncodeInputCommand(inputCommand, 18, inputPacket) &&
+		                                        WorldStateProtocol::DecodeInputCommand(inputPacket, decodedInputCommand, &decodedInputSequence) &&
+		                                        decodedInputSequence == 18 && decodedInputCommand.ClientTick == inputCommand.ClientTick &&
+		                                        decodedInputCommand.HeldElements == inputCommand.HeldElements &&
+		                                        decodedInputCommand.MouseDeltaX == inputCommand.MouseDeltaX &&
+		                                        decodedInputCommand.MouseDeltaY == inputCommand.MouseDeltaY &&
+		                                        decodedInputCommand.MouseWheelDelta == inputCommand.MouseWheelDelta &&
+		                                        decodedInputCommand.MouseButtonsHeld == inputCommand.MouseButtonsHeld &&
+		                                        decodedInputCommand.AnalogMoveX == inputCommand.AnalogMoveX &&
+		                                        decodedInputCommand.AnalogMoveY == inputCommand.AnalogMoveY &&
+		                                        decodedInputCommand.AnalogAimX == inputCommand.AnalogAimX &&
+		                                        decodedInputCommand.AnalogAimY == inputCommand.AnalogAimY &&
+		                                        decodedInputCommand.RestartActivityVote && !decodedInputCommand.ResetActivityVote;
+		WorldStateProtocol::InputCommand invalidInputCommand = inputCommand;
+		invalidInputCommand.MouseDeltaX = WorldStateProtocol::c_MaxMouseDelta + 1;
+		std::vector<std::uint8_t> invalidInputPacket;
+		const bool invalidInputRejected = !WorldStateProtocol::EncodeInputCommand(invalidInputCommand, 19, invalidInputPacket) &&
+		                                 !inputPacket.empty() && !WorldStateProtocol::DecodeInputCommand(std::span(inputPacket).first(inputPacket.size() - 1), decodedInputCommand);
+		state.Log << "world_state_input_codec_smoke=" << (inputCommandRoundTripPassed && invalidInputRejected ? "passed" : "failed") << '\n' << std::flush;
+		if (!inputCommandRoundTripPassed || !invalidInputRejected || WorldStateProtocol::c_InputElementCount != InputElements::INPUT_COUNT) {
+			return false;
+		}
 		if (!VerifyWorldStateTransportLoopback(networkSnapshot, state.Log)) {
 			return false;
 		}
@@ -483,6 +521,46 @@ namespace {
 		const std::size_t clientsReceivedSnapshotCount = std::count_if(clients.begin(), clients.end(), [](const WorldStateClientSession& client) {
 			return client.GetReceivedSnapshotCount() > 0;
 		});
+		bool networkInputApplied = false;
+		int networkInputPlayer = Players::NoPlayer;
+		if (allConnectedAndReceived) {
+			WorldStateProtocol::InputCommand inputCommand;
+			inputCommand.ClientTick = 1;
+			inputCommand.HeldElements = std::uint64_t{1} << InputElements::INPUT_FIRE;
+			inputCommand.MouseButtonsHeld = static_cast<std::uint8_t>(1U << MouseButtons::MOUSE_LEFT);
+			inputCommand.AnalogAimX = 16384;
+			const std::uint32_t initialInputCount = serverSession.GetInputCommandCount();
+			const bool inputSent = clients.front().SendInputCommand(inputCommand);
+			const auto inputDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+			while (inputSent && serverSession.GetInputCommandCount() == initialInputCount && std::chrono::steady_clock::now() < inputDeadline) {
+				serverSession.Update(++worldStateServerSimulationTick);
+				clients.front().Update();
+				std::this_thread::sleep_for(std::chrono::milliseconds(5));
+			}
+			if (serverSession.GetInputCommandCount() > initialInputCount) {
+				for (int player = Players::PlayerOne; player < Players::MaxPlayerCount; ++player) {
+					if (g_UInputMan.IsNetworkInputActive(player) && g_UInputMan.ElementHeld(player, InputElements::INPUT_FIRE) &&
+					    g_UInputMan.MouseButtonHeld(MouseButtons::MOUSE_LEFT, player) && g_UInputMan.AnalogAimValues(player).GetX() > 0.49F) {
+						networkInputPlayer = player;
+						break;
+					}
+				}
+			}
+			inputCommand.ClientTick = 2;
+			inputCommand.HeldElements = 0;
+			inputCommand.MouseButtonsHeld = 0;
+			inputCommand.AnalogAimX = 0;
+			const bool releaseSent = clients.front().SendInputCommand(inputCommand);
+			const auto releaseDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+			while (releaseSent && serverSession.GetInputCommandCount() <= initialInputCount + 1 && std::chrono::steady_clock::now() < releaseDeadline) {
+				serverSession.Update(++worldStateServerSimulationTick);
+				clients.front().Update();
+				std::this_thread::sleep_for(std::chrono::milliseconds(5));
+			}
+			networkInputApplied = networkInputPlayer != Players::NoPlayer && serverSession.GetInputCommandCount() >= initialInputCount + 2 &&
+			                      g_UInputMan.ElementReleased(networkInputPlayer, InputElements::INPUT_FIRE) &&
+			                      g_UInputMan.MouseButtonReleased(MouseButtons::MOUSE_LEFT, networkInputPlayer);
+		}
 		for (WorldStateClientSession& client : clients) {
 			client.Disconnect();
 		}
@@ -492,11 +570,12 @@ namespace {
 			std::this_thread::sleep_for(std::chrono::milliseconds(5));
 		}
 		const bool remainedAvailableAfterDisconnect = serverSession.IsStarted() && serverSession.GetConnectedClientCount() == 0;
-		const bool passed = idleServerSkippedSnapshot && allConnectedAndReceived && remainedAvailableAfterDisconnect;
+		const bool passed = idleServerSkippedSnapshot && allConnectedAndReceived && networkInputApplied && remainedAvailableAfterDisconnect;
 		log << "world_state_host_session_smoke=" << (passed ? "passed" : "failed")
 		    << " clients_accepted=" << expectedClientCount
 		    << " clients_received=" << clientsReceivedSnapshotCount
 		    << " idle_snapshot_count=" << (idleServerSkippedSnapshot ? 0 : serverSession.GetSnapshotBroadcastCount())
+		    << " input_applied=" << networkInputApplied << " input_slot=" << networkInputPlayer
 		    << " server_alive_after_disconnect=" << remainedAvailableAfterDisconnect << '\n' << std::flush;
 		return passed;
 	}
@@ -557,6 +636,29 @@ namespace {
 		state.Log << "transient_mopixel_replica_smoke=" << (transientPixelReplicaPassed ? "passed" : "failed")
 		          << " spawned=" << transientPixelSpawn.Spawned << " removed=" << transientPixelRemoval.Removed
 		          << " missing=" << transientPixelSpawn.MissingPresets << '\n' << std::flush;
+		const int inputSmokePlayer = Players::MaxPlayerCount - 1;
+		const std::uint64_t inputSmokeMask = std::uint64_t{1} << InputElements::INPUT_FIRE;
+		const Vector inputSmokeMouseMovement(3.0F, -4.0F);
+		const Vector inputSmokeAnalogMove(0.5F, -0.25F);
+		const Vector inputSmokeAnalogAim(-1.0F, 1.0F);
+		const std::uint8_t inputSmokeMouseButtons = static_cast<std::uint8_t>(1U << MouseButtons::MOUSE_LEFT);
+		g_UInputMan.SetNetworkInputState(inputSmokePlayer, inputSmokeMask, inputSmokeMouseMovement, -1, inputSmokeMouseButtons,
+		                                inputSmokeAnalogMove, inputSmokeAnalogAim);
+		const bool networkInputPressPassed = g_UInputMan.ElementHeld(inputSmokePlayer, InputElements::INPUT_FIRE) &&
+		                                    g_UInputMan.ElementPressed(inputSmokePlayer, InputElements::INPUT_FIRE) &&
+		                                    g_UInputMan.MouseButtonHeld(MouseButtons::MOUSE_LEFT, inputSmokePlayer) &&
+		                                    g_UInputMan.MouseButtonPressed(MouseButtons::MOUSE_LEFT, inputSmokePlayer) &&
+		                                    g_UInputMan.MouseWheelMovedByPlayer(inputSmokePlayer) == -1 &&
+		                                    g_UInputMan.GetMouseMovement(inputSmokePlayer).GetX() == inputSmokeMouseMovement.GetX() &&
+		                                    g_UInputMan.GetMouseMovement(inputSmokePlayer).GetY() == inputSmokeMouseMovement.GetY() &&
+		                                    g_UInputMan.AnalogMoveValues(inputSmokePlayer).GetX() == inputSmokeAnalogMove.GetX() &&
+		                                    g_UInputMan.AnalogAimValues(inputSmokePlayer).GetY() == inputSmokeAnalogAim.GetY();
+		g_UInputMan.SetNetworkInputState(inputSmokePlayer, 0, Vector(), 0, 0, Vector(), Vector());
+		const bool networkInputReleasePassed = g_UInputMan.ElementReleased(inputSmokePlayer, InputElements::INPUT_FIRE) &&
+		                                      g_UInputMan.MouseButtonReleased(MouseButtons::MOUSE_LEFT, inputSmokePlayer);
+		g_UInputMan.ClearNetworkInputState(inputSmokePlayer);
+		const bool networkInputApplicationPassed = networkInputPressPassed && networkInputReleasePassed;
+		state.Log << "world_state_input_application_smoke=" << (networkInputApplicationPassed ? "passed" : "failed") << '\n' << std::flush;
 		std::vector<std::uint8_t> worldSnapshotPacket;
 		WorldStateProtocol::Snapshot decodedWorldSnapshot;
 		const bool worldSnapshotPassed = WorldStateProtocol::EncodeSnapshot(worldSnapshot, state.SimulationUpdates, worldSnapshotPacket) &&
@@ -597,7 +699,8 @@ namespace {
 		std::ifstream unicodeFontProbe(unicodeFontFilePath, std::ios::binary);
 		state.Log << "utf8_unicode_font_path=" << unicodeFontFilePath.generic_string() << " exists=" << (unicodeFontProbe ? "yes" : "no") << '\n' << std::flush;
 		state.Log << "utf8_glyph_render_smoke=" << (utf8GlyphRenderPassed ? "passed" : "failed") << '\n' << std::flush;
-		success = success && utf8GlyphRenderPassed && state.HostSessionTestPassed && worldIdentityStable && replicaSmokePassed && transientPixelReplicaPassed && worldSnapshotPassed && snapshotCompressionPassed && liveSnapshotTransportPassed;
+		success = success && utf8GlyphRenderPassed && state.HostSessionTestPassed && worldIdentityStable && replicaSmokePassed && transientPixelReplicaPassed &&
+		          networkInputApplicationPassed && worldSnapshotPassed && snapshotCompressionPassed && liveSnapshotTransportPassed;
 		const double elapsedSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - state.StartTime).count();
 		const double simulationSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - state.SimulationStartTime).count();
 		state.Log << "result=" << (success ? "passed" : "failed") << "\nupdates_done=" << state.SimulationUpdates
@@ -965,12 +1068,47 @@ void RunGameLoop() {
 			g_PerformanceMan.UpdateMSPSU();
 			g_TimerMan.UpdateSim();
 			if (worldStateClient && worldStateClient->IsConnected()) worldStateClient->Update();
+			if (worldStateServer && worldStateServer->IsStarted()) {
+				worldStateServer->Update(++worldStateServerSimulationTick);
+			}
 
 			g_PerformanceMan.StartPerformanceMeasurement(PerformanceMan::SimTotal);
 
 			g_LuaMan.Update();
 
 			g_UInputMan.Update();
+			if (worldStateClient && worldStateClient->IsConnected()) {
+				WorldStateProtocol::InputCommand inputCommand;
+				inputCommand.ClientTick = static_cast<std::uint32_t>(g_TimerMan.GetSimUpdateCount());
+				for (int element = 0; element < InputElements::INPUT_COUNT; ++element) {
+					if (g_UInputMan.ElementHeld(Players::PlayerOne, element)) {
+						inputCommand.HeldElements |= std::uint64_t{1} << element;
+					}
+				}
+				const Vector mouseMovement = g_UInputMan.GetMouseMovement(Players::PlayerOne);
+				inputCommand.MouseDeltaX = std::clamp(mouseMovement.GetFloorIntX(), -WorldStateProtocol::c_MaxMouseDelta, WorldStateProtocol::c_MaxMouseDelta);
+				inputCommand.MouseDeltaY = std::clamp(mouseMovement.GetFloorIntY(), -WorldStateProtocol::c_MaxMouseDelta, WorldStateProtocol::c_MaxMouseDelta);
+				auto QuantizeAnalog = [](float value) {
+					return static_cast<std::int16_t>(std::lround(std::clamp(value, -1.0F, 1.0F) * 32767.0F));
+				};
+				const Vector analogMove = g_UInputMan.AnalogMoveValues(Players::PlayerOne);
+				const Vector analogAim = g_UInputMan.AnalogAimValues(Players::PlayerOne);
+				inputCommand.AnalogMoveX = QuantizeAnalog(analogMove.GetX());
+				inputCommand.AnalogMoveY = QuantizeAnalog(analogMove.GetY());
+				inputCommand.AnalogAimX = QuantizeAnalog(analogAim.GetX());
+				inputCommand.AnalogAimY = QuantizeAnalog(analogAim.GetY());
+				for (int button = 0; button < std::min<int>(MouseButtons::MAX_MOUSE_BUTTONS, 8); ++button) {
+					if (g_UInputMan.MouseButtonHeld(button, Players::PlayerOne)) {
+						inputCommand.MouseButtonsHeld |= static_cast<std::uint8_t>(1U << button);
+					}
+				}
+				inputCommand.MouseWheelDelta = static_cast<std::int16_t>(std::clamp(g_UInputMan.MouseWheelMovedByPlayer(Players::PlayerOne),
+				                                                                            -static_cast<int>(WorldStateProtocol::c_MaxMouseWheelDelta),
+				                                                                            static_cast<int>(WorldStateProtocol::c_MaxMouseWheelDelta)));
+				inputCommand.ResetActivityVote = g_UInputMan.KeyHeld(SDL_SCANCODE_BACKSPACE);
+				inputCommand.RestartActivityVote = g_UInputMan.KeyHeld(SDL_SCANCODE_BACKSLASH);
+				worldStateClient->SendInputCommand(inputCommand);
+			}
 
 			g_FrameMan.Update();
 
@@ -1008,9 +1146,6 @@ void RunGameLoop() {
 				}
 			}
 			AdvanceDebugRunSimulation();
-			if (worldStateServer && worldStateServer->IsStarted()) {
-				worldStateServer->Update(++worldStateServerSimulationTick);
-			}
 
 			// This is to support hot reloading entities in SceneEditorGUI. It's a bit hacky to put it in Main like this, but PresetMan has no update in which to clear the value, and I didn't want to set up a listener for the job.
 			// It's in this spot to allow it to be set by UInputMan update and ConsoleMan update, and read from ActivityMan update.

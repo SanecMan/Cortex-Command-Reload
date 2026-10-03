@@ -18,6 +18,7 @@
 #include <vector>
 #include <optional>
 #include <functional>
+#include <cstdint>
 
 #define g_UInputMan UInputMan::Instance()
 
@@ -72,6 +73,15 @@ namespace RTE {
 
 		/// Resets the changed states for keyboard and mouse events.
 		void EndFrame();
+
+		/// Applies a validated network input sample to a local gameplay player slot.
+		void SetNetworkInputState(int player, std::uint64_t heldElements, const Vector& mouseMovement, int mouseWheelDelta,
+		                          std::uint8_t mouseButtonsHeld, const Vector& analogMove, const Vector& analogAim);
+		/// Clears transient network mouse input after one simulation update.
+		void ClearNetworkInputImpulse(int player);
+		/// Releases all network controls owned by a disconnected peer.
+		void ClearNetworkInputState(int player);
+		bool IsNetworkInputActive(int player) const;
 #pragma endregion
 
 #pragma region Control Scheme and Input Mapping Handling
@@ -507,6 +517,20 @@ namespace RTE {
 		bool m_OverrideInput; //!< If true then this instance operates in multiplayer mode and the input is overridden by network input.
 
 		std::array<InputScheme, Players::MaxPlayerCount> m_ControlScheme; //!< Which control scheme is being used by each player.
+		struct NetworkInputState {
+			std::array<bool, InputElements::INPUT_COUNT> held{};
+			std::array<bool, InputElements::INPUT_COUNT> pressed{};
+			std::array<bool, InputElements::INPUT_COUNT> released{};
+			std::array<bool, MouseButtons::MAX_MOUSE_BUTTONS> mouseHeld{};
+			std::array<bool, MouseButtons::MAX_MOUSE_BUTTONS> mousePressed{};
+			std::array<bool, MouseButtons::MAX_MOUSE_BUTTONS> mouseReleased{};
+			Vector mouseMovement{};
+			Vector analogMove{};
+			Vector analogAim{};
+			int mouseWheelDelta = 0;
+			bool active = false;
+		};
+		std::array<NetworkInputState, Players::MaxPlayerCount> m_NetworkInput{};
 		const Icon* m_DeviceIcons[InputDevice::DEVICE_COUNT]; //!< The Icons representing all different devices.
 
 		float m_MouseSensitivity; //!< Mouse sensitivity multiplier while in Activity. HAS NO EFFECT IN MENUS.

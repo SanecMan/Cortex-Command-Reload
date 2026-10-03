@@ -7,13 +7,15 @@
 
 namespace RTE {
 
-	/// Receives and validates authoritative snapshots. It does not yet reconcile them
-	/// into MovableMan; that requires lifecycle and mod-object mapping policy.
+	/// Receives state snapshots and forwards sampled local input commands to the host.
+	/// The main simulation loop applies replica snapshots; host-side input injection is
+	/// still separate from transport validation.
 	class WorldStateClientSession {
 	public:
 		bool Connect(const char* address, unsigned short port);
 		void Disconnect();
-		void Update();
+	void Update();
+	bool SendInputCommand(const WorldStateProtocol::InputCommand& command);
 		bool IsConnected() const { return m_Connected; }
 		bool HasSnapshot() const { return m_HasSnapshot; }
 		std::uint32_t GetReceivedSnapshotCount() const { return m_ReceivedSnapshotCount; }
@@ -23,7 +25,8 @@ namespace RTE {
 		WorldStateTransport m_Transport;
 		WorldStateProtocol::Snapshot m_LatestSnapshot;
 		std::uint32_t m_LastSequence = 0;
-		std::uint32_t m_ReceivedSnapshotCount = 0;
+	std::uint32_t m_ReceivedSnapshotCount = 0;
+	std::uint32_t m_InputCommandSequence = 0;
 		bool m_Connected = false;
 		bool m_HasSnapshot = false;
 	};

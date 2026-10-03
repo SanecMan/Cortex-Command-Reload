@@ -36,6 +36,7 @@ void UInputMan::Clear() {
 	m_TextInput.clear();
 	m_NumJoysticks = 0;
 	m_OverrideInput = false;
+	m_NetworkInput = {};
 	m_MouseSensitivity = 0.6F;
 	m_TrapMousePos = false;
 	m_PlayerScreenMouseBounds = {0, 0, 0, 0};
@@ -136,6 +137,9 @@ void UInputMan::LoadDeviceIcons() {
 }
 
 Vector UInputMan::AnalogMoveValues(int whichPlayer) {
+	if (whichPlayer >= Players::PlayerOne && whichPlayer < Players::MaxPlayerCount && m_NetworkInput[whichPlayer].active) {
+		return m_NetworkInput[whichPlayer].analogMove;
+	}
 	Vector moveValues(0, 0);
 	InputDevice device = m_ControlScheme.at(whichPlayer).GetDevice();
 	if (device >= InputDevice::DEVICE_GAMEPAD_1) {
@@ -154,6 +158,9 @@ Vector UInputMan::AnalogMoveValues(int whichPlayer) {
 }
 
 Vector UInputMan::AnalogAimValues(int whichPlayer) {
+	if (whichPlayer >= Players::PlayerOne && whichPlayer < Players::MaxPlayerCount && m_NetworkInput[whichPlayer].active) {
+		return m_NetworkInput[whichPlayer].analogAim;
+	}
 	InputDevice device = m_ControlScheme.at(whichPlayer).GetDevice();
 
 	Vector aimValues(0, 0);
@@ -372,6 +379,9 @@ void UInputMan::SetAbsoluteMousePosition(const Vector& pos, int whichPlayer) {
 }
 
 Vector UInputMan::GetMouseMovement(int whichPlayer) const {
+	if (whichPlayer >= Players::PlayerOne && whichPlayer < Players::MaxPlayerCount && m_NetworkInput[whichPlayer].active) {
+		return m_NetworkInput[whichPlayer].mouseMovement;
+	}
 	if (whichPlayer == Players::NoPlayer || (m_ControlScheme.at(whichPlayer).GetDevice() == InputDevice::DEVICE_MOUSE_KEYB && !m_EnableMultiMouseKeyboard)) {
 		return m_MouseStates.at(0).relativeMotion;
 	} else if (m_ControlScheme.at(whichPlayer).GetDevice() == InputDevice::DEVICE_MOUSE_KEYB) {
@@ -450,6 +460,9 @@ void UInputMan::ClearMouseButtons() {
 }
 
 int UInputMan::MouseWheelMovedByPlayer(int player) const {
+	if (player >= Players::PlayerOne && player < Players::MaxPlayerCount && m_NetworkInput[player].active) {
+		return m_NetworkInput[player].mouseWheelDelta;
+	}
 	if (player == Players::NoPlayer || player < Players::PlayerOne || player >= Players::MaxPlayerCount || !m_EnableMultiMouseKeyboard) {
 		return m_MouseStates.at(0).wheelChange;
 	}
@@ -655,6 +668,16 @@ bool UInputMan::AnyJoyButtonPress(int whichJoy) const {
 }
 
 bool UInputMan::GetInputElementState(int whichPlayer, int whichElement, InputState whichState) {
+	if (whichPlayer >= Players::PlayerOne && whichPlayer < Players::MaxPlayerCount && whichElement >= 0 &&
+	    whichElement < InputElements::INPUT_COUNT && m_NetworkInput[whichPlayer].active) {
+		const NetworkInputState& networkState = m_NetworkInput[whichPlayer];
+		switch (whichState) {
+			case InputState::Held: return networkState.held[whichElement];
+			case InputState::Pressed: return networkState.pressed[whichElement];
+			case InputState::Released: return networkState.released[whichElement];
+			default: return false;
+		}
+	}
 	bool elementState = false;
 	InputDevice device = m_ControlScheme.at(whichPlayer).GetDevice();
 	const InputMapping* element = &(m_ControlScheme.at(whichPlayer).GetInputMappings()->at(whichElement));
@@ -682,6 +705,10 @@ bool UInputMan::GetInputElementState(int whichPlayer, int whichElement, InputSta
 		}
 	}
 	return elementState;
+}
+
+bool UInputMan::IsNetworkInputActive(int player) const {
+	return player >= Players::PlayerOne && player < Players::MaxPlayerCount && m_NetworkInput[player].active;
 }
 
 bool UInputMan::GetMenuButtonState(int whichButton, InputState whichState) {
@@ -749,6 +776,16 @@ bool UInputMan::GetKeyboardButtonState(SDL_Scancode scancodeToTest, InputState w
 }
 
 bool UInputMan::GetMouseButtonState(int whichPlayer, int whichButton, InputState whichState, SDL_MouseID mouseID) const {
+	if (whichPlayer >= Players::PlayerOne && whichPlayer < Players::MaxPlayerCount && whichButton >= 0 &&
+	    whichButton < MouseButtons::MAX_MOUSE_BUTTONS && m_NetworkInput[whichPlayer].active) {
+		const NetworkInputState& networkState = m_NetworkInput[whichPlayer];
+		switch (whichState) {
+			case InputState::Held: return networkState.mouseHeld[whichButton];
+			case InputState::Pressed: return networkState.mousePressed[whichButton];
+			case InputState::Released: return networkState.mouseReleased[whichButton];
+			default: return false;
+		}
+	}
 	if (whichButton < MouseButtons::MOUSE_LEFT || whichButton >= MouseButtons::MAX_MOUSE_BUTTONS) {
 		return false;
 	}
@@ -1055,6 +1092,68 @@ void UInputMan::EndFrame() {
 		mouse.relativeMotion.Reset();
 		mouse.change.fill(false);
 	}
+	for (NetworkInputState& input : m_NetworkInput) {
+		input.pressed.fill(false);
+		input.released.fill(false);
+		input.mousePressed.fill(false);
+		input.mouseReleased.fill(false);
+	}
+}
+
+void UInputMan::SetNetworkInputState(int player, std::uint64_t heldElements, const Vector& mouseMovement, int mouseWheelDelta,
+	                                 std::uint8_t mouseButtonsHeld, const Vector& analogMove, const Vector& analogAim) {
+	if (player < Players::PlayerOne || player >= Players::MaxPlayerCount) {
+		return;
+	}
+	NetworkInputState& state = m_NetworkInput[static_cast<std::size_t>(player)];
+	for (int element = 0; element < InputElements::INPUT_COUNT; ++element) {
+		const bool held = (heldElements & (std::uint64_t{1} << element)) != 0;
+		state.pressed[element] = held && !state.held[element];
+		state.released[element] = !held && state.held[element];
+		state.held[element] = held;
+	}
+	for (int button = 0; button < MouseButtons::MAX_MOUSE_BUTTONS; ++button) {
+		const bool held = button < 8 && (mouseButtonsHeld & (std::uint8_t{1} << button)) != 0;
+		state.mousePressed[button] = held && !state.mouseHeld[button];
+		state.mouseReleased[button] = !held && state.mouseHeld[button];
+		state.mouseHeld[button] = held;
+	}
+	state.mouseMovement = mouseMovement;
+	state.mouseWheelDelta = mouseWheelDelta;
+	state.analogMove = analogMove;
+	state.analogAim = analogAim;
+	state.active = true;
+}
+
+void UInputMan::ClearNetworkInputImpulse(int player) {
+	if (player < Players::PlayerOne || player >= Players::MaxPlayerCount) {
+		return;
+	}
+	NetworkInputState& state = m_NetworkInput[static_cast<std::size_t>(player)];
+	state.mouseMovement.Reset();
+	state.mouseWheelDelta = 0;
+}
+
+void UInputMan::ClearNetworkInputState(int player) {
+	if (player < Players::PlayerOne || player >= Players::MaxPlayerCount) {
+		return;
+	}
+	NetworkInputState& state = m_NetworkInput[static_cast<std::size_t>(player)];
+	for (int element = 0; element < InputElements::INPUT_COUNT; ++element) {
+		state.released[element] = state.held[element];
+	}
+	state.held.fill(false);
+	state.pressed.fill(false);
+	for (int button = 0; button < MouseButtons::MAX_MOUSE_BUTTONS; ++button) {
+		state.mouseReleased[button] = state.mouseHeld[button];
+	}
+	state.mouseHeld.fill(false);
+	state.mousePressed.fill(false);
+	state.mouseMovement.Reset();
+	state.mouseWheelDelta = 0;
+	state.analogMove.Reset();
+	state.analogAim.Reset();
+	state.active = false;
 }
 
 void UInputMan::HandleSpecialInput() {

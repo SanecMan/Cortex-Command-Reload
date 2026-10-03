@@ -17,7 +17,7 @@
 namespace RTE::WorldStateProtocol {
 
 inline constexpr std::uint32_t c_Magic = 0x31524343; // "CCR1" on the wire.
-inline constexpr std::uint16_t c_Version = 3;
+inline constexpr std::uint16_t c_Version = 4;
 inline constexpr std::size_t c_HeaderSize = 16;
 inline constexpr std::size_t c_MaxPacketSize = 4 * 1024 * 1024;
 inline constexpr std::size_t c_MaxObjects = 65535;
@@ -28,6 +28,9 @@ inline constexpr std::uint16_t c_ObjectFlagParticle = 0x0004;
 inline constexpr std::uint16_t c_ObjectFlagTransientPixel = 0x0008;
 inline constexpr std::int16_t c_NoTeam = -1;
 inline constexpr std::int16_t c_MaxTeamCount = 4;
+inline constexpr std::uint32_t c_InputElementCount = 34;
+inline constexpr std::int32_t c_MaxMouseDelta = 8192;
+inline constexpr std::int16_t c_MaxMouseWheelDelta = 16;
 
 enum class MessageType : std::uint8_t {
 	ClientHello = 1,
@@ -66,6 +69,21 @@ struct Snapshot {
 	std::string SceneModuleName;
 	std::string ScenePreset;
 	std::vector<ObjectState> Objects;
+};
+
+struct InputCommand {
+	std::uint32_t ClientTick = 0;
+	std::uint64_t HeldElements = 0;
+	std::int32_t MouseDeltaX = 0;
+	std::int32_t MouseDeltaY = 0;
+	std::int16_t MouseWheelDelta = 0;
+	std::uint8_t MouseButtonsHeld = 0;
+	std::int16_t AnalogMoveX = 0;
+	std::int16_t AnalogMoveY = 0;
+	std::int16_t AnalogAimX = 0;
+	std::int16_t AnalogAimY = 0;
+	bool ResetActivityVote = false;
+	bool RestartActivityVote = false;
 };
 
 namespace Detail {
@@ -129,6 +147,86 @@ namespace Detail {
 		       object.PixelColorIndex <= 255 && std::isfinite(object.PixelMass) && object.PixelMass >= 0.0F && std::isfinite(object.PixelSharpness);
 	}
 } // namespace Detail
+
+inline bool EncodeInputCommand(const InputCommand& command, std::uint32_t sequence, std::vector<std::uint8_t>& packet) {
+	constexpr std::uint64_t validElementMask = (std::uint64_t{1} << c_InputElementCount) - 1;
+	if ((command.HeldElements & ~validElementMask) != 0 || command.MouseDeltaX < -c_MaxMouseDelta || command.MouseDeltaX > c_MaxMouseDelta ||
+	    command.MouseDeltaY < -c_MaxMouseDelta || command.MouseDeltaY > c_MaxMouseDelta ||
+	    command.MouseWheelDelta < -c_MaxMouseWheelDelta || command.MouseWheelDelta > c_MaxMouseWheelDelta ||
+	    command.AnalogMoveX == std::numeric_limits<std::int16_t>::min() || command.AnalogMoveY == std::numeric_limits<std::int16_t>::min() ||
+	    command.AnalogAimX == std::numeric_limits<std::int16_t>::min() || command.AnalogAimY == std::numeric_limits<std::int16_t>::min()) {
+		return false;
+	}
+	std::vector<std::uint8_t> payload;
+	payload.reserve(32);
+	Detail::WriteUnsigned(payload, command.ClientTick, sizeof(command.ClientTick));
+	Detail::WriteUnsigned(payload, command.HeldElements, sizeof(command.HeldElements));
+	Detail::WriteUnsigned(payload, std::bit_cast<std::uint32_t>(command.MouseDeltaX), sizeof(command.MouseDeltaX));
+	Detail::WriteUnsigned(payload, std::bit_cast<std::uint32_t>(command.MouseDeltaY), sizeof(command.MouseDeltaY));
+	Detail::WriteUnsigned(payload, std::bit_cast<std::uint16_t>(command.MouseWheelDelta), sizeof(command.MouseWheelDelta));
+	Detail::WriteUnsigned(payload, command.MouseButtonsHeld, sizeof(command.MouseButtonsHeld));
+	Detail::WriteUnsigned(payload, std::bit_cast<std::uint16_t>(command.AnalogMoveX), sizeof(command.AnalogMoveX));
+	Detail::WriteUnsigned(payload, std::bit_cast<std::uint16_t>(command.AnalogMoveY), sizeof(command.AnalogMoveY));
+	Detail::WriteUnsigned(payload, std::bit_cast<std::uint16_t>(command.AnalogAimX), sizeof(command.AnalogAimX));
+	Detail::WriteUnsigned(payload, std::bit_cast<std::uint16_t>(command.AnalogAimY), sizeof(command.AnalogAimY));
+	const std::uint8_t votes = static_cast<std::uint8_t>((command.ResetActivityVote ? 1 : 0) | (command.RestartActivityVote ? 2 : 0));
+	Detail::WriteUnsigned(payload, votes, sizeof(votes));
+	packet.clear();
+	Detail::WriteUnsigned(packet, c_Magic, sizeof(c_Magic));
+	Detail::WriteUnsigned(packet, c_Version, sizeof(c_Version));
+	Detail::WriteUnsigned(packet, static_cast<std::uint8_t>(MessageType::InputCommand), sizeof(std::uint8_t));
+	Detail::WriteUnsigned(packet, 0, sizeof(std::uint8_t));
+	Detail::WriteUnsigned(packet, sequence, sizeof(sequence));
+	Detail::WriteUnsigned(packet, payload.size(), sizeof(std::uint32_t));
+	packet.insert(packet.end(), payload.begin(), payload.end());
+	return packet.size() <= c_MaxPacketSize;
+}
+
+inline bool DecodeInputCommand(std::span<const std::uint8_t> packet, InputCommand& command, std::uint32_t* sequence = nullptr) {
+	if (packet.size() != c_HeaderSize + 32) return false;
+	std::size_t offset = 0;
+	std::uint64_t magic = 0, version = 0, messageType = 0, reserved = 0, sequenceValue = 0, payloadSize = 0, value = 0;
+	if (!Detail::ReadUnsigned(packet, offset, sizeof(c_Magic), magic) || magic != c_Magic ||
+	    !Detail::ReadUnsigned(packet, offset, sizeof(c_Version), version) || version != c_Version ||
+	    !Detail::ReadUnsigned(packet, offset, sizeof(std::uint8_t), messageType) || messageType != static_cast<std::uint8_t>(MessageType::InputCommand) ||
+	    !Detail::ReadUnsigned(packet, offset, sizeof(std::uint8_t), reserved) || reserved != 0 ||
+	    !Detail::ReadUnsigned(packet, offset, sizeof(std::uint32_t), sequenceValue) ||
+	    !Detail::ReadUnsigned(packet, offset, sizeof(std::uint32_t), payloadSize) || payloadSize != 32) return false;
+
+	InputCommand decoded;
+	if (!Detail::ReadUnsigned(packet, offset, sizeof(decoded.ClientTick), value)) return false;
+	decoded.ClientTick = static_cast<std::uint32_t>(value);
+	if (!Detail::ReadUnsigned(packet, offset, sizeof(decoded.HeldElements), value)) return false;
+	decoded.HeldElements = value;
+	constexpr std::uint64_t validElementMask = (std::uint64_t{1} << c_InputElementCount) - 1;
+	if ((decoded.HeldElements & ~validElementMask) != 0 || !Detail::ReadUnsigned(packet, offset, sizeof(decoded.MouseDeltaX), value)) return false;
+	decoded.MouseDeltaX = std::bit_cast<std::int32_t>(static_cast<std::uint32_t>(value));
+	if (!Detail::ReadUnsigned(packet, offset, sizeof(decoded.MouseDeltaY), value)) return false;
+	decoded.MouseDeltaY = std::bit_cast<std::int32_t>(static_cast<std::uint32_t>(value));
+	if (!Detail::ReadUnsigned(packet, offset, sizeof(decoded.MouseWheelDelta), value)) return false;
+	decoded.MouseWheelDelta = std::bit_cast<std::int16_t>(static_cast<std::uint16_t>(value));
+	if (!Detail::ReadUnsigned(packet, offset, sizeof(decoded.MouseButtonsHeld), value)) return false;
+	decoded.MouseButtonsHeld = static_cast<std::uint8_t>(value);
+	if (!Detail::ReadUnsigned(packet, offset, sizeof(decoded.AnalogMoveX), value)) return false;
+	decoded.AnalogMoveX = std::bit_cast<std::int16_t>(static_cast<std::uint16_t>(value));
+	if (!Detail::ReadUnsigned(packet, offset, sizeof(decoded.AnalogMoveY), value)) return false;
+	decoded.AnalogMoveY = std::bit_cast<std::int16_t>(static_cast<std::uint16_t>(value));
+	if (!Detail::ReadUnsigned(packet, offset, sizeof(decoded.AnalogAimX), value)) return false;
+	decoded.AnalogAimX = std::bit_cast<std::int16_t>(static_cast<std::uint16_t>(value));
+	if (!Detail::ReadUnsigned(packet, offset, sizeof(decoded.AnalogAimY), value)) return false;
+	decoded.AnalogAimY = std::bit_cast<std::int16_t>(static_cast<std::uint16_t>(value));
+	if (!Detail::ReadUnsigned(packet, offset, sizeof(std::uint8_t), value) || (value & ~std::uint64_t{3}) != 0 ||
+	    decoded.MouseDeltaX < -c_MaxMouseDelta || decoded.MouseDeltaX > c_MaxMouseDelta ||
+	    decoded.MouseDeltaY < -c_MaxMouseDelta || decoded.MouseDeltaY > c_MaxMouseDelta ||
+	    decoded.MouseWheelDelta < -c_MaxMouseWheelDelta || decoded.MouseWheelDelta > c_MaxMouseWheelDelta ||
+	    decoded.AnalogMoveX == std::numeric_limits<std::int16_t>::min() || decoded.AnalogMoveY == std::numeric_limits<std::int16_t>::min() ||
+	    decoded.AnalogAimX == std::numeric_limits<std::int16_t>::min() || decoded.AnalogAimY == std::numeric_limits<std::int16_t>::min()) return false;
+	decoded.ResetActivityVote = (value & 1) != 0;
+	decoded.RestartActivityVote = (value & 2) != 0;
+	command = decoded;
+	if (sequence) *sequence = static_cast<std::uint32_t>(sequenceValue);
+	return true;
+}
 
 inline bool EncodeSnapshot(const Snapshot& snapshot, std::uint32_t sequence, std::vector<std::uint8_t>& packet) {
 	packet.clear();
