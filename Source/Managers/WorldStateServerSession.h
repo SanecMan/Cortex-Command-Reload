@@ -18,6 +18,8 @@ namespace RTE {
 		void Stop();
 		void Update(std::uint32_t simulationTick);
 		bool IsStarted() const { return m_Transport.IsStarted(); }
+		unsigned short GetBoundPort() const { return m_Transport.GetBoundPort(); }
+		unsigned short GetConnectedClientCount() const { return m_ConnectedClients; }
 
 	private:
 		void Log(const std::string& message);

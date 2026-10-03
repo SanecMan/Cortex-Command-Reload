@@ -101,6 +101,7 @@ namespace {
 		bool Enabled = false;
 		bool StressStarted = false;
 		bool Passed = false;
+		bool HostSessionTestPassed = true;
 		int UpdateLimit = 600;
 		int SimulationUpdates = 0;
 		int RenderedFrames = 0;
@@ -398,6 +399,46 @@ namespace {
 		return loopbackPassed;
 	}
 
+	bool VerifyWorldStateHostSessionLoopback(WorldStateServerSession& serverSession, std::ofstream& log) {
+		constexpr std::size_t expectedClientCount = 4;
+		const unsigned short port = serverSession.GetBoundPort();
+		std::array<WorldStateTransport, expectedClientCount> clients;
+		std::array<bool, expectedClientCount> receivedSnapshot{};
+		bool started = port != 0;
+		for (WorldStateTransport& client : clients) {
+			started = started && client.StartClient("127.0.0.1", port);
+		}
+		if (!started) {
+			log << "world_state_host_session_smoke=failed reason=client_start\n" << std::flush;
+			return false;
+		}
+
+		const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+		while (std::chrono::steady_clock::now() < deadline &&
+		       (serverSession.GetConnectedClientCount() < expectedClientCount ||
+		        std::find(receivedSnapshot.begin(), receivedSnapshot.end(), false) != receivedSnapshot.end())) {
+			serverSession.Update(++worldStateServerSimulationTick);
+			for (std::size_t index = 0; index < clients.size(); ++index) {
+				std::vector<WorldStateTransport::ReceivedPacket> packets;
+				clients[index].Poll(packets);
+				for (const WorldStateTransport::ReceivedPacket& packet : packets) {
+					if (packet.Identifier != ID_CCR_WORLD_STATE) {
+						continue;
+					}
+					WorldStateProtocol::Snapshot snapshot;
+					receivedSnapshot[index] = WorldStateProtocol::DecodeSnapshot(packet.Payload, snapshot) && snapshot.Tick > 0;
+				}
+			}
+			std::this_thread::sleep_for(std::chrono::milliseconds(5));
+		}
+		const bool passed = serverSession.GetConnectedClientCount() == expectedClientCount &&
+		                    std::find(receivedSnapshot.begin(), receivedSnapshot.end(), false) == receivedSnapshot.end();
+		log << "world_state_host_session_smoke=" << (passed ? "passed" : "failed")
+		    << " clients_connected=" << serverSession.GetConnectedClientCount()
+		    << " clients_received=" << std::count(receivedSnapshot.begin(), receivedSnapshot.end(), true) << '\n' << std::flush;
+		return passed;
+	}
+
 	void FinishDebugRun(bool success) {
 		DebugRunState& state = GetDebugRunState();
 		if (!state.Enabled || System::IsSetToQuit()) {
@@ -421,7 +462,7 @@ namespace {
 		          << " bytes=" << worldSnapshotPacket.size()
 		          << " result=" << (worldSnapshotPassed ? "passed" : "failed") << '\n' << std::flush;
 		state.Log << "live_world_state_transport=" << (liveSnapshotTransportPassed ? "passed" : "failed") << '\n' << std::flush;
-		success = success && worldIdentityStable && worldSnapshotPassed && liveSnapshotTransportPassed;
+		success = success && state.HostSessionTestPassed && worldIdentityStable && worldSnapshotPassed && liveSnapshotTransportPassed;
 		const double elapsedSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - state.StartTime).count();
 		const double simulationSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - state.SimulationStartTime).count();
 		state.Log << "result=" << (success ? "passed" : "failed") << "\nupdates_done=" << state.SimulationUpdates
@@ -963,12 +1004,16 @@ int main(int argc, char** argv) {
 		}
 		if (worldStateServerRequested) {
 			worldStateServer = std::make_unique<WorldStateServerSession>();
-			if (!worldStateServer->Start("0.0.0.0", worldStateServerPort, worldStateServerMaxPlayers, "WorldStateServer.log")) {
+			const unsigned short serverPort = debugRun ? 0 : worldStateServerPort;
+			if (!worldStateServer->Start("0.0.0.0", serverPort, worldStateServerMaxPlayers, "WorldStateServer.log")) {
 				worldStateServer.reset();
 				DestroyManagers();
 				allegro_exit();
 				SDL_Quit();
 				return EXIT_FAILURE;
+			}
+			if (debugRun && !VerifyWorldStateHostSessionLoopback(*worldStateServer, GetDebugRunState().Log)) {
+				GetDebugRunState().HostSessionTestPassed = false;
 			}
 		}
 
