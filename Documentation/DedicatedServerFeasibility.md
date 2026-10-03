@@ -40,9 +40,9 @@ The preferred outcome is one shared simulation library used by the client and se
 
 ## Verified build status
 
-The current development branch builds the Linux x86_64 client with Meson/Ninja, and its `-debug-run 60` smoke test passes using SDL's offscreen video driver without X11/Wayland. The versioned snapshot codec and RakNet world-state transport also compile on Windows and Linux; the debug run opens a loopback server/client pair, delivers a snapshot, and validates the decoded state on both platforms. A live simulation snapshot is captured and round-tripped at the end of the gameplay smoke run.
+The current development branch builds the Linux x86_64 client with Meson/Ninja, and its `-debug-run 60` smoke test passes using SDL's offscreen video driver without X11/Wayland. The versioned snapshot codec and RakNet world-state transport also compile on Windows and Linux; the debug run opens a loopback server/client pair before loading content, delivers a representative snapshot, and validates the decoded state on both platforms. A separate live simulation snapshot is captured and round-tripped through the codec at the end of the gameplay smoke run.
 
-These checks validate serialization and RakNet delivery only. The process still initializes the renderer/OpenGL context; no authoritative session, upstream input commands, client reconciliation, terrain replication, disconnect policy, or GPU-free dedicated-server executable exists yet. Debug snapshots currently enumerate top-level actors, items, and particles and use their local engine UIDs; they do not represent a complete stable cross-machine entity identity model.
+These checks validate serialization and RakNet delivery only. The process still initializes the renderer/OpenGL context; no authoritative session, upstream input commands, client reconciliation, terrain replication, disconnect policy, or GPU-free dedicated-server executable exists yet. Debug snapshots currently enumerate top-level actors, items, and particles and use their local engine UIDs; they do not represent a complete stable cross-machine entity identity model. Running RakNet startup/shutdown alongside the live Linux game exposed an FMOD shutdown crash, so network smoke tests currently run before content/audio initialization while live-state codec checks run at session end.
 
 ## Completion checks
 

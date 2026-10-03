@@ -104,8 +104,6 @@ namespace {
 		bool InitialScreenshotCaptured = false;
 		bool MidpointScreenshotCaptured = false;
 		bool FinalScreenshotCaptured = false;
-		bool GameplayPassed = false;
-		std::vector<std::uint8_t> FinalWorldSnapshotPacket;
 		std::filesystem::path OutputDirectory;
 		std::ofstream Log;
 		std::chrono::steady_clock::time_point StartTime;
@@ -138,6 +136,8 @@ namespace {
 #endif
 		return 0;
 	}
+
+	bool VerifyWorldStateTransportLoopback(std::span<const std::uint8_t> packet, const WorldStateProtocol::Snapshot& expectedSnapshot, std::ofstream& log);
 
 	bool ParseDebugRunArguments(int argc, char** argv) {
 		DebugRunState& state = GetDebugRunState();
@@ -246,6 +246,9 @@ namespace {
 		                                     !WorldStateProtocol::EncodeSnapshot(duplicateIdSnapshot, 100, duplicateIdPacket);
 		state.Log << "world_state_protocol_smoke=" << (networkRoundTripPassed && malformedNetworkRejected ? "passed" : "failed") << '\n' << std::flush;
 		if (!networkRoundTripPassed || !malformedNetworkRejected) {
+			return false;
+		}
+		if (!VerifyWorldStateTransportLoopback(networkPacket, networkSnapshot, state.Log)) {
 			return false;
 		}
 		const std::string legacyCyrillicProbe("\xCF\xF0\xE8\xE2\xE5\xF2", 6);
@@ -414,15 +417,13 @@ namespace {
 		const bool worldSnapshotPassed = WorldStateProtocol::EncodeSnapshot(worldSnapshot, state.SimulationUpdates, worldSnapshotPacket) &&
 		                                 WorldStateProtocol::DecodeSnapshot(worldSnapshotPacket, decodedWorldSnapshot) &&
 		                                 decodedWorldSnapshot.Objects.size() == worldSnapshot.Objects.size();
-		state.FinalWorldSnapshotPacket = worldSnapshotPacket;
 		state.Log << "captured_world_snapshot_objects=" << worldSnapshot.Objects.size()
 		          << " bytes=" << worldSnapshotPacket.size()
 		          << " result=" << (worldSnapshotPassed ? "passed" : "failed") << '\n' << std::flush;
 		success = success && worldSnapshotPassed;
-		state.GameplayPassed = success;
 		const double elapsedSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - state.StartTime).count();
 		const double simulationSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - state.SimulationStartTime).count();
-		state.Log << "simulation_result=" << (success ? "passed" : "failed") << "\nupdates_done=" << state.SimulationUpdates
+		state.Log << "result=" << (success ? "passed" : "failed") << "\nupdates_done=" << state.SimulationUpdates
 		          << "\nrendered_frames=" << state.RenderedFrames << "\nelapsed_seconds=" << elapsedSeconds
 		          << "\nsimulation_seconds=" << simulationSeconds
 		          << "\nmodule_load_seconds=" << std::chrono::duration<double>(state.ModuleLoadEndTime - state.ModuleLoadStartTime).count()
@@ -450,18 +451,6 @@ namespace {
 		}
 		state.Log.close();
 		System::SetQuit();
-	}
-
-	void CompleteDebugRunTransportCheck() {
-		DebugRunState& state = GetDebugRunState();
-		if (!state.Enabled) {
-			return;
-		}
-		std::ofstream log(state.OutputDirectory / "DebugRun.log", std::ios::out | std::ios::app);
-		WorldStateProtocol::Snapshot expectedSnapshot;
-		const bool packetValid = WorldStateProtocol::DecodeSnapshot(state.FinalWorldSnapshotPacket, expectedSnapshot);
-		const bool transportPassed = packetValid && VerifyWorldStateTransportLoopback(state.FinalWorldSnapshotPacket, expectedSnapshot, log);
-		log << "result=" << (state.GameplayPassed && transportPassed ? "passed" : "failed") << '\n' << std::flush;
 	}
 
 	void CaptureDebugRunFrame() {
@@ -947,7 +936,6 @@ int main(int argc, char** argv) {
 	DiscordPresence::Shutdown();
 
 	DestroyManagers();
-	CompleteDebugRunTransportCheck();
 
 	allegro_exit();
 	SDL_Quit();
