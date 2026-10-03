@@ -2,6 +2,7 @@
 
 #include "NetworkMessages.h"
 #include "WorldStateProtocol.h"
+#include "WorldStateCompression.h"
 
 #include "MessageIdentifiers.h"
 #include "PacketPriority.h"
@@ -71,12 +72,18 @@ bool WorldStateTransport::BroadcastWorldState(std::span<const std::uint8_t> pack
 
 bool WorldStateTransport::SendSnapshot(const RakNet::AddressOrGUID& target, const WorldStateProtocol::Snapshot& snapshot, std::uint32_t sequence) {
 	std::vector<std::uint8_t> packet;
-	return WorldStateProtocol::EncodeSnapshot(snapshot, sequence, packet) && Send(target, packet, false, UNRELIABLE_SEQUENCED);
+	std::vector<std::uint8_t> wirePacket;
+	bool compressed = false;
+	return WorldStateProtocol::EncodeSnapshot(snapshot, sequence, packet) && WorldStateCompression::EncodeForWire(packet, wirePacket, compressed) &&
+	       Send(target, wirePacket, false, UNRELIABLE_SEQUENCED);
 }
 
 bool WorldStateTransport::BroadcastSnapshot(const WorldStateProtocol::Snapshot& snapshot, std::uint32_t sequence) {
 	std::vector<std::uint8_t> packet;
-	return WorldStateProtocol::EncodeSnapshot(snapshot, sequence, packet) && Send(RakNet::UNASSIGNED_SYSTEM_ADDRESS, packet, true, UNRELIABLE_SEQUENCED);
+	std::vector<std::uint8_t> wirePacket;
+	bool compressed = false;
+	return WorldStateProtocol::EncodeSnapshot(snapshot, sequence, packet) && WorldStateCompression::EncodeForWire(packet, wirePacket, compressed) &&
+	       Send(RakNet::UNASSIGNED_SYSTEM_ADDRESS, wirePacket, true, UNRELIABLE_SEQUENCED);
 }
 
 bool WorldStateTransport::Send(const RakNet::AddressOrGUID& target, std::span<const std::uint8_t> packet, bool broadcast, PacketReliability reliability) {

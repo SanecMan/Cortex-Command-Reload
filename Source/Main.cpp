@@ -55,6 +55,7 @@
 #include "System.h"
 #include "System/UTF8.h"
 #include "System/WorldStateProtocol.h"
+#include "WorldStateCompression.h"
 #include "WorldStateTransport.h"
 #include "WorldStateSnapshotBuilder.h"
 #include "WorldStateClientSession.h"
@@ -417,9 +418,12 @@ namespace {
 							if (received.Identifier != ID_CCR_WORLD_STATE) {
 								continue;
 							}
+							std::vector<std::uint8_t> decompressedPacket;
+							std::span<const std::uint8_t> snapshotPayload;
 							WorldStateProtocol::Snapshot transportedSnapshot;
 							std::uint32_t receivedSequence = 0;
-							clientReceivedSnapshot[clientIndex] = WorldStateProtocol::DecodeSnapshot(received.Payload, transportedSnapshot, &receivedSequence) &&
+							clientReceivedSnapshot[clientIndex] = WorldStateCompression::DecodeFromWire(received.Payload, decompressedPacket, snapshotPayload) &&
+							                                         WorldStateProtocol::DecodeSnapshot(snapshotPayload, transportedSnapshot, &receivedSequence) &&
 							                                         receivedSequence == expectedSnapshot.Tick &&
 							                                         transportedSnapshot.Tick == expectedSnapshot.Tick &&
 							                                         transportedSnapshot.ActivityClassName == expectedSnapshot.ActivityClassName &&
@@ -563,7 +567,22 @@ namespace {
 		                                 decodedWorldSnapshot.SceneModuleName == worldSnapshot.SceneModuleName &&
 		                                 decodedWorldSnapshot.ScenePreset == worldSnapshot.ScenePreset &&
 		                                 decodedWorldSnapshot.Objects.size() == worldSnapshot.Objects.size();
-		const bool liveSnapshotTransportPassed = worldSnapshotPassed && VerifyWorldStateTransportLoopback(worldSnapshot, state.Log);
+		std::vector<std::uint8_t> snapshotWirePacket;
+		std::vector<std::uint8_t> decompressedWorldSnapshotPacket;
+		std::span<const std::uint8_t> decompressedWorldSnapshotView;
+		bool snapshotWasCompressed = false;
+		WorldStateProtocol::Snapshot compressedRoundTripSnapshot;
+		const bool snapshotCompressionPassed = worldSnapshotPassed &&
+		                                      WorldStateCompression::EncodeForWire(worldSnapshotPacket, snapshotWirePacket, snapshotWasCompressed) &&
+		                                      WorldStateCompression::DecodeFromWire(snapshotWirePacket, decompressedWorldSnapshotPacket, decompressedWorldSnapshotView) &&
+		                                      WorldStateProtocol::DecodeSnapshot(decompressedWorldSnapshotView, compressedRoundTripSnapshot) &&
+		                                      compressedRoundTripSnapshot.Objects.size() == worldSnapshot.Objects.size() &&
+		                                      compressedRoundTripSnapshot.ActivityPreset == worldSnapshot.ActivityPreset &&
+		                                      compressedRoundTripSnapshot.ScenePreset == worldSnapshot.ScenePreset;
+		state.Log << "world_snapshot_compression_smoke=" << (snapshotCompressionPassed ? "passed" : "failed")
+		          << " compressed=" << (snapshotWasCompressed ? "yes" : "no") << " plain_bytes=" << worldSnapshotPacket.size()
+		          << " wire_bytes=" << snapshotWirePacket.size() << '\n' << std::flush;
+		const bool liveSnapshotTransportPassed = worldSnapshotPassed && snapshotCompressionPassed && VerifyWorldStateTransportLoopback(worldSnapshot, state.Log);
 		state.Log << "captured_world_snapshot_objects=" << worldSnapshot.Objects.size()
 		          << " bytes=" << worldSnapshotPacket.size()
 		          << " result=" << (worldSnapshotPassed ? "passed" : "failed") << '\n' << std::flush;
@@ -578,7 +597,7 @@ namespace {
 		std::ifstream unicodeFontProbe(unicodeFontFilePath, std::ios::binary);
 		state.Log << "utf8_unicode_font_path=" << unicodeFontFilePath.generic_string() << " exists=" << (unicodeFontProbe ? "yes" : "no") << '\n' << std::flush;
 		state.Log << "utf8_glyph_render_smoke=" << (utf8GlyphRenderPassed ? "passed" : "failed") << '\n' << std::flush;
-		success = success && utf8GlyphRenderPassed && state.HostSessionTestPassed && worldIdentityStable && replicaSmokePassed && transientPixelReplicaPassed && worldSnapshotPassed && liveSnapshotTransportPassed;
+		success = success && utf8GlyphRenderPassed && state.HostSessionTestPassed && worldIdentityStable && replicaSmokePassed && transientPixelReplicaPassed && worldSnapshotPassed && snapshotCompressionPassed && liveSnapshotTransportPassed;
 		const double elapsedSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - state.StartTime).count();
 		const double simulationSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - state.SimulationStartTime).count();
 		state.Log << "result=" << (success ? "passed" : "failed") << "\nupdates_done=" << state.SimulationUpdates

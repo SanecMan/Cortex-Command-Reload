@@ -2,6 +2,7 @@
 
 #include "MessageIdentifiers.h"
 #include "NetworkMessages.h"
+#include "WorldStateCompression.h"
 
 #include <utility>
 
@@ -40,9 +41,14 @@ void WorldStateClientSession::Update() {
 		if (packet.Identifier != ID_CCR_WORLD_STATE) {
 			continue;
 		}
+		std::vector<std::uint8_t> decompressedPacket;
+		std::span<const std::uint8_t> snapshotPayload;
+		if (!WorldStateCompression::DecodeFromWire(packet.Payload, decompressedPacket, snapshotPayload)) {
+			continue;
+		}
 		WorldStateProtocol::Snapshot snapshot;
 		std::uint32_t sequence = 0;
-		if (!WorldStateProtocol::DecodeSnapshot(packet.Payload, snapshot, &sequence)) {
+		if (!WorldStateProtocol::DecodeSnapshot(snapshotPayload, snapshot, &sequence)) {
 			continue;
 		}
 		if (m_HasSnapshot && static_cast<std::int32_t>(sequence - m_LastSequence) <= 0) {
