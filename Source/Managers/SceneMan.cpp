@@ -186,6 +186,17 @@ int SceneMan::SetSceneToLoad(const std::string& sceneName, bool placeObjects, bo
 	return 0;
 }
 
+int SceneMan::SetSceneToLoad(const std::string& sceneName, const std::string& moduleName, bool placeObjects, bool placeUnits) {
+	// Resolve by module as well as preset name so clients load the same scene as the authority.
+	const Scene* pSceneRef = dynamic_cast<const Scene*>(g_PresetMan.GetEntityPreset("Scene", sceneName, moduleName));
+	if (!pSceneRef) {
+		g_ConsoleMan.PrintString("ERROR: Finding Scene preset '" + sceneName + "' in module '" + moduleName + "' failed!");
+		return -1;
+	}
+	SetSceneToLoad(pSceneRef, placeObjects, placeUnits);
+	return 0;
+}
+
 int SceneMan::LoadScene() {
 	// In case we have no set Scene reference to load from, do something graceful about it
 	if (!m_pSceneToLoad) {

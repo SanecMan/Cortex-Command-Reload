@@ -109,6 +109,8 @@ namespace RTE {
 		/// @return An error return value signaling success or any particular failure.
 		/// Anything below 0 is an error signal.
 		int SetSceneToLoad(const std::string& sceneName, bool placeObjects = true, bool placeUnits = true);
+		/// Sets the scene preset from a specific module, avoiding ambiguous same-name presets on multiplayer clients.
+		int SetSceneToLoad(const std::string& sceneName, const std::string& moduleName, bool placeObjects = true, bool placeUnits = true);
 
 		/// Gets the stored Scene reference to be loaded later into the SceneMan.
 		/// @return The instance reference of the Scene, ownership IS NOT (!!) transferred!
