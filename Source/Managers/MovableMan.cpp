@@ -1680,8 +1680,8 @@ void MovableMan::Update() {
 
 				// Delete
 				(*aIt)->DestroyScriptState();
-				delete (*aIt);
 				m_ValidActors.erase(*aIt);
+				delete (*aIt);
 				aIt++;
 			}
 			// Try to set the existing iterator to a safer value, erase can crash in debug mode otherwise?
@@ -1694,8 +1694,8 @@ void MovableMan::Update() {
 
 			while (iIt != m_Items.end()) {
 				(*iIt)->DestroyScriptState();
-				delete (*iIt);
 				m_ValidItems.erase(*iIt);
+				delete (*iIt);
 				iIt++;
 			}
 			m_Items.erase(imidIt, m_Items.end());
@@ -1706,8 +1706,8 @@ void MovableMan::Update() {
 
 			while (parIt != m_Particles.end()) {
 				(*parIt)->DestroyScriptState();
-				delete (*parIt);
 				m_ValidParticles.erase(*parIt);
+				delete (*parIt);
 				parIt++;
 			}
 			m_Particles.erase(midIt, m_Particles.end());
