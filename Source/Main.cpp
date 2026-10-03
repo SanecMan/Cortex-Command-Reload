@@ -424,10 +424,12 @@ namespace {
 		const bool worldSnapshotPassed = WorldStateProtocol::EncodeSnapshot(worldSnapshot, state.SimulationUpdates, worldSnapshotPacket) &&
 		                                 WorldStateProtocol::DecodeSnapshot(worldSnapshotPacket, decodedWorldSnapshot) &&
 		                                 decodedWorldSnapshot.Objects.size() == worldSnapshot.Objects.size();
+		const bool liveSnapshotTransportPassed = worldSnapshotPassed && VerifyWorldStateTransportLoopback(worldSnapshotPacket, worldSnapshot, state.Log);
 		state.Log << "captured_world_snapshot_objects=" << worldSnapshot.Objects.size()
 		          << " bytes=" << worldSnapshotPacket.size()
 		          << " result=" << (worldSnapshotPassed ? "passed" : "failed") << '\n' << std::flush;
-		success = success && worldSnapshotPassed;
+		state.Log << "live_world_state_transport=" << (liveSnapshotTransportPassed ? "passed" : "failed") << '\n' << std::flush;
+		success = success && worldSnapshotPassed && liveSnapshotTransportPassed;
 		const double elapsedSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - state.StartTime).count();
 		const double simulationSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - state.SimulationStartTime).count();
 		state.Log << "result=" << (success ? "passed" : "failed") << "\nupdates_done=" << state.SimulationUpdates
