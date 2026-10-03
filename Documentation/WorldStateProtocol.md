@@ -6,4 +6,6 @@ The 16-byte packet header contains the `CCR1` magic, protocol version, message t
 
 `-debug-run` performs an in-process round-trip check with a Cyrillic preset name and verifies that truncated packets, unsupported versions, and duplicate network IDs are rejected. The codec is transport-independent so it can be carried over the repository's RakNet dependency.
 
+At the end of its automated gameplay smoke run, the debug mode also captures the current top-level actors, items, and particles from `MovableMan`, serializes them as a world snapshot, decodes the packet, and reports the object count and packet size in `ScreenShots/DebugRuns/DebugRun.log`. This checks that live simulation values can pass through the codec. Attached equipment and actor inventories, terrain state/deltas, and object creation/deletion history are not captured by this diagnostic snapshot.
+
 This is the wire-format foundation only. The existing multiplayer sources remain excluded from both build systems and implement a remote-frame protocol. No server/client transport, object lifecycle reconciliation, input authority, terrain delta replication, or headless simulation is enabled by this codec yet; those pieces must be integrated before this protocol is exposed to players.
