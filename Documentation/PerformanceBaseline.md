@@ -124,4 +124,10 @@ The observed total load reduction was 43%. A second buffered run measured 29.60 
 
 The rebuilt Windows `Final|x64` executable also passed `-debug-run 60` and measured 7.18 s module loading in a warm-cache run. This single release sample is not the paired comparison above.
 
+## 2026-10-04: cold and warm startup variance
+
+On the same Ryzen 5 3500U system, the Final executable first measured 105.03 s module loading (Base.rte 60.79 s). A subsequent Debug Minimal run measured 184.98 s (Base.rte 92.31 s, Missions.rte 35.94 s) and passed the automated scenario. Immediately afterward, the Final executable loaded the same modules in 7.52 s (Base.rte 3.61 s, Missions.rte 1.89 s) and passed. These builds and runs are not a controlled cold/warm pair, so the difference is not a speedup claim. It does show that startup measurements are dominated by highly variable cold-read/system conditions; warm Final startup remains close to the earlier 7.18 s sample.
+
+At the time of these runs, the repository was on `H:`, reported by Windows as a removable exFAT volume. `Base.rte` contains about 120 MB across 4,385 files, including 787 sound files, and `Missions.rte` adds about 5.3 MB across 317 files. Cold startup on that volume is therefore a different target from the warm parser benchmark. No filesystem cache flush, volume change, or user data move was performed. Future cold-start comparisons should record the volume and cache condition, and warm-start comparisons should use the same Final binary and module set.
+
 A paired Ubuntu 24.04 x86_64 offscreen run on the configured Linux machine measured 3.16 s with the existing Reader and 2.96 s with the buffered Reader (about 6%). Both passed the same 60-update UTF-8 and world-state smoke. Its absolute times differ from Windows because this machine, filesystem cache and build setup differ; only the within-machine pair is relevant.
