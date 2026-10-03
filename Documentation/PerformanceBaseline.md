@@ -76,3 +76,7 @@ Two comparable warm-cache 60-update `Debug Minimal|x64` Tutorial Bunker runs wer
 | Base.rte + Missions.rte index phases | 30.36 s (earlier instrumented run) | 18.61 s | −38.7% |
 
 The phase comparison uses an earlier instrumented baseline rather than the exact same run set, so the module-load median is the stronger before/after result. Individual simulation timings varied with the number and behavior of spawned particles and are not claimed as an effect of this path lookup change.
+
+## Linux offscreen smoke run
+
+On 2026-10-03, commit `b32ac660e` built successfully on Ubuntu 24.04 x86_64 with the repository's Meson/Ninja build. `ldd` found no unresolved shared dependencies. Running `SDL_VIDEODRIVER=offscreen ./build/CortexCommand -debug-run 60` also passed without an X11/Wayland display and produced all three debug screenshots. The run reported 12.27 s module loading, 15.40 s total elapsed time, and 19.2 simulation updates/s. This uses the offscreen renderer and debug build, so its frame-rate and render-time counters are diagnostic only and are not comparable to normal GPU rendering or the Windows startup benchmark.
