@@ -18,7 +18,7 @@ A dedicated server is technically feasible without replacing the simulation engi
 
 Keep one simulation and introduce a server-authoritative replication layer:
 
-1. **Restore a buildable network baseline.** Re-enable networking sources in one build system, fix compile errors against current manager APIs, and add a loopback host/client test. This is a prerequisite to protocol work.
+1. **Build a state-protocol baseline.** Keep the obsolete framebuffer managers isolated; compile a transport adapter for the versioned world-state packets and prove loopback delivery before integrating it with gameplay.
 2. **Define the replicated state.** Begin with stable network IDs, actor ownership, position/velocity, health/status, inventory/equipment changes, and lifecycle events (spawn/delete). Add terrain deltas and Activity state as versioned messages. Continue using existing `.rte` preset loading and Lua Activity scripts on the authoritative process.
 3. **Send input upstream and snapshots downstream.** Clients send input commands with sequence/tick numbers. The server applies them in the simulation loop, then publishes snapshots. Clients render interpolated snapshots and predict only local input if needed. Keep the old framebuffer protocol behind a compatibility mode during transition.
 4. **Separate client startup from simulation startup.** Add a server entry point that skips SDL video, `WindowMan`, OpenGL, UI and client input. Audit simulation dependencies on `FrameMan`, `AudioMan`, `CameraMan`, `PrimitiveMan` and GUI globals; replace only simulation-critical calls with no-op/service interfaces where required. Keep terrain and collision data available to the server.
@@ -40,7 +40,9 @@ The preferred outcome is one shared simulation library used by the client and se
 
 ## Verified build status
 
-The current development branch builds the Linux x86_64 client with Meson/Ninja, and its `-debug-run 60` smoke test passes using SDL's offscreen video driver without X11/Wayland. This confirms the Linux client build and hidden diagnostic path only. The process still initializes the renderer/OpenGL context; it is not a dedicated server, does not prove GPU-free simulation, and does not validate network replication.
+The current development branch builds the Linux x86_64 client with Meson/Ninja, and its `-debug-run 60` smoke test passes using SDL's offscreen video driver without X11/Wayland. The versioned snapshot codec and RakNet world-state transport also compile on Windows and Linux; the debug run opens a loopback server/client pair, delivers a snapshot, and validates the decoded state on both platforms. A live simulation snapshot is captured and round-tripped at the end of the gameplay smoke run.
+
+These checks validate serialization and RakNet delivery only. The process still initializes the renderer/OpenGL context; no authoritative session, upstream input commands, client reconciliation, terrain replication, disconnect policy, or GPU-free dedicated-server executable exists yet. Debug snapshots currently enumerate top-level actors, items, and particles and use their local engine UIDs; they do not represent a complete stable cross-machine entity identity model.
 
 ## Completion checks
 
