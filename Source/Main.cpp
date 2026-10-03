@@ -53,6 +53,7 @@
 #include "MusicMan.h"
 #include "System.h"
 #include "System/UTF8.h"
+#include "System/WorldStateProtocol.h"
 #include "DiscordPresence.h"
 
 #include "RenderTarget.h"
@@ -168,6 +169,52 @@ namespace {
 		const bool utf8DecodePassed = UTF8::CountCodepoints(utf8Probe) == 3 && UTF8::NextBoundary(utf8Probe, 1) == 3 && UTF8::PreviousBoundary(utf8Probe, 3) == 1 && UTF8::CountCodepoints("\xF0\x28\x8C\x28") == 4;
 		state.Log << "utf8_decoder_smoke=" << (utf8DecodePassed ? "passed" : "failed") << '\n' << std::flush;
 		if (!utf8DecodePassed) {
+			return false;
+		}
+		WorldStateProtocol::Snapshot networkSnapshot;
+		networkSnapshot.Tick = 1234;
+		networkSnapshot.SceneRevision = 7;
+		networkSnapshot.ActivityPreset = "Tutorial Mission";
+		networkSnapshot.ScenePreset = "Tutorial Bunker";
+		WorldStateProtocol::ObjectState networkActor;
+		networkActor.NetworkId = 0x1020304050607080ULL;
+		networkActor.ClassName = "AHuman";
+		networkActor.ModuleName = "Base.rte";
+		networkActor.PresetName = "Пример актора";
+		networkActor.PositionX = 123.5F;
+		networkActor.PositionY = 42.25F;
+		networkActor.VelocityX = -2.0F;
+		networkActor.VelocityY = 0.75F;
+		networkActor.Rotation = 1.25F;
+		networkActor.AngularVelocity = -0.5F;
+		networkActor.Health = 83.0F;
+		networkActor.Team = 1;
+		networkActor.Flags = 3;
+		networkSnapshot.Objects.push_back(networkActor);
+		std::vector<std::uint8_t> networkPacket;
+		WorldStateProtocol::Snapshot decodedSnapshot;
+		std::uint32_t decodedSequence = 0;
+		const bool networkRoundTripPassed = WorldStateProtocol::EncodeSnapshot(networkSnapshot, 99, networkPacket) &&
+		                                   WorldStateProtocol::DecodeSnapshot(networkPacket, decodedSnapshot, &decodedSequence) &&
+		                                   decodedSequence == 99 && decodedSnapshot.Tick == networkSnapshot.Tick &&
+		                                   decodedSnapshot.SceneRevision == networkSnapshot.SceneRevision && decodedSnapshot.Objects.size() == 1 &&
+		                                   decodedSnapshot.Objects.front().NetworkId == networkActor.NetworkId &&
+		                                   decodedSnapshot.Objects.front().PresetName == networkActor.PresetName &&
+		                                   decodedSnapshot.Objects.front().PositionX == networkActor.PositionX &&
+		                                   decodedSnapshot.Objects.front().Team == networkActor.Team && decodedSnapshot.Objects.front().Flags == networkActor.Flags;
+		std::vector<std::uint8_t> truncatedNetworkPacket = networkPacket;
+		if (!truncatedNetworkPacket.empty()) truncatedNetworkPacket.pop_back();
+		std::vector<std::uint8_t> unsupportedVersionPacket = networkPacket;
+		if (unsupportedVersionPacket.size() > 4) unsupportedVersionPacket[4] = static_cast<std::uint8_t>(WorldStateProtocol::c_Version + 1);
+		WorldStateProtocol::Snapshot duplicateIdSnapshot = networkSnapshot;
+		duplicateIdSnapshot.Objects.push_back(networkActor);
+		std::vector<std::uint8_t> duplicateIdPacket;
+		const bool malformedNetworkRejected = !networkPacket.empty() &&
+		                                     !WorldStateProtocol::DecodeSnapshot(truncatedNetworkPacket, decodedSnapshot) &&
+		                                     !WorldStateProtocol::DecodeSnapshot(unsupportedVersionPacket, decodedSnapshot) &&
+		                                     !WorldStateProtocol::EncodeSnapshot(duplicateIdSnapshot, 100, duplicateIdPacket);
+		state.Log << "world_state_protocol_smoke=" << (networkRoundTripPassed && malformedNetworkRejected ? "passed" : "failed") << '\n' << std::flush;
+		if (!networkRoundTripPassed || !malformedNetworkRejected) {
 			return false;
 		}
 		const std::string legacyCyrillicProbe("\xCF\xF0\xE8\xE2\xE5\xF2", 6);
