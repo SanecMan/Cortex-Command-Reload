@@ -57,6 +57,7 @@
 #include "System/WorldStateProtocol.h"
 #include "WorldStateTransport.h"
 #include "WorldStateSnapshotBuilder.h"
+#include "WorldStateClientSession.h"
 #include "WorldStateServerSession.h"
 #include "NetworkMessages.h"
 #include "DiscordPresence.h"
@@ -403,11 +404,10 @@ namespace {
 	bool VerifyWorldStateHostSessionLoopback(WorldStateServerSession& serverSession, std::ofstream& log) {
 		constexpr std::size_t expectedClientCount = 4;
 		const unsigned short port = serverSession.GetBoundPort();
-		std::array<WorldStateTransport, expectedClientCount> clients;
-		std::array<bool, expectedClientCount> receivedSnapshot{};
+		std::array<WorldStateClientSession, expectedClientCount> clients;
 		bool started = port != 0;
-		for (WorldStateTransport& client : clients) {
-			started = started && client.StartClient("127.0.0.1", port);
+		for (WorldStateClientSession& client : clients) {
+			started = started && client.Connect("127.0.0.1", port);
 		}
 		if (!started) {
 			log << "world_state_host_session_smoke=failed reason=client_start\n" << std::flush;
@@ -417,25 +417,22 @@ namespace {
 		const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
 		while (std::chrono::steady_clock::now() < deadline &&
 		       (serverSession.GetConnectedClientCount() < expectedClientCount ||
-		        std::find(receivedSnapshot.begin(), receivedSnapshot.end(), false) != receivedSnapshot.end())) {
+		        std::any_of(clients.begin(), clients.end(), [](const WorldStateClientSession& client) { return !client.HasSnapshot(); }))) {
 			serverSession.Update(++worldStateServerSimulationTick);
-			for (std::size_t index = 0; index < clients.size(); ++index) {
-				std::vector<WorldStateTransport::ReceivedPacket> packets;
-				clients[index].Poll(packets);
-				for (const WorldStateTransport::ReceivedPacket& packet : packets) {
-					if (packet.Identifier != ID_CCR_WORLD_STATE) {
-						continue;
-					}
-					WorldStateProtocol::Snapshot snapshot;
-					receivedSnapshot[index] = WorldStateProtocol::DecodeSnapshot(packet.Payload, snapshot) && snapshot.Tick > 0;
-				}
+			for (WorldStateClientSession& client : clients) {
+				client.Update();
 			}
 			std::this_thread::sleep_for(std::chrono::milliseconds(5));
 		}
 		const bool allConnectedAndReceived = serverSession.GetConnectedClientCount() == expectedClientCount &&
-		                                    std::find(receivedSnapshot.begin(), receivedSnapshot.end(), false) == receivedSnapshot.end();
-		for (WorldStateTransport& client : clients) {
-			client.Stop();
+		                                    std::all_of(clients.begin(), clients.end(), [](const WorldStateClientSession& client) {
+		                                    return client.IsConnected() && client.HasSnapshot() && client.GetLatestSnapshot().Tick > 0;
+		                                    });
+		const std::size_t clientsReceivedSnapshotCount = std::count_if(clients.begin(), clients.end(), [](const WorldStateClientSession& client) {
+			return client.GetReceivedSnapshotCount() > 0;
+		});
+		for (WorldStateClientSession& client : clients) {
+			client.Disconnect();
 		}
 		const auto disconnectDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
 		while (serverSession.GetConnectedClientCount() > 0 && std::chrono::steady_clock::now() < disconnectDeadline) {
@@ -446,7 +443,7 @@ namespace {
 		const bool passed = allConnectedAndReceived && remainedAvailableAfterDisconnect;
 		log << "world_state_host_session_smoke=" << (passed ? "passed" : "failed")
 		    << " clients_accepted=" << expectedClientCount
-		    << " clients_received=" << std::count(receivedSnapshot.begin(), receivedSnapshot.end(), true)
+		    << " clients_received=" << clientsReceivedSnapshotCount
 		    << " server_alive_after_disconnect=" << remainedAvailableAfterDisconnect << '\n' << std::flush;
 		return passed;
 	}

@@ -1,0 +1,56 @@
+#include "WorldStateClientSession.h"
+
+#include "MessageIdentifiers.h"
+#include "NetworkMessages.h"
+
+#include <utility>
+
+using namespace RTE;
+
+bool WorldStateClientSession::Connect(const char* address, unsigned short port) {
+	Disconnect();
+	return m_Transport.StartClient(address, port);
+}
+
+void WorldStateClientSession::Disconnect() {
+	m_Transport.Stop();
+	m_Connected = false;
+	m_HasSnapshot = false;
+	m_LastSequence = 0;
+	m_ReceivedSnapshotCount = 0;
+	m_LatestSnapshot = {};
+}
+
+void WorldStateClientSession::Update() {
+	if (!m_Transport.IsStarted()) {
+		m_Connected = false;
+		return;
+	}
+	std::vector<WorldStateTransport::ReceivedPacket> packets;
+	m_Transport.Poll(packets);
+	for (const WorldStateTransport::ReceivedPacket& packet : packets) {
+		if (packet.Identifier == ID_CONNECTION_REQUEST_ACCEPTED) {
+			m_Connected = true;
+			continue;
+		}
+		if (packet.Identifier == ID_DISCONNECTION_NOTIFICATION || packet.Identifier == ID_CONNECTION_LOST) {
+			m_Connected = false;
+			continue;
+		}
+		if (packet.Identifier != ID_CCR_WORLD_STATE) {
+			continue;
+		}
+		WorldStateProtocol::Snapshot snapshot;
+		std::uint32_t sequence = 0;
+		if (!WorldStateProtocol::DecodeSnapshot(packet.Payload, snapshot, &sequence)) {
+			continue;
+		}
+		if (m_HasSnapshot && static_cast<std::int32_t>(sequence - m_LastSequence) <= 0) {
+			continue;
+		}
+		m_LastSequence = sequence;
+		m_LatestSnapshot = std::move(snapshot);
+		m_HasSnapshot = true;
+		++m_ReceivedSnapshotCount;
+	}
+}
