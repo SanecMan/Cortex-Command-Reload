@@ -404,6 +404,8 @@ namespace {
 	bool VerifyWorldStateHostSessionLoopback(WorldStateServerSession& serverSession, std::ofstream& log) {
 		constexpr std::size_t expectedClientCount = 4;
 		const unsigned short port = serverSession.GetBoundPort();
+		serverSession.Update(++worldStateServerSimulationTick);
+		const bool idleServerSkippedSnapshot = serverSession.GetSnapshotBroadcastCount() == 0;
 		std::array<WorldStateClientSession, expectedClientCount> clients;
 		bool started = port != 0;
 		for (WorldStateClientSession& client : clients) {
@@ -440,10 +442,11 @@ namespace {
 			std::this_thread::sleep_for(std::chrono::milliseconds(5));
 		}
 		const bool remainedAvailableAfterDisconnect = serverSession.IsStarted() && serverSession.GetConnectedClientCount() == 0;
-		const bool passed = allConnectedAndReceived && remainedAvailableAfterDisconnect;
+		const bool passed = idleServerSkippedSnapshot && allConnectedAndReceived && remainedAvailableAfterDisconnect;
 		log << "world_state_host_session_smoke=" << (passed ? "passed" : "failed")
 		    << " clients_accepted=" << expectedClientCount
 		    << " clients_received=" << clientsReceivedSnapshotCount
+		    << " idle_snapshot_count=" << (idleServerSkippedSnapshot ? 0 : serverSession.GetSnapshotBroadcastCount())
 		    << " server_alive_after_disconnect=" << remainedAvailableAfterDisconnect << '\n' << std::flush;
 		return passed;
 	}

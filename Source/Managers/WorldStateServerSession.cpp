@@ -15,6 +15,7 @@ bool WorldStateServerSession::Start(const std::string& bindAddress, unsigned sho
 	}
 	m_LastBroadcastTick = 0;
 	m_Sequence = 0;
+	m_SnapshotBroadcastCount = 0;
 	m_ConnectedClients = 0;
 	Log("INFO: world-state host listening on " + bindAddress + ":" + std::to_string(m_Transport.GetBoundPort()) +
 	    " (max clients " + std::to_string(maxPlayers) + ")");
@@ -51,6 +52,10 @@ void WorldStateServerSession::Update(std::uint32_t simulationTick) {
 	}
 
 	// The simulation timer currently runs at 60 updates per second. Send 20 full snapshots/sec.
+	// Avoid walking every movable object and encoding a full snapshot while nobody is connected.
+	if (m_Transport.GetNumberOfConnections() == 0) {
+		return;
+	}
 	if (simulationTick - m_LastBroadcastTick < 3) {
 		return;
 	}
@@ -58,6 +63,8 @@ void WorldStateServerSession::Update(std::uint32_t simulationTick) {
 	const WorldStateProtocol::Snapshot snapshot = m_SnapshotBuilder.Capture(simulationTick);
 	if (!m_Transport.BroadcastSnapshot(snapshot, ++m_Sequence)) {
 		Log("ERROR: failed to encode or broadcast world snapshot");
+	} else {
+		++m_SnapshotBroadcastCount;
 	}
 }
 

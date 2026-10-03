@@ -20,6 +20,7 @@ namespace RTE {
 		bool IsStarted() const { return m_Transport.IsStarted(); }
 		unsigned short GetBoundPort() const { return m_Transport.GetBoundPort(); }
 		unsigned short GetConnectedClientCount() const { return m_ConnectedClients; }
+		std::uint32_t GetSnapshotBroadcastCount() const { return m_SnapshotBroadcastCount; }
 
 	private:
 		void Log(const std::string& message);
@@ -29,6 +30,7 @@ namespace RTE {
 		std::ofstream m_Log;
 		std::uint32_t m_LastBroadcastTick = 0;
 		std::uint32_t m_Sequence = 0;
+		std::uint32_t m_SnapshotBroadcastCount = 0;
 		unsigned short m_ConnectedClients = 0;
 	};
 

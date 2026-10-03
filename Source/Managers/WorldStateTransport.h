@@ -34,6 +34,7 @@ namespace RTE {
 		void Stop();
 		bool IsStarted() const { return m_Peer != nullptr; }
 		unsigned short GetBoundPort() const;
+		unsigned short GetNumberOfConnections() const { return m_Peer ? m_Peer->NumberOfConnections() : 0; }
 
 		bool SendWorldState(const RakNet::AddressOrGUID& target, std::span<const std::uint8_t> packet);
 		bool BroadcastWorldState(std::span<const std::uint8_t> packet);
