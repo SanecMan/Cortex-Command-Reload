@@ -25,6 +25,8 @@ inline constexpr std::size_t c_MaxStringBytes = 1024;
 inline constexpr std::uint16_t c_ObjectFlagActor = 0x0001;
 inline constexpr std::uint16_t c_ObjectFlagItem = 0x0002;
 inline constexpr std::uint16_t c_ObjectFlagParticle = 0x0004;
+inline constexpr std::int16_t c_NoTeam = -1;
+inline constexpr std::int16_t c_MaxTeamCount = 4;
 
 enum class MessageType : std::uint8_t {
 	ClientHello = 1,
@@ -116,7 +118,8 @@ namespace Detail {
 		       UTF8::IsValid(object.ClassName) && UTF8::IsValid(object.ModuleName) && UTF8::IsValid(object.PresetName) &&
 		       std::isfinite(object.PositionX) && std::isfinite(object.PositionY) && std::isfinite(object.VelocityX) &&
 		       std::isfinite(object.VelocityY) && std::isfinite(object.Rotation) && std::isfinite(object.AngularVelocity) &&
-		       std::isfinite(object.Health);
+		       std::isfinite(object.Health) && object.Team >= c_NoTeam && object.Team < c_MaxTeamCount &&
+		       (object.Flags == c_ObjectFlagActor || object.Flags == c_ObjectFlagItem || object.Flags == c_ObjectFlagParticle);
 	}
 } // namespace Detail
 

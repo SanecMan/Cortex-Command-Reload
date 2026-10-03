@@ -58,6 +58,7 @@
 #include "WorldStateTransport.h"
 #include "WorldStateSnapshotBuilder.h"
 #include "WorldStateClientSession.h"
+#include "WorldStateClientReplica.h"
 #include "WorldStateServerSession.h"
 #include "NetworkMessages.h"
 #include "DiscordPresence.h"
@@ -101,6 +102,7 @@ namespace {
 	std::string worldStateClientAddress;
 	unsigned short worldStateClientPort = 8000;
 	std::unique_ptr<WorldStateClientSession> worldStateClient;
+	WorldStateClientReplica worldStateClientReplica;
 	std::ofstream worldStateClientLog;
 	std::uint32_t worldStateClientLastLoggedSnapshotCount = 0;
 
@@ -245,7 +247,7 @@ namespace {
 		networkActor.AngularVelocity = -0.5F;
 		networkActor.Health = 83.0F;
 		networkActor.Team = 1;
-		networkActor.Flags = 3;
+		networkActor.Flags = WorldStateProtocol::c_ObjectFlagActor;
 		networkSnapshot.Objects.push_back(networkActor);
 		std::vector<std::uint8_t> networkPacket;
 		WorldStateProtocol::Snapshot decodedSnapshot;
@@ -270,10 +272,16 @@ namespace {
 		WorldStateProtocol::Snapshot duplicateIdSnapshot = networkSnapshot;
 		duplicateIdSnapshot.Objects.push_back(networkActor);
 		std::vector<std::uint8_t> duplicateIdPacket;
+		WorldStateProtocol::Snapshot invalidTeamSnapshot = networkSnapshot;
+		invalidTeamSnapshot.Objects.front().Team = 32767;
+		WorldStateProtocol::Snapshot invalidFlagsSnapshot = networkSnapshot;
+		invalidFlagsSnapshot.Objects.front().Flags = 3;
 		const bool malformedNetworkRejected = !networkPacket.empty() &&
 		                                     !WorldStateProtocol::DecodeSnapshot(truncatedNetworkPacket, decodedSnapshot) &&
 		                                     !WorldStateProtocol::DecodeSnapshot(unsupportedVersionPacket, decodedSnapshot) &&
-		                                     !WorldStateProtocol::EncodeSnapshot(duplicateIdSnapshot, 100, duplicateIdPacket);
+		                                     !WorldStateProtocol::EncodeSnapshot(duplicateIdSnapshot, 100, duplicateIdPacket) &&
+		                                     !WorldStateProtocol::EncodeSnapshot(invalidTeamSnapshot, 100, duplicateIdPacket) &&
+		                                     !WorldStateProtocol::EncodeSnapshot(invalidFlagsSnapshot, 100, duplicateIdPacket);
 		state.Log << "world_state_protocol_smoke=" << (networkRoundTripPassed && malformedNetworkRejected ? "passed" : "failed") << '\n' << std::flush;
 		if (!networkRoundTripPassed || !malformedNetworkRejected) {
 			return false;
@@ -486,6 +494,20 @@ namespace {
 			worldIdentityStable = worldSnapshot.Objects[index].NetworkId == repeatedWorldSnapshot.Objects[index].NetworkId;
 		}
 		state.Log << "world_state_identity_smoke=" << (worldIdentityStable ? "passed" : "failed") << '\n' << std::flush;
+		WorldStateClientReplica replicaSmoke;
+		const WorldStateClientReplica::ApplyResult firstApply = replicaSmoke.Apply(worldSnapshot);
+		WorldStateProtocol::Snapshot emptyReplicaSnapshot = worldSnapshot;
+		emptyReplicaSnapshot.Objects.clear();
+		const WorldStateClientReplica::ApplyResult removalApply = replicaSmoke.Apply(emptyReplicaSnapshot);
+		const WorldStateClientReplica::ApplyResult restoredApply = replicaSmoke.Apply(worldSnapshot);
+		const WorldStateClientReplica::ApplyResult repeatedApply = replicaSmoke.Apply(worldSnapshot);
+		const bool replicaSmokePassed = firstApply.Updated + firstApply.Spawned == worldSnapshot.Objects.size() && firstApply.MissingPresets == 0 &&
+		                               removalApply.Removed == firstApply.Spawned && removalApply.Updated == 0 && removalApply.Spawned == 0 &&
+		                               restoredApply.Updated + restoredApply.Spawned == worldSnapshot.Objects.size() && restoredApply.MissingPresets == 0 &&
+		                               repeatedApply.Updated == worldSnapshot.Objects.size() && repeatedApply.Spawned == 0 && repeatedApply.Removed == 0 && repeatedApply.MissingPresets == 0;
+		state.Log << "world_state_replica_smoke=" << (replicaSmokePassed ? "passed" : "failed") << " objects=" << worldSnapshot.Objects.size()
+		          << " first_updated=" << firstApply.Updated << " first_spawned=" << firstApply.Spawned << " removed=" << removalApply.Removed
+		          << " repeat_updated=" << repeatedApply.Updated << '\n' << std::flush;
 		std::vector<std::uint8_t> worldSnapshotPacket;
 		WorldStateProtocol::Snapshot decodedWorldSnapshot;
 		const bool worldSnapshotPassed = WorldStateProtocol::EncodeSnapshot(worldSnapshot, state.SimulationUpdates, worldSnapshotPacket) &&
@@ -503,7 +525,7 @@ namespace {
 		state.Log << "live_world_state_transport=" << (liveSnapshotTransportPassed ? "passed" : "failed") << '\n' << std::flush;
 		const bool utf8GlyphRenderPassed = g_FrameMan.DidDebugUTF8GlyphProbePass();
 		state.Log << "utf8_glyph_render_smoke=" << (utf8GlyphRenderPassed ? "passed" : "failed") << '\n' << std::flush;
-		success = success && utf8GlyphRenderPassed && state.HostSessionTestPassed && worldIdentityStable && worldSnapshotPassed && liveSnapshotTransportPassed;
+		success = success && utf8GlyphRenderPassed && state.HostSessionTestPassed && worldIdentityStable && replicaSmokePassed && worldSnapshotPassed && liveSnapshotTransportPassed;
 		const double elapsedSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - state.StartTime).count();
 		const double simulationSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - state.SimulationStartTime).count();
 		state.Log << "result=" << (success ? "passed" : "failed") << "\nupdates_done=" << state.SimulationUpdates
@@ -870,6 +892,7 @@ void RunGameLoop() {
 			g_PerformanceMan.NewPerformanceSample();
 			g_PerformanceMan.UpdateMSPSU();
 			g_TimerMan.UpdateSim();
+			if (worldStateClient && worldStateClient->IsConnected()) worldStateClient->Update();
 
 			g_PerformanceMan.StartPerformanceMeasurement(PerformanceMan::SimTotal);
 
@@ -896,15 +919,23 @@ void RunGameLoop() {
 			g_MusicMan.Update();
 
 			g_ActivityMan.LateUpdateGlobalScripts();
-			AdvanceDebugRunSimulation();
-			if (worldStateClient && worldStateClient->IsConnected()) {
-				worldStateClient->Update();
-				if (worldStateClientLog.is_open() && worldStateClient->GetReceivedSnapshotCount() >= worldStateClientLastLoggedSnapshotCount + 100) {
-					worldStateClientLastLoggedSnapshotCount = worldStateClient->GetReceivedSnapshotCount();
-					worldStateClientLog << "snapshots_received=" << worldStateClientLastLoggedSnapshotCount << '\n';
-					worldStateClientLog.flush();
+			if (worldStateClient && worldStateClient->HasSnapshot()) {
+				const std::uint32_t snapshotCount = worldStateClient->GetReceivedSnapshotCount();
+				if (snapshotCount != worldStateClientLastLoggedSnapshotCount) {
+					const WorldStateClientReplica::ApplyResult applied = worldStateClientReplica.Apply(worldStateClient->GetLatestSnapshot());
+					worldStateClientLastLoggedSnapshotCount = snapshotCount;
+					if (worldStateClientLog.is_open() && (snapshotCount == 1 || snapshotCount % 100 == 0)) {
+						worldStateClientLog << "snapshot=" << snapshotCount << " updated=" << applied.Updated << " spawned=" << applied.Spawned << " removed=" << applied.Removed
+						                    << " missing_presets=" << applied.MissingPresets << '\n'
+						                    << std::flush;
+						for (const std::string& detail : applied.MissingPresetDetails) {
+							worldStateClientLog << "missing=" << detail << '\n';
+						}
+						worldStateClientLog.flush();
+					}
 				}
 			}
+			AdvanceDebugRunSimulation();
 			if (worldStateServer && worldStateServer->IsStarted()) {
 				worldStateServer->Update(++worldStateServerSimulationTick);
 			}
@@ -1152,7 +1183,7 @@ int main(int argc, char** argv) {
 	}
 	if (worldStateClientLog.is_open()) {
 		if (worldStateClient) {
-			worldStateClientLog << "snapshots_received_total=" << worldStateClient->GetReceivedSnapshotCount() << '\n';
+			worldStateClientLog << "snapshots_applied_total=" << worldStateClientLastLoggedSnapshotCount << '\n';
 		}
 		worldStateClientLog.close();
 	}

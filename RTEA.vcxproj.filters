@@ -598,6 +598,9 @@
     <ClInclude Include="Source\Managers\WindowMan.h">
       <Filter>Managers</Filter>
     </ClInclude>
+    <ClInclude Include="Source\Managers\WorldStateClientReplica.h">
+      <Filter>Managers</Filter>
+    </ClInclude>
     <ClInclude Include="Resources\Credits.h">
       <Filter>Resources</Filter>
     </ClInclude>
@@ -1206,6 +1209,9 @@
       <Filter>GUI\Wrappers</Filter>
     </ClCompile>
     <ClCompile Include="Source\Managers\WindowMan.cpp">
+      <Filter>Managers</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Managers\WorldStateClientReplica.cpp">
       <Filter>Managers</Filter>
     </ClCompile>
     <ClCompile Include="Source\Menus\PauseMenuGUI.cpp">

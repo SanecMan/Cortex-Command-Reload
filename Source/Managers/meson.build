@@ -26,6 +26,7 @@ sources += files(
 'WorldStateTransport.cpp',
 'WorldStateSnapshotBuilder.cpp',
 'WorldStateClientSession.cpp',
+'WorldStateClientReplica.cpp',
 'WorldStateServerSession.cpp',
 'WindowMan.cpp'
 )
