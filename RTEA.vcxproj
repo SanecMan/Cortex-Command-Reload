@@ -1032,6 +1032,7 @@
     <ClCompile Include="Source\Managers\CameraMan.cpp" />
     <ClCompile Include="Source\Managers\ThreadMan.cpp" />
     <ClCompile Include="Source\Managers\WindowMan.cpp" />
+    <ClCompile Include="Source\Managers\WorldStateTransport.cpp" />
     <ClCompile Include="Source\Menus\LoadingScreen.cpp" />
     <ClCompile Include="Source\Menus\ModManagerGUI.cpp" />
     <ClCompile Include="Source\Menus\PauseMenuGUI.cpp" />
@@ -1367,6 +1368,7 @@
     <ClCompile Include="Source\System\Vector.cpp" />
     <ClCompile Include="Source\System\Writer.cpp" />
     <ClInclude Include="Source\Managers\DiscordPresence.h" />
+    <ClInclude Include="Source\Managers\WorldStateTransport.h" />
     <ClCompile Include="Source\Managers\AchievementMan.cpp" />
     <ClCompile Include="Source\Managers\ActivityMan.cpp" />
     <ClCompile Include="Source\Managers\AudioMan.cpp" />

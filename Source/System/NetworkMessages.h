@@ -31,7 +31,8 @@ namespace RTE {
 		ID_SRV_TERRAIN,
 		ID_SRV_POST_EFFECTS,
 		ID_SRV_SOUND_EVENTS,
-		ID_SRV_MUSIC_EVENTS
+		ID_SRV_MUSIC_EVENTS,
+		ID_CCR_WORLD_STATE
 	};
 
 // Pack the structs so 1 byte members are exactly 1 byte in memory instead of being aligned by 4 bytes (padding) so the correct representation is sent over the network without empty bytes consumed by alignment.

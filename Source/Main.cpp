@@ -55,6 +55,8 @@
 #include "System.h"
 #include "System/UTF8.h"
 #include "System/WorldStateProtocol.h"
+#include "WorldStateTransport.h"
+#include "NetworkMessages.h"
 #include "DiscordPresence.h"
 
 #include "RenderTarget.h"
@@ -75,6 +77,7 @@
 #include <list>
 #include <sstream>
 #include <string_view>
+#include <thread>
 #include <unordered_set>
 
 extern "C" {
@@ -217,6 +220,58 @@ namespace {
 		                                     !WorldStateProtocol::EncodeSnapshot(duplicateIdSnapshot, 100, duplicateIdPacket);
 		state.Log << "world_state_protocol_smoke=" << (networkRoundTripPassed && malformedNetworkRejected ? "passed" : "failed") << '\n' << std::flush;
 		if (!networkRoundTripPassed || !malformedNetworkRejected) {
+			return false;
+		}
+		bool transportLoopbackPassed = false;
+		bool transportServerStarted = false;
+		bool transportClientStarted = false;
+		std::size_t transportSendCount = 0;
+		std::size_t transportServerPacketCount = 0;
+		std::size_t transportClientPacketCount = 0;
+		std::uint16_t transportBoundPort = 0;
+		{
+			WorldStateTransport serverTransport;
+			WorldStateTransport clientTransport;
+			transportServerStarted = serverTransport.StartServer(0, 1, "127.0.0.1");
+			if (transportServerStarted) {
+				const unsigned short port = serverTransport.GetBoundPort();
+				transportBoundPort = port;
+				transportClientStarted = port != 0 && clientTransport.StartClient("127.0.0.1", port);
+				if (transportClientStarted) {
+					const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+					while (std::chrono::steady_clock::now() < deadline && !transportLoopbackPassed) {
+						std::vector<WorldStateTransport::ReceivedPacket> serverPackets;
+						std::vector<WorldStateTransport::ReceivedPacket> clientPackets;
+						serverTransport.Poll(serverPackets);
+						clientTransport.Poll(clientPackets);
+						transportServerPacketCount += serverPackets.size();
+						transportClientPacketCount += clientPackets.size();
+						for (const WorldStateTransport::ReceivedPacket& received : serverPackets) {
+							if (received.Identifier == ID_NEW_INCOMING_CONNECTION && serverTransport.SendWorldState(received.Sender, networkPacket)) {
+								++transportSendCount;
+							}
+						}
+						for (const WorldStateTransport::ReceivedPacket& received : clientPackets) {
+							if (received.Identifier != ID_CCR_WORLD_STATE) {
+								continue;
+							}
+							WorldStateProtocol::Snapshot transportedSnapshot;
+							transportLoopbackPassed = WorldStateProtocol::DecodeSnapshot(received.Payload, transportedSnapshot) &&
+							                         transportedSnapshot.Tick == networkSnapshot.Tick &&
+							                         transportedSnapshot.Objects.size() == networkSnapshot.Objects.size() &&
+							                         transportedSnapshot.Objects.front().PresetName == networkActor.PresetName;
+							break;
+						}
+						std::this_thread::sleep_for(std::chrono::milliseconds(1));
+					}
+				}
+			}
+		}
+		state.Log << "world_state_transport_setup=server:" << transportServerStarted << ",port:" << transportBoundPort
+		          << ",client:" << transportClientStarted << ",server_packets:" << transportServerPacketCount
+		          << ",client_packets:" << transportClientPacketCount << ",sends:" << transportSendCount
+		          << ",loopback:" << (transportLoopbackPassed ? "passed" : "failed") << '\n' << std::flush;
+		if (!transportLoopbackPassed) {
 			return false;
 		}
 		const std::string legacyCyrillicProbe("\xCF\xF0\xE8\xE2\xE5\xF2", 6);
