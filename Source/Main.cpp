@@ -309,7 +309,9 @@ namespace {
 			return false;
 		}
 		const std::string legacyCyrillicProbe("\xCF\xF0\xE8\xE2\xE5\xF2", 6);
-		const bool legacyEncodingPassed = UTF8::PreserveLegacyWindows1251(legacyCyrillicProbe) == "Привет" && UTF8::PreserveLegacyWindows1251("Already UTF-8: Привет") == "Already UTF-8: Привет";
+		const bool legacyEncodingPassed = UTF8::PreserveLegacyWindows1251(legacyCyrillicProbe) == "Привет" &&
+		                                  UTF8::PreserveLegacyWindows1251("ASCII content is unchanged") == "ASCII content is unchanged" &&
+		                                  UTF8::PreserveLegacyWindows1251("Already UTF-8: Привет") == "Already UTF-8: Привет";
 		state.Log << "legacy_windows_1251_smoke=" << (legacyEncodingPassed ? "passed" : "failed") << '\n' << std::flush;
 		if (!legacyEncodingPassed) {
 			return false;

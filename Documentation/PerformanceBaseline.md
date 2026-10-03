@@ -99,3 +99,7 @@ After adding the visible Cyrillic glyph check, a Windows `Debug Minimal|x64` smo
 
 
 The world-state protocol v2 Windows and Ubuntu 24.04 smoke runs both passed after adding Activity/Scene module identity to snapshots. The Linux offscreen Debug Minimal run completed in 12.04 s, including 8.22 s module loading; it ended with 49 actors, 295 particles, 12.79 ms average simulation update, 6.23 ms AI, 2.22 ms Lua scripts, and 605,982,720 resident bytes. This is a single Linux debug sample and is not directly comparable to the Windows timings or earlier Linux runs using different revisions and workloads.
+
+## ASCII fast path in legacy text conversion
+
+The Windows Debug Minimal build ran the same hidden `-debug-run 1` startup three times before and after adding an ASCII fast path to `UTF8::PreserveLegacyWindows1251`. Before: 23.5491 s, 25.4176 s, 24.2147 s (median 24.2147 s). After: 22.8374 s, 23.8866 s, 23.3706 s (median 23.3706 s), a 3.5% median reduction. All runs exited successfully; the after runs also passed UTF-8/Windows-1251, world-state protocol, and transient MOPixel replica smoke checks. The ranges overlap, so this is a small observed gain rather than a strong causal result. Per-module output on the last after run showed Base.rte index parsing at 8.44 s and Missions.rte at 9.65 s; these remain the main startup targets.

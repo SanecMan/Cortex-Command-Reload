@@ -154,7 +154,14 @@ inline void AppendCodepoint(std::string& output, std::uint32_t codePoint) {
 // Valid UTF-8 remains byte-for-byte unchanged; malformed sequences trigger a
 // whole-string Windows-1251 fallback, matching the legacy file encoding.
 inline std::string PreserveLegacyWindows1251(std::string_view text) {
-	if (IsValid(text)) {
+	bool hasNonAsciiByte = false;
+	for (unsigned char byte : text) {
+		if (byte >= 0x80) {
+			hasNonAsciiByte = true;
+			break;
+		}
+	}
+	if (!hasNonAsciiByte || IsValid(text)) {
 		return std::string(text);
 	}
 	static constexpr std::uint16_t c_Windows1251LowBytes[] = {
