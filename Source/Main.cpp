@@ -98,6 +98,11 @@ namespace {
 	std::string worldStateServerBindAddress = "0.0.0.0";
 	std::unique_ptr<WorldStateServerSession> worldStateServer;
 	std::uint32_t worldStateServerSimulationTick = 0;
+	std::string worldStateClientAddress;
+	unsigned short worldStateClientPort = 8000;
+	std::unique_ptr<WorldStateClientSession> worldStateClient;
+	std::ofstream worldStateClientLog;
+	std::uint32_t worldStateClientLastLoggedSnapshotCount = 0;
 
 	struct DebugRunState {
 		bool Enabled = false;
@@ -665,6 +670,16 @@ void HandleMainArgs(int argCount, char** argValue) {
 	for (int i = 0; i < argCount;) {
 		std::string currentArg = argValue[i];
 		bool lastArg = i + 1 == argCount;
+		if (currentArg == "-world-state-client" && i + 2 < argCount) {
+			unsigned int port = 0;
+			const std::string_view portArgument(argValue[i + 2]);
+			const auto parsed = std::from_chars(portArgument.data(), portArgument.data() + portArgument.size(), port);
+			if (parsed.ec == std::errc{} && parsed.ptr == portArgument.data() + portArgument.size() && port > 0 && port <= 65535) {
+				worldStateClientAddress = argValue[i + 1];
+				worldStateClientPort = static_cast<unsigned short>(port);
+				i += 2;
+			}
+		}
 		if (currentArg == "-world-state-server") {
 			worldStateServerRequested = true;
 			if (!lastArg) {
@@ -882,6 +897,14 @@ void RunGameLoop() {
 
 			g_ActivityMan.LateUpdateGlobalScripts();
 			AdvanceDebugRunSimulation();
+			if (worldStateClient && worldStateClient->IsConnected()) {
+				worldStateClient->Update();
+				if (worldStateClientLog.is_open() && worldStateClient->GetReceivedSnapshotCount() >= worldStateClientLastLoggedSnapshotCount + 100) {
+					worldStateClientLastLoggedSnapshotCount = worldStateClient->GetReceivedSnapshotCount();
+					worldStateClientLog << "snapshots_received=" << worldStateClientLastLoggedSnapshotCount << '\n';
+					worldStateClientLog.flush();
+				}
+			}
 			if (worldStateServer && worldStateServer->IsStarted()) {
 				worldStateServer->Update(++worldStateServerSimulationTick);
 			}
@@ -1013,6 +1036,57 @@ int main(int argc, char** argv) {
 		GetDebugRunState().SimulationStartTime = GetDebugRunState().ModuleLoadEndTime;
 		GetDebugRunState().Log << "stage=modules_loaded\n" << std::flush;
 	}
+	if (!worldStateClientAddress.empty()) {
+		worldStateClientLog.open("WorldStateClient.log", std::ios::out | std::ios::trunc);
+		worldStateClient = std::make_unique<WorldStateClientSession>();
+		if (!worldStateClient->Connect(worldStateClientAddress.c_str(), worldStateClientPort)) {
+			std::cerr << "[NETWORK] Failed to start client transport\n";
+			DestroyManagers();
+			allegro_exit();
+			SDL_Quit();
+			return EXIT_FAILURE;
+		}
+		const auto connectionDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(15);
+		while (!worldStateClient->HasSnapshot() && std::chrono::steady_clock::now() < connectionDeadline) {
+			worldStateClient->Update();
+			std::this_thread::sleep_for(std::chrono::milliseconds(10));
+		}
+		if (!worldStateClient->HasSnapshot()) {
+			std::cerr << "[NETWORK] Connected but no valid world snapshot arrived within 15 seconds\n";
+			worldStateClient.reset();
+			DestroyManagers();
+			allegro_exit();
+			SDL_Quit();
+			return EXIT_FAILURE;
+		}
+		const WorldStateProtocol::Snapshot& snapshot = worldStateClient->GetLatestSnapshot();
+		const int activityModule = snapshot.ActivityModuleName.empty() ? -1 : g_PresetMan.GetModuleID(snapshot.ActivityModuleName);
+		const Entity* activityPreset = g_PresetMan.GetEntityPreset(snapshot.ActivityClassName, snapshot.ActivityPreset, activityModule);
+		Entity* activityClone = activityPreset ? activityPreset->Clone() : nullptr;
+		Activity* activity = dynamic_cast<Activity*>(activityClone);
+		if (!activity) {
+			delete activityClone;
+		}
+		const int sceneResult = snapshot.SceneModuleName.empty() ? g_SceneMan.SetSceneToLoad(snapshot.ScenePreset)
+		                                                       : g_SceneMan.SetSceneToLoad(snapshot.ScenePreset, snapshot.SceneModuleName);
+		if (!activity || sceneResult < 0) {
+			std::cerr << "[NETWORK] Server Activity or Scene preset is unavailable locally; verify installed .rte modules\n";
+			delete activity;
+			worldStateClient.reset();
+			DestroyManagers();
+			allegro_exit();
+			SDL_Quit();
+			return EXIT_FAILURE;
+		}
+		g_ActivityMan.SetStartActivity(activity);
+		g_ActivityMan.SetRestartActivity();
+		if (worldStateClientLog.is_open()) {
+			worldStateClientLog << "connected=true\nactivity=" << snapshot.ActivityClassName << '/' << snapshot.ActivityPreset << "\nscene=" << snapshot.SceneModuleName << '/' << snapshot.ScenePreset
+			                    << "\nsnapshot_objects=" << snapshot.Objects.size() << "\n" << std::flush;
+		}
+		std::cout << "[NETWORK] Loaded server Activity '" << snapshot.ActivityPreset << "' and Scene '" << snapshot.ScenePreset << "' from module '"
+		          << snapshot.SceneModuleName << "'\n";
+	}
 	if (debugRun) {
 		g_ActivityMan.SetStartTutorialActivity();
 		g_ActivityMan.SetRestartActivity();
@@ -1041,9 +1115,9 @@ int main(int argc, char** argv) {
 
 		const bool activityInitialized = g_ActivityMan.Initialize();
 		if (!activityInitialized && !debugRun) {
-			if (!worldStateServerRequested) {
+			if (!worldStateServerRequested && worldStateClientAddress.empty()) {
 				RunMenuLoop();
-			} else {
+			} else if (!g_ActivityMan.ActivitySetToRestart()) {
 				DestroyManagers();
 				allegro_exit();
 				SDL_Quit();
@@ -1075,6 +1149,16 @@ int main(int argc, char** argv) {
 	if (worldStateServer) {
 		worldStateServer->Stop();
 		worldStateServer.reset();
+	}
+	if (worldStateClientLog.is_open()) {
+		if (worldStateClient) {
+			worldStateClientLog << "snapshots_received_total=" << worldStateClient->GetReceivedSnapshotCount() << '\n';
+		}
+		worldStateClientLog.close();
+	}
+	if (worldStateClient) {
+		worldStateClient->Disconnect();
+		worldStateClient.reset();
 	}
 	DiscordPresence::Shutdown();
 
