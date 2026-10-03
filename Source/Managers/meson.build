@@ -4,6 +4,7 @@ sources += files(
 'AudioMan.cpp',
 'CameraMan.cpp',
 'ConsoleMan.cpp',
+'DiscordPresence.cpp',
 'FrameMan.cpp',
 #'LuaMan.cpp',
 'GLResourceMan.cpp',
