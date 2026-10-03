@@ -62,3 +62,17 @@ The phase-level follow-up (`Debug Minimal|x64`) measured Base.rte at 14.92 s in 
 Additional `Debug Minimal|x64` runs on the same Ryzen 5 3500U machine measured module loading at 37.00 s, 37.26 s, and 52.79 s. The last run overlapped other machine activity, so these values demonstrate significant run-to-run variance and are not evidence of a startup optimization. Its phase counters attributed 17.06 s to `Base.rte` index parsing and 22.84 s to `Missions.rte` index parsing; folder scanning remained 0 ms. Across the measured runs, those two large indices dominate startup time.
 
 A generated flattened `MergedIndex.ini` was tested as a way to avoid repeated file opens, but the existing `Reader` rejected the flattened format at runtime. The generated files were removed and the approach is excluded from the performance results. Any future index-cache or parser change must preserve the engine's include and indentation semantics, then be compared with multiple idle warm-cache runs.
+
+## Optimization: case-sensitive path cache lookup
+
+`System::PathExistsCaseSensitive` built a cache of every path hash in the working tree, then searched it with `std::find` for every `.ini` include. That made each of thousands of lookups linear in the number of files. Replacing the vector with `std::unordered_set` preserves exact-hash matching while making lookups average constant time. No simulation or mod-facing behavior changes.
+
+Two comparable warm-cache 60-update `Debug Minimal|x64` Tutorial Bunker runs were measured before and three runs after on the same machine. All runs passed the gameplay smoke test and included the same actor/particle stress batches. Runs with unrelated background activity were excluded.
+
+| Measurement | Before median | After median | Change |
+| --- | ---: | ---: | ---: |
+| Data module loading | 37.13 s (2 comparable runs) | 24.23 s (3 runs) | −34.7% |
+| Total run | 42.85 s (2 runs) | 29.12 s (3 runs) | −32.1% |
+| Base.rte + Missions.rte index phases | 30.36 s (earlier instrumented run) | 18.61 s | −38.7% |
+
+The phase comparison uses an earlier instrumented baseline rather than the exact same run set, so the module-load median is the stronger before/after result. Individual simulation timings varied with the number and behavior of spawned particles and are not claimed as an effect of this path lookup change.
