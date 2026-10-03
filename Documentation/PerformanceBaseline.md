@@ -56,3 +56,9 @@ The same diagnostic build measured these module totals while loading, before pha
 Base.rte and Missions.rte account for most of the observed load. Neither currently has a `MergedIndex.ini`.
 
 The phase-level follow-up (`Debug Minimal|x64`) measured Base.rte at 14.92 s in index parsing and Missions.rte at 15.44 s. Both reported 0 ms in folder scanning; all included `.ini` content is read through the index hierarchy. That run loaded all modules in 41.24 s. The result points to `Reader`/INI parsing and preset construction as the next areas to profile.
+
+## 2026-10-03: repeated warm-start diagnostics
+
+Additional `Debug Minimal|x64` runs on the same Ryzen 5 3500U machine measured module loading at 37.00 s, 37.26 s, and 52.79 s. The last run overlapped other machine activity, so these values demonstrate significant run-to-run variance and are not evidence of a startup optimization. Its phase counters attributed 17.06 s to `Base.rte` index parsing and 22.84 s to `Missions.rte` index parsing; folder scanning remained 0 ms. Across the measured runs, those two large indices dominate startup time.
+
+A generated flattened `MergedIndex.ini` was tested as a way to avoid repeated file opens, but the existing `Reader` rejected the flattened format at runtime. The generated files were removed and the approach is excluded from the performance results. Any future index-cache or parser change must preserve the engine's include and indentation semantics, then be compared with multiple idle warm-cache runs.
