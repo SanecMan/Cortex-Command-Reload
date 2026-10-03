@@ -364,51 +364,68 @@ namespace {
 	bool VerifyWorldStateTransportLoopback(std::span<const std::uint8_t> packet, const WorldStateProtocol::Snapshot& expectedSnapshot, std::ofstream& log) {
 		bool loopbackPassed = false;
 		bool serverStarted = false;
-		bool clientStarted = false;
+		bool clientsStarted = false;
+		constexpr std::size_t expectedClientCount = 4;
 		std::size_t sendCount = 0;
 		std::size_t serverPacketCount = 0;
 		std::size_t clientPacketCount = 0;
+		std::size_t acceptedClientCount = 0;
+		std::size_t receivedClientCount = 0;
 		std::uint16_t boundPort = 0;
 		{
 			WorldStateTransport serverTransport;
-			WorldStateTransport clientTransport;
-			serverStarted = serverTransport.StartServer(0, 1, "127.0.0.1");
+			std::array<WorldStateTransport, expectedClientCount> clientTransports;
+			std::array<bool, expectedClientCount> clientReceivedSnapshot{};
+			serverStarted = serverTransport.StartServer(0, static_cast<unsigned short>(expectedClientCount), "127.0.0.1");
 			if (serverStarted) {
 				boundPort = serverTransport.GetBoundPort();
-				clientStarted = boundPort != 0 && clientTransport.StartClient("127.0.0.1", boundPort);
-				if (clientStarted) {
+				clientsStarted = boundPort != 0;
+				for (WorldStateTransport& clientTransport : clientTransports) {
+					clientsStarted = clientsStarted && clientTransport.StartClient("127.0.0.1", boundPort);
+				}
+				if (clientsStarted) {
+					bool broadcastSent = false;
 					const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-					while (std::chrono::steady_clock::now() < deadline && !loopbackPassed) {
+					while (std::chrono::steady_clock::now() < deadline && receivedClientCount < expectedClientCount) {
 						std::vector<WorldStateTransport::ReceivedPacket> serverPackets;
-						std::vector<WorldStateTransport::ReceivedPacket> clientPackets;
 						serverTransport.Poll(serverPackets);
-						clientTransport.Poll(clientPackets);
 						serverPacketCount += serverPackets.size();
-						clientPacketCount += clientPackets.size();
 						for (const WorldStateTransport::ReceivedPacket& received : serverPackets) {
-							if (received.Identifier == ID_NEW_INCOMING_CONNECTION && serverTransport.SendWorldState(received.Sender, packet)) {
-								++sendCount;
+							if (received.Identifier == ID_NEW_INCOMING_CONNECTION) {
+								++acceptedClientCount;
 							}
 						}
-		for (const WorldStateTransport::ReceivedPacket& received : clientPackets) {
-			if (received.Identifier != ID_CCR_WORLD_STATE) {
-				continue;
-			}
-			WorldStateProtocol::Snapshot transportedSnapshot;
-							loopbackPassed = WorldStateProtocol::DecodeSnapshot(received.Payload, transportedSnapshot) &&
-							                 transportedSnapshot.Tick == expectedSnapshot.Tick &&
-							                 transportedSnapshot.ScenePreset == expectedSnapshot.ScenePreset &&
-							                 transportedSnapshot.Objects.size() == expectedSnapshot.Objects.size() &&
-							                 (transportedSnapshot.Objects.empty() || transportedSnapshot.Objects.front().PresetName == expectedSnapshot.Objects.front().PresetName);
-							break;
+						if (!broadcastSent && acceptedClientCount == expectedClientCount) {
+							broadcastSent = serverTransport.BroadcastWorldState(packet);
+							sendCount += broadcastSent ? expectedClientCount : 0;
+						}
+					for (std::size_t clientIndex = 0; clientIndex < clientTransports.size(); ++clientIndex) {
+						std::vector<WorldStateTransport::ReceivedPacket> clientPackets;
+						clientTransports[clientIndex].Poll(clientPackets);
+						clientPacketCount += clientPackets.size();
+						for (const WorldStateTransport::ReceivedPacket& received : clientPackets) {
+							if (received.Identifier != ID_CCR_WORLD_STATE) {
+								continue;
+							}
+							WorldStateProtocol::Snapshot transportedSnapshot;
+							clientReceivedSnapshot[clientIndex] = WorldStateProtocol::DecodeSnapshot(received.Payload, transportedSnapshot) &&
+							                                         transportedSnapshot.Tick == expectedSnapshot.Tick &&
+							                                         transportedSnapshot.ScenePreset == expectedSnapshot.ScenePreset &&
+							                                         transportedSnapshot.Objects.size() == expectedSnapshot.Objects.size() &&
+							                                         (transportedSnapshot.Objects.empty() || transportedSnapshot.Objects.front().PresetName == expectedSnapshot.Objects.front().PresetName);
+							if (clientReceivedSnapshot[clientIndex]) {
+								++receivedClientCount;
+							}
+						}
 						}
 						std::this_thread::sleep_for(std::chrono::milliseconds(1));
 					}
+					loopbackPassed = broadcastSent && receivedClientCount == expectedClientCount;
 				}
 			}
 		}
 		log << "world_state_transport_setup=server:" << serverStarted << ",port:" << boundPort
-		    << ",client:" << clientStarted << ",server_packets:" << serverPacketCount
+		    << ",clients_started:" << clientsStarted << ",clients_accepted:" << acceptedClientCount << ",clients_received:" << receivedClientCount << ",server_packets:" << serverPacketCount
 		    << ",client_packets:" << clientPacketCount << ",sends:" << sendCount
 		    << ",loopback:" << (loopbackPassed ? "passed" : "failed") << '\n' << std::flush;
 		return loopbackPassed;
