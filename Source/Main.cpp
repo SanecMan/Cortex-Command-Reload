@@ -80,6 +80,7 @@
 #include <charconv>
 #include <chrono>
 #include <fstream>
+#include <limits>
 #include <filesystem>
 #include <memory>
 #include <sstream>
@@ -249,13 +250,26 @@ namespace {
 		networkActor.Team = 1;
 		networkActor.Flags = WorldStateProtocol::c_ObjectFlagActor;
 		networkSnapshot.Objects.push_back(networkActor);
+		WorldStateProtocol::ObjectState transientPixel;
+		transientPixel.NetworkId = 0x8877665544332211ULL;
+		transientPixel.ClassName = "MOPixel";
+		transientPixel.PresetName = "None";
+		transientPixel.PositionX = 5.0F;
+		transientPixel.PositionY = 6.0F;
+		transientPixel.PixelMaterialId = 1;
+		transientPixel.PixelColorIndex = 42;
+		transientPixel.PixelMass = 0.25F;
+		transientPixel.PixelLifetime = 350;
+		transientPixel.PixelSharpness = 0.8F;
+		transientPixel.Flags = WorldStateProtocol::c_ObjectFlagTransientPixel;
+		networkSnapshot.Objects.push_back(transientPixel);
 		std::vector<std::uint8_t> networkPacket;
 		WorldStateProtocol::Snapshot decodedSnapshot;
 		std::uint32_t decodedSequence = 0;
 		const bool networkRoundTripPassed = WorldStateProtocol::EncodeSnapshot(networkSnapshot, 99, networkPacket) &&
 		                                   WorldStateProtocol::DecodeSnapshot(networkPacket, decodedSnapshot, &decodedSequence) &&
 			                                   decodedSequence == 99 && decodedSnapshot.Tick == networkSnapshot.Tick &&
-			                                   decodedSnapshot.SceneRevision == networkSnapshot.SceneRevision && decodedSnapshot.Objects.size() == 1 &&
+			                                   decodedSnapshot.SceneRevision == networkSnapshot.SceneRevision && decodedSnapshot.Objects.size() == 2 &&
 			                                   decodedSnapshot.ActivityClassName == networkSnapshot.ActivityClassName &&
 			                                   decodedSnapshot.ActivityPreset == networkSnapshot.ActivityPreset &&
 			                                   decodedSnapshot.ActivityModuleName == networkSnapshot.ActivityModuleName &&
@@ -264,7 +278,12 @@ namespace {
 		                                   decodedSnapshot.Objects.front().NetworkId == networkActor.NetworkId &&
 		                                   decodedSnapshot.Objects.front().PresetName == networkActor.PresetName &&
 		                                   decodedSnapshot.Objects.front().PositionX == networkActor.PositionX &&
-		                                   decodedSnapshot.Objects.front().Team == networkActor.Team && decodedSnapshot.Objects.front().Flags == networkActor.Flags;
+		                                   decodedSnapshot.Objects.front().Team == networkActor.Team && decodedSnapshot.Objects.front().Flags == networkActor.Flags &&
+		                                   decodedSnapshot.Objects.back().PixelMaterialId == transientPixel.PixelMaterialId &&
+		                                   decodedSnapshot.Objects.back().PixelColorIndex == transientPixel.PixelColorIndex &&
+		                                   decodedSnapshot.Objects.back().PixelMass == transientPixel.PixelMass &&
+		                                   decodedSnapshot.Objects.back().PixelLifetime == transientPixel.PixelLifetime &&
+		                                   decodedSnapshot.Objects.back().PixelSharpness == transientPixel.PixelSharpness;
 		std::vector<std::uint8_t> truncatedNetworkPacket = networkPacket;
 		if (!truncatedNetworkPacket.empty()) truncatedNetworkPacket.pop_back();
 		std::vector<std::uint8_t> unsupportedVersionPacket = networkPacket;
@@ -508,6 +527,30 @@ namespace {
 		state.Log << "world_state_replica_smoke=" << (replicaSmokePassed ? "passed" : "failed") << " objects=" << worldSnapshot.Objects.size()
 		          << " first_updated=" << firstApply.Updated << " first_spawned=" << firstApply.Spawned << " removed=" << removalApply.Removed
 		          << " repeat_updated=" << repeatedApply.Updated << '\n' << std::flush;
+		WorldStateProtocol::Snapshot transientPixelSnapshot = worldSnapshot;
+		transientPixelSnapshot.Objects.clear();
+		WorldStateProtocol::ObjectState transientPixel;
+		transientPixel.NetworkId = std::numeric_limits<std::uint64_t>::max();
+		transientPixel.ClassName = "MOPixel";
+		transientPixel.PresetName = "None";
+		transientPixel.PositionX = 100000.0F;
+		transientPixel.PositionY = 100000.0F;
+		transientPixel.PixelMaterialId = g_MaterialAir;
+		transientPixel.PixelColorIndex = 42;
+		transientPixel.PixelMass = 0.25F;
+		transientPixel.PixelLifetime = 350;
+		transientPixel.PixelSharpness = 0.8F;
+		transientPixel.Flags = WorldStateProtocol::c_ObjectFlagTransientPixel;
+		transientPixelSnapshot.Objects.push_back(transientPixel);
+		WorldStateClientReplica transientPixelReplica;
+		const WorldStateClientReplica::ApplyResult transientPixelSpawn = transientPixelReplica.Apply(transientPixelSnapshot);
+		WorldStateProtocol::Snapshot removeTransientPixel = transientPixelSnapshot;
+		removeTransientPixel.Objects.clear();
+		const WorldStateClientReplica::ApplyResult transientPixelRemoval = transientPixelReplica.Apply(removeTransientPixel);
+		const bool transientPixelReplicaPassed = transientPixelSpawn.Spawned == 1 && transientPixelSpawn.MissingPresets == 0 && transientPixelRemoval.Removed == 1;
+		state.Log << "transient_mopixel_replica_smoke=" << (transientPixelReplicaPassed ? "passed" : "failed")
+		          << " spawned=" << transientPixelSpawn.Spawned << " removed=" << transientPixelRemoval.Removed
+		          << " missing=" << transientPixelSpawn.MissingPresets << '\n' << std::flush;
 		std::vector<std::uint8_t> worldSnapshotPacket;
 		WorldStateProtocol::Snapshot decodedWorldSnapshot;
 		const bool worldSnapshotPassed = WorldStateProtocol::EncodeSnapshot(worldSnapshot, state.SimulationUpdates, worldSnapshotPacket) &&
@@ -533,7 +576,7 @@ namespace {
 		std::ifstream unicodeFontProbe(unicodeFontFilePath, std::ios::binary);
 		state.Log << "utf8_unicode_font_path=" << unicodeFontFilePath.generic_string() << " exists=" << (unicodeFontProbe ? "yes" : "no") << '\n' << std::flush;
 		state.Log << "utf8_glyph_render_smoke=" << (utf8GlyphRenderPassed ? "passed" : "failed") << '\n' << std::flush;
-		success = success && utf8GlyphRenderPassed && state.HostSessionTestPassed && worldIdentityStable && replicaSmokePassed && worldSnapshotPassed && liveSnapshotTransportPassed;
+		success = success && utf8GlyphRenderPassed && state.HostSessionTestPassed && worldIdentityStable && replicaSmokePassed && transientPixelReplicaPassed && worldSnapshotPassed && liveSnapshotTransportPassed;
 		const double elapsedSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - state.StartTime).count();
 		const double simulationSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - state.SimulationStartTime).count();
 		state.Log << "result=" << (success ? "passed" : "failed") << "\nupdates_done=" << state.SimulationUpdates

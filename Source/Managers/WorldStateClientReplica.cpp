@@ -1,11 +1,14 @@
 #include "WorldStateClientReplica.h"
 
 #include "Actor.h"
+#include "Atom.h"
 #include "HeldDevice.h"
+#include "MOPixel.h"
 #include "MovableMan.h"
 #include "MovableObject.h"
 #include "PresetMan.h"
 #include "SceneObject.h"
+#include "SceneMan.h"
 #include "Vector.h"
 
 #include <array>
@@ -42,6 +45,18 @@ namespace {
 	}
 
 	MovableObject* CloneObject(const WorldStateProtocol::ObjectState& state, std::string& failureReason) {
+		if (state.Flags == WorldStateProtocol::c_ObjectFlagTransientPixel) {
+			const Material* material = g_SceneMan.GetMaterialFromID(state.PixelMaterialId);
+			if (!material || state.PixelColorIndex > 255) {
+				failureReason = "invalid-transient-pixel";
+				return nullptr;
+			}
+			auto* pixel = new MOPixel(Color(state.PixelColorIndex), state.PixelMass, Vector(state.PositionX, state.PositionY),
+			                          Vector(state.VelocityX, state.VelocityY),
+			                          new Atom(Vector(), material, nullptr, Color(state.PixelColorIndex), 0), state.PixelLifetime);
+			pixel->SetSharpness(state.PixelSharpness);
+			return pixel;
+		}
 		const int moduleId = state.ModuleName.empty() ? -1 : g_PresetMan.GetModuleID(state.ModuleName);
 		const Entity* preset = g_PresetMan.GetEntityPreset(state.ClassName, state.PresetName, moduleId);
 		if (!preset) {

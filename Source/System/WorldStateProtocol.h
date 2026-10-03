@@ -17,7 +17,7 @@
 namespace RTE::WorldStateProtocol {
 
 inline constexpr std::uint32_t c_Magic = 0x31524343; // "CCR1" on the wire.
-inline constexpr std::uint16_t c_Version = 2;
+inline constexpr std::uint16_t c_Version = 3;
 inline constexpr std::size_t c_HeaderSize = 16;
 inline constexpr std::size_t c_MaxPacketSize = 4 * 1024 * 1024;
 inline constexpr std::size_t c_MaxObjects = 65535;
@@ -25,6 +25,7 @@ inline constexpr std::size_t c_MaxStringBytes = 1024;
 inline constexpr std::uint16_t c_ObjectFlagActor = 0x0001;
 inline constexpr std::uint16_t c_ObjectFlagItem = 0x0002;
 inline constexpr std::uint16_t c_ObjectFlagParticle = 0x0004;
+inline constexpr std::uint16_t c_ObjectFlagTransientPixel = 0x0008;
 inline constexpr std::int16_t c_NoTeam = -1;
 inline constexpr std::int16_t c_MaxTeamCount = 4;
 
@@ -49,6 +50,11 @@ struct ObjectState {
 	float Health = 0.0F;
 	std::int16_t Team = -1;
 	std::uint16_t Flags = 0;
+	std::uint8_t PixelMaterialId = 0;
+	std::uint16_t PixelColorIndex = 0;
+	float PixelMass = 0.0F;
+	std::uint32_t PixelLifetime = 0;
+	float PixelSharpness = 1.0F;
 };
 
 struct Snapshot {
@@ -119,7 +125,8 @@ namespace Detail {
 		       std::isfinite(object.PositionX) && std::isfinite(object.PositionY) && std::isfinite(object.VelocityX) &&
 		       std::isfinite(object.VelocityY) && std::isfinite(object.Rotation) && std::isfinite(object.AngularVelocity) &&
 		       std::isfinite(object.Health) && object.Team >= c_NoTeam && object.Team < c_MaxTeamCount &&
-		       (object.Flags == c_ObjectFlagActor || object.Flags == c_ObjectFlagItem || object.Flags == c_ObjectFlagParticle);
+		       (object.Flags == c_ObjectFlagActor || object.Flags == c_ObjectFlagItem || object.Flags == c_ObjectFlagParticle || object.Flags == c_ObjectFlagTransientPixel) &&
+		       object.PixelColorIndex <= 255 && std::isfinite(object.PixelMass) && object.PixelMass >= 0.0F && std::isfinite(object.PixelSharpness);
 	}
 } // namespace Detail
 
@@ -161,6 +168,13 @@ inline bool EncodeSnapshot(const Snapshot& snapshot, std::uint32_t sequence, std
 		Detail::WriteFloat(payload, object.Health);
 		Detail::WriteUnsigned(payload, static_cast<std::uint16_t>(object.Team), sizeof(object.Team));
 		Detail::WriteUnsigned(payload, object.Flags, sizeof(object.Flags));
+		if (object.Flags == c_ObjectFlagTransientPixel) {
+			Detail::WriteUnsigned(payload, object.PixelMaterialId, sizeof(object.PixelMaterialId));
+			Detail::WriteUnsigned(payload, object.PixelColorIndex, sizeof(object.PixelColorIndex));
+			Detail::WriteFloat(payload, object.PixelMass);
+			Detail::WriteUnsigned(payload, object.PixelLifetime, sizeof(object.PixelLifetime));
+			Detail::WriteFloat(payload, object.PixelSharpness);
+		}
 		if (payload.size() + c_HeaderSize > c_MaxPacketSize) {
 			return false;
 		}
@@ -222,6 +236,15 @@ inline bool DecodeSnapshot(std::span<const std::uint8_t> packet, Snapshot& snaps
 		object.Team = std::bit_cast<std::int16_t>(static_cast<std::uint16_t>(value));
 		if (!Detail::ReadUnsigned(packet, offset, sizeof(object.Flags), value)) return false;
 		object.Flags = static_cast<std::uint16_t>(value);
+		if (object.Flags == c_ObjectFlagTransientPixel) {
+			if (!Detail::ReadUnsigned(packet, offset, sizeof(object.PixelMaterialId), value)) return false;
+			object.PixelMaterialId = static_cast<std::uint8_t>(value);
+			if (!Detail::ReadUnsigned(packet, offset, sizeof(object.PixelColorIndex), value)) return false;
+			object.PixelColorIndex = static_cast<std::uint16_t>(value);
+			if (!Detail::ReadFloat(packet, offset, object.PixelMass) || !Detail::ReadUnsigned(packet, offset, sizeof(object.PixelLifetime), value)) return false;
+			object.PixelLifetime = static_cast<std::uint32_t>(value);
+			if (!Detail::ReadFloat(packet, offset, object.PixelSharpness)) return false;
+		}
 		if (!Detail::ValidObject(object) || !networkIds.insert(object.NetworkId).second) return false;
 		decoded.Objects.push_back(std::move(object));
 	}

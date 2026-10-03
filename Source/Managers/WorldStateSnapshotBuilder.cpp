@@ -6,6 +6,7 @@
 #include "HeldDevice.h"
 #include "MovableMan.h"
 #include "MovableObject.h"
+#include "MOPixel.h"
 #include "Scene.h"
 #include "SceneMan.h"
 
@@ -95,6 +96,13 @@ WorldStateProtocol::Snapshot WorldStateSnapshotBuilder::Capture(std::uint32_t ti
 			object.Flags = WorldStateProtocol::c_ObjectFlagActor;
 		} else if (dynamic_cast<const HeldDevice*>(movableObject)) {
 			object.Flags = WorldStateProtocol::c_ObjectFlagItem;
+		} else if (const auto* pixel = dynamic_cast<const MOPixel*>(movableObject); pixel && (object.PresetName.empty() || object.PresetName == "None")) {
+			object.Flags = WorldStateProtocol::c_ObjectFlagTransientPixel;
+			object.PixelMaterialId = pixel->GetMaterial()->GetIndex();
+			object.PixelColorIndex = static_cast<std::uint16_t>(pixel->GetColorIndex());
+			object.PixelMass = pixel->GetMass();
+			object.PixelLifetime = static_cast<std::uint32_t>(pixel->GetLifetime());
+			object.PixelSharpness = pixel->GetSharpness();
 		} else {
 			object.Flags = WorldStateProtocol::c_ObjectFlagParticle;
 		}
