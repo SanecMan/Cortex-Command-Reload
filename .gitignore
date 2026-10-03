@@ -99,6 +99,7 @@ User[dD]ata/
 allegro.log
 AbortScreen.*
 AbortLog.txt
+AbortDump.dmp
 MemCleanupInfo.txt
 LogPublish.txt
 LogLoading.txt

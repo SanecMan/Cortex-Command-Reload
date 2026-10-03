@@ -63,12 +63,39 @@ static LONG WINAPI RTEWindowsExceptionHandler([[maybe_unused]] EXCEPTION_POINTER
 		if (errorMessageID == 0) {
 			return "";
 		}
-		LPSTR messageBuffer = nullptr;
+		LPWSTR messageBuffer = nullptr;
 		DWORD messageFlags = FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS;
 
 		// This bullshit makes the error string and returns the size because we can't know it in advance. Don't think we actually care about the size when we construct string from a buffer but whatever.
-		size_t messageSize = FormatMessage(messageFlags, nullptr, errorMessageID, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), reinterpret_cast<LPSTR>(&messageBuffer), 0, nullptr);
-		std::string message(messageBuffer, messageSize);
+		const DWORD messageSize = FormatMessageW(messageFlags, nullptr, errorMessageID, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), reinterpret_cast<LPWSTR>(&messageBuffer), 0, nullptr);
+		if (messageSize == 0 || !messageBuffer) {
+			return "Windows error " + std::to_string(errorMessageID);
+		}
+		std::string message;
+		message.reserve(messageSize * 3);
+		for (DWORD i = 0; i < messageSize; ++i) {
+			std::uint32_t codePoint = messageBuffer[i];
+			if (codePoint >= 0xD800 && codePoint <= 0xDBFF && i + 1 < messageSize && messageBuffer[i + 1] >= 0xDC00 && messageBuffer[i + 1] <= 0xDFFF) {
+				codePoint = 0x10000 + ((codePoint - 0xD800) << 10) + (messageBuffer[++i] - 0xDC00);
+			} else if (codePoint >= 0xD800 && codePoint <= 0xDFFF) {
+				codePoint = 0xFFFD;
+			}
+			if (codePoint <= 0x7F) {
+				message.push_back(static_cast<char>(codePoint));
+			} else if (codePoint <= 0x7FF) {
+				message.push_back(static_cast<char>(0xC0 | (codePoint >> 6)));
+				message.push_back(static_cast<char>(0x80 | (codePoint & 0x3F)));
+			} else if (codePoint <= 0xFFFF) {
+				message.push_back(static_cast<char>(0xE0 | (codePoint >> 12)));
+				message.push_back(static_cast<char>(0x80 | ((codePoint >> 6) & 0x3F)));
+				message.push_back(static_cast<char>(0x80 | (codePoint & 0x3F)));
+			} else {
+				message.push_back(static_cast<char>(0xF0 | (codePoint >> 18)));
+				message.push_back(static_cast<char>(0x80 | ((codePoint >> 12) & 0x3F)));
+				message.push_back(static_cast<char>(0x80 | ((codePoint >> 6) & 0x3F)));
+				message.push_back(static_cast<char>(0x80 | (codePoint & 0x3F)));
+			}
+		}
 		LocalFree(messageBuffer);
 		return message;
 	};
@@ -148,11 +175,26 @@ static LONG WINAPI RTEWindowsExceptionHandler([[maybe_unused]] EXCEPTION_POINTER
 	std::stringstream exceptionDescription;
 	DWORD exceptionCode = exceptPtr->ExceptionRecord->ExceptionCode;
 	size_t exceptionAddress = reinterpret_cast<size_t>(exceptPtr->ExceptionRecord->ExceptionAddress);
-
 	if (exceptionCode == EXCEPTION_BREAKPOINT) {
-		// Advance to the next instruction otherwise this handler will be called for all eternity.
+		// Advance the instruction pointer instead of treating this as a crash.
 		exceptPtr->ContextRecord->Rip++;
 		return EXCEPTION_CONTINUE_EXECUTION;
+	}
+
+	bool crashDumpSaved = false;
+	HANDLE crashDumpFile = CreateFileW(L"AbortDump.dmp", GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+	if (crashDumpFile != INVALID_HANDLE_VALUE) {
+		MINIDUMP_EXCEPTION_INFORMATION exceptionInfo{};
+		exceptionInfo.ThreadId = GetCurrentThreadId();
+		exceptionInfo.ExceptionPointers = exceptPtr;
+		exceptionInfo.ClientPointers = FALSE;
+		crashDumpSaved = MiniDumpWriteDump(processHandle, GetCurrentProcessId(), crashDumpFile,
+		                                  static_cast<MINIDUMP_TYPE>(MiniDumpNormal | MiniDumpWithThreadInfo | MiniDumpWithIndirectlyReferencedMemory),
+		                                  &exceptionInfo, nullptr, nullptr) != FALSE;
+		CloseHandle(crashDumpFile);
+		if (!crashDumpSaved) {
+			DeleteFileW(L"AbortDump.dmp");
+		}
 	}
 
 	std::string symbolNameAtAddress = getSymbolNameFromAddress(processHandle, exceptionAddress);
@@ -160,6 +202,9 @@ static LONG WINAPI RTEWindowsExceptionHandler([[maybe_unused]] EXCEPTION_POINTER
 
 	exceptionDescription << getExceptionDescriptionFromCode(exceptionCode) << " at address 0x" << std::uppercase << std::hex << exceptionAddress << ".\n\n"
 	                     << symbolNameAtAddress << std::endl;
+	if (crashDumpSaved) {
+		exceptionDescription << "Crash dump saved to 'AbortDump.dmp'.\n";
+	}
 
 	backward::StackTrace st;
 	st.load_here(32, exceptPtr->ContextRecord);

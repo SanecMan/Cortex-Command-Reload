@@ -14,4 +14,6 @@ The process exits with code 0 only when the smoke run completes successfully. A 
 
 The resident-memory measurement is the Windows working set or Linux resident pages, in bytes; `0` means that the platform query failed or is not implemented. The network check uses four local client peers and does not connect remote gameplay clients.
 
+On Windows, an unhandled exception also writes `AbortDump.dmp` next to `AbortLog.txt` and `AbortScreen.png`. The dump is overwritten by the next crash and includes thread state plus memory referenced from thread stacks; it can contain game/session data, so review it before sharing it publicly. Windows system error text in the crash dialog is converted to UTF-8 before it is passed to SDL.
+
 This is a repeatable smoke and stress run, not a headless server or a multi-scene benchmark yet. It uses real game content and the existing Lua object creation API.
