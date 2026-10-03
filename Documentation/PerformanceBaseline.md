@@ -107,3 +107,21 @@ The Windows Debug Minimal build ran the same hidden `-debug-run 1` startup three
 ## World-state snapshot compression and live Linux client
 
 LZ4 framing was measured on stress-scene snapshots and only retained when smaller than the original packet. A Windows snapshot compressed from 28,694 to 9,380 bytes (67.3% less); a Linux snapshot compressed from 27,686 to 9,006 bytes (67.5% less). On the configured 20 snapshots/second cadence, this corresponds to about 188 KB/s instead of 574 KB/s for the Windows sample, before RakNet/UDP overhead. The Linux x64 build passed the offscreen debug smoke and a separate server/client process test; the client connected, loaded the server Activity and Scene, applied 156 snapshots, and reported zero missing presets. This validates transport compression and replica application, not yet authoritative input handling or full simulation-state synchronization.
+
+## Reader stream-buffer benchmark: 2026-10-04
+
+The old parser used `std::istream::peek/get/ignore` for each byte while reading property names, values, whitespace and comments. The optimized parser reads through the same stream buffer directly and retains the existing Reader grammar, UTF-8/Windows-1251 handling and recursive include semantics.
+
+Measured on this Windows x64 machine with `Debug Minimal`, the same installed modules, Tutorial Bunker, and `-debug-run 60`. Runs were made in an old/new/old source sequence with warm filesystem caches. Both versions passed the automated run, UTF-8 glyph probe and world-state transport smoke.
+
+| Measurement | Existing Reader | Buffered Reader |
+| --- | ---: | ---: |
+| Data module load, conservative paired run | 57.47 s | 32.74 s |
+| Base.rte index/include parsing | 25.80 s | 11.34 s |
+| Missions.rte index/include parsing | 17.75 s | 10.74 s |
+
+The observed total load reduction was 43%. A second buffered run measured 29.60 s, so the single paired comparison is reported conservatively; cache and system activity still affect totals. This optimization changes only how bytes are fetched from each existing stream, not the on-disk data format or module order.
+
+The rebuilt Windows `Final|x64` executable also passed `-debug-run 60` and measured 7.18 s module loading in a warm-cache run. This single release sample is not the paired comparison above.
+
+A paired Ubuntu 24.04 x86_64 offscreen run on the configured Linux machine measured 3.16 s with the existing Reader and 2.96 s with the buffered Reader (about 6%). Both passed the same 60-update UTF-8 and world-state smoke. Its absolute times differ from Windows because this machine, filesystem cache and build setup differ; only the within-machine pair is relevant.

@@ -9,6 +9,26 @@
 
 using namespace RTE;
 
+namespace {
+	int PeekBufferedCharacter(std::istream& stream) {
+		const auto character = stream.rdbuf()->sgetc();
+		if (std::char_traits<char>::eq_int_type(character, std::char_traits<char>::eof())) {
+			stream.setstate(std::ios::eofbit);
+			return -1;
+		}
+		return std::char_traits<char>::to_int_type(std::char_traits<char>::to_char_type(character));
+	}
+
+	int GetBufferedCharacter(std::istream& stream) {
+		const auto character = stream.rdbuf()->sbumpc();
+		if (std::char_traits<char>::eq_int_type(character, std::char_traits<char>::eof())) {
+			stream.setstate(std::ios::eofbit);
+			return -1;
+		}
+		return std::char_traits<char>::to_int_type(std::char_traits<char>::to_char_type(character));
+	}
+}
+
 void Reader::Clear() {
 	m_Stream = nullptr;
 	m_FilePath.clear();
@@ -118,13 +138,13 @@ std::string Reader::ReadLine() {
 
 	std::string retString;
 	char temp;
-	char peek = static_cast<char>(m_Stream->peek());
+	int peek = PeekBufferedCharacter(*m_Stream);
 
 	while (peek != '\n' && peek != '\r' && peek != '\t') {
-		temp = static_cast<char>(m_Stream->get());
+		temp = static_cast<char>(GetBufferedCharacter(*m_Stream));
 
 		// Check for line comment "//"
-		if (peek == '/' && m_Stream->peek() == '/') {
+		if (peek == '/' && PeekBufferedCharacter(*m_Stream) == '/') {
 			m_Stream->unget();
 			break;
 		}
@@ -137,7 +157,7 @@ std::string Reader::ReadLine() {
 		}
 
 		retString.append(1, temp);
-		peek = static_cast<char>(m_Stream->peek());
+		peek = PeekBufferedCharacter(*m_Stream);
 	}
 	return UTF8::PreserveLegacyWindows1251(TrimString(retString));
 }
@@ -147,19 +167,19 @@ std::string Reader::ReadPropName() {
 
 	std::string retString;
 	char temp;
-	char peek;
+	int peek;
 
 	while (true) {
-		peek = static_cast<char>(m_Stream->peek());
+		peek = PeekBufferedCharacter(*m_Stream);
 		if (peek == '=') {
-			m_Stream->ignore(1);
+			GetBufferedCharacter(*m_Stream);
 			break;
 		}
 		if (peek == '\n' || peek == '\r' || peek == '\t') {
 			ReportError("Property name wasn't followed by a value");
 		}
 
-		temp = static_cast<char>(m_Stream->get());
+		temp = static_cast<char>(GetBufferedCharacter(*m_Stream));
 		if (m_Stream->eof()) {
 			EndIncludeFile();
 			break;
@@ -222,13 +242,13 @@ std::string Reader::TrimString(const std::string& stringToTrim) const {
 }
 
 bool Reader::DiscardEmptySpace() {
-	char peek;
+	int peek;
 	int indent = 0;
 	int leadingSpaceCount = 0;
 	bool discardedLine = false;
 
 	while (true) {
-		peek = static_cast<char>(m_Stream->peek());
+		peek = PeekBufferedCharacter(*m_Stream);
 
 		// If we have hit the end and don't have any files to resume, then quit and indicate that
 		if (m_Stream->eof()) {
@@ -242,11 +262,11 @@ bool Reader::DiscardEmptySpace() {
 		// Discard spaces
 		if (peek == ' ') {
 			leadingSpaceCount++;
-			m_Stream->ignore(1);
+			GetBufferedCharacter(*m_Stream);
 			// Discard tabs, and count them
 		} else if (peek == '\t') {
 			indent++;
-			m_Stream->ignore(1);
+			GetBufferedCharacter(*m_Stream);
 			// Discard newlines and reset the tab count for the new line, also count the lines
 		} else if (peek == '\n' || peek == '\r') {
 			// So we don't count lines twice when there are both newline and carriage return at the end of lines
@@ -260,33 +280,33 @@ bool Reader::DiscardEmptySpace() {
 			indent = 0;
 			leadingSpaceCount = 0;
 			discardedLine = true;
-			m_Stream->ignore(1);
+			GetBufferedCharacter(*m_Stream);
 
 			// Comment line?
-		} else if (m_Stream->peek() == '/') {
-			char temp = static_cast<char>(m_Stream->get());
+		} else if (PeekBufferedCharacter(*m_Stream) == '/') {
+			char temp = static_cast<char>(GetBufferedCharacter(*m_Stream));
 
 			// Confirm that it's a comment line, if so discard it and continue
-			if (m_Stream->peek() == '/') {
-				while (m_Stream->peek() != '\n' && m_Stream->peek() != '\r' && !m_Stream->eof()) {
-					m_Stream->ignore(1);
+			if (PeekBufferedCharacter(*m_Stream) == '/') {
+				while (PeekBufferedCharacter(*m_Stream) != '\n' && PeekBufferedCharacter(*m_Stream) != '\r' && !m_Stream->eof()) {
+					GetBufferedCharacter(*m_Stream);
 				}
 				// Block comment
-			} else if (m_Stream->peek() == '*') {
+			} else if (PeekBufferedCharacter(*m_Stream) == '*') {
 				int openBlockComments = 1;
 				m_BlockCommentOpenTagLines.emplace(m_CurrentLine);
 
 				char temp2 = 0;
 				while (openBlockComments > 0 && !m_Stream->eof()) {
-					temp2 = static_cast<char>(m_Stream->get());
+					temp2 = static_cast<char>(GetBufferedCharacter(*m_Stream));
 					if (temp2 == '\n') {
 						++m_CurrentLine;
 					}
 
 					// Find the matching close tag.
-					if (!(temp2 == '*' && m_Stream->peek() == '/')) {
+					if (!(temp2 == '*' && PeekBufferedCharacter(*m_Stream) == '/')) {
 						// Check if a nested block comment open tag.
-						if (temp2 == '/' && m_Stream->peek() == '*') {
+						if (temp2 == '/' && PeekBufferedCharacter(*m_Stream) == '*') {
 							openBlockComments++;
 							m_BlockCommentOpenTagLines.emplace(m_CurrentLine);
 						}
@@ -297,7 +317,7 @@ bool Reader::DiscardEmptySpace() {
 				}
 				// Discard that final '/'.
 				if (!m_Stream->eof()) {
-					m_Stream->ignore(1);
+					GetBufferedCharacter(*m_Stream);
 				} else if (openBlockComments > 0) {
 					ReportError("File stream ended with an open block comment!\nCouldn't find closing tag for block comment opened on line " + std::to_string(m_BlockCommentOpenTagLines.top()) + ".\n");
 				}
