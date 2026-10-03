@@ -259,7 +259,7 @@ namespace {
 		}
 		const bool unicodePathResolved = unicodeFileWritten && System::PathExistsCaseSensitive(unicodePath);
 		std::error_code unicodeFileCleanupError;
-		std::filesystem::remove(std::filesystem::u8path(unicodePath), unicodeFileCleanupError);
+		std::filesystem::remove(UTF8::PathFromString(unicodePath), unicodeFileCleanupError);
 		const bool unicodeFilePathPassed = unicodeFileWritten && unicodeFileRead && unicodePathResolved && !unicodeFileCleanupError;
 		state.Log << "utf8_file_path_smoke=" << (unicodeFilePathPassed ? "passed" : "failed") << '\n' << std::flush;
 		if (!unicodeFilePathPassed) {

@@ -379,11 +379,11 @@ std::string System::ExtractZippedDataModule(const std::string& zippedModulePath)
 }
 
 int System::ASCIIFileContainsString(const std::string& filePath, const std::string_view& findString) {
-	std::ifstream inputStream(std::filesystem::u8path(filePath), std::ios::binary);
+	std::ifstream inputStream(UTF8::PathFromString(filePath), std::ios::binary);
 	if (!inputStream.is_open()) {
 		return -1;
 	} else {
-		size_t fileSize = static_cast<size_t>(std::filesystem::file_size(std::filesystem::u8path(filePath)));
+		size_t fileSize = static_cast<size_t>(std::filesystem::file_size(UTF8::PathFromString(filePath)));
 		std::vector<unsigned char> rawData(fileSize);
 		inputStream.read(reinterpret_cast<char*>(&rawData[0]), fileSize);
 		inputStream.close();
