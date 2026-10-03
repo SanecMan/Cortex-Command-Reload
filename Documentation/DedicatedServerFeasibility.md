@@ -6,11 +6,11 @@ A dedicated server is technically feasible without replacing the simulation engi
 
 ## Current architecture
 
-- `NetworkServer` receives `MsgInput` and gates simulation on frame delivery/consumption. Its start path binds an IPv4 socket and hardcodes four connections (`Source/Managers/NetworkServer.cpp`, `Source/Managers/NetworkServer.h`).
-- The server maintains per-client 8-bit game and GUI buffers, compression state, frame queues, terrain changes, and send threads. It sends frame setup and pixel-line/box messages (`NetworkServer::SendFrame`, `SendFrameSetupMsg`, `SendSceneData`).
-- `NetworkClient` reconstructs those images into `FrameMan` network buffers. It also applies scene setup and terrain updates (`Source/Managers/NetworkClient.cpp`). `NetworkMessages.h` confirms the wire message set is frame/pixel-oriented; there are no replicated movable-object or actor-state messages.
-- This means simulation is authoritative on the host process today, but the host is also a regular graphical game instance. This is not a dedicated-server executable or world-state replication.
-- Multiplayer sources are commented out of `Source/Managers/meson.build` and `Source/Activities/meson.build`; they are not part of the maintained Meson target. The Windows project also needs an explicit check before relying on it as a build path.
+- In the legacy, currently unbuilt `NetworkServer` source, the server receives `MsgInput` and gates simulation on frame delivery/consumption. Its start path binds an IPv4 socket and hardcodes four connections (`Source/Managers/NetworkServer.cpp`, `Source/Managers/NetworkServer.h`).
+- That legacy server maintains per-client 8-bit game and GUI buffers, compression state, frame queues, terrain changes, and send threads. It sends frame setup and pixel-line/box messages (`NetworkServer::SendFrame`, `SendFrameSetupMsg`, `SendSceneData`).
+- The legacy `NetworkClient` reconstructs those images into `FrameMan` network buffers. It also applies scene setup and terrain updates (`Source/Managers/NetworkClient.cpp`). `Source/System/NetworkMessages.h` confirms that the legacy wire message set is frame/pixel-oriented; there are no replicated movable-object or actor-state messages.
+- The old protocol made the host process authoritative, but tied hosting to a regular graphical game instance. The current executables do not include that networking code, so there is no active multiplayer mode to reuse as a working dedicated server or world-state replication.
+- Multiplayer sources are commented out of `Source/Managers/meson.build` and `Source/Activities/meson.build`, and are also absent from the `ClCompile` items in `RTEA.vcxproj`. The framebuffer-based networking code is therefore a legacy implementation that is not built into either current client target; it cannot be treated as a working compatibility server without first restoring and validating it.
 - `Main.cpp` unconditionally calls `SDL_Init(SDL_INIT_VIDEO | ...)` before manager initialization. `WindowMan`, OpenGL resources, `FrameMan`, audio and input are global managers. A server mode therefore needs explicit client/server manager initialization, not just hiding the window.
 - `c_MaxClients` is 4 and affects shared arrays in activities, audio and networking. Raising the player count requires auditing all these fixed-size interfaces and content assumptions.
 
