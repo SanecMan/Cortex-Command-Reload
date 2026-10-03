@@ -18,6 +18,16 @@ void SettingsMan::Clear() {
 	m_SettingsPath = System::GetUserdataDirectory() + "Settings.ini";
 	m_SettingsNeedOverwrite = false;
 	m_DiscordPresenceEnabled = true;
+	m_FPSLimit = 0;
+	m_PerformancePreset = 0;
+	m_ParticleLimitLevel = 0;
+	m_GibLimitLevel = 0;
+	m_DebrisLifetimeLevel = 0;
+	m_ParticleLifetimePercent = 100;
+	m_MaximumMovableObjects = 0;
+	m_BackgroundEffectsLevel = 0;
+	m_ScreenEffectsLevel = 0;
+	m_GoreDensityPercent = 100;
 
 	m_FlashOnBrainDamage = true;
 	m_BlipOnRevealUnseen = false;
@@ -105,6 +115,30 @@ void SettingsMan::UpdateSettingsFile() const {
 	g_SettingsMan.Save(settingsWriter);
 }
 
+void SettingsMan::SetPerformancePreset(int preset) {
+	m_PerformancePreset = std::clamp(preset, 0, 4);
+	switch (m_PerformancePreset) {
+		case 0: // Original visual density.
+			m_ParticleLimitLevel = 0; m_GibLimitLevel = 0; m_DebrisLifetimeLevel = 0; m_ParticleLifetimePercent = 100;
+			m_MaximumMovableObjects = 0; m_BackgroundEffectsLevel = 0; m_ScreenEffectsLevel = 0; m_GoreDensityPercent = 100;
+			break;
+		case 1:
+			m_ParticleLimitLevel = 1; m_GibLimitLevel = 1; m_DebrisLifetimeLevel = 1; m_ParticleLifetimePercent = 100;
+			m_MaximumMovableObjects = 15000; m_BackgroundEffectsLevel = 0; m_ScreenEffectsLevel = 0; m_GoreDensityPercent = 100;
+			break;
+		case 2:
+			m_ParticleLimitLevel = 2; m_GibLimitLevel = 2; m_DebrisLifetimeLevel = 2; m_ParticleLifetimePercent = 75;
+			m_MaximumMovableObjects = 10000; m_BackgroundEffectsLevel = 1; m_ScreenEffectsLevel = 1; m_GoreDensityPercent = 75;
+			break;
+		case 3:
+			m_ParticleLimitLevel = 4; m_GibLimitLevel = 3; m_DebrisLifetimeLevel = 3; m_ParticleLifetimePercent = 25;
+			m_MaximumMovableObjects = 4000; m_BackgroundEffectsLevel = 2; m_ScreenEffectsLevel = 2; m_GoreDensityPercent = 25;
+			break;
+		default: // Custom settings loaded from the configuration file.
+			break;
+	}
+}
+
 int SettingsMan::ReadProperty(const std::string_view& propName, Reader& reader) {
 	StartPropertyList(return Serializable::ReadProperty(propName, reader));
 
@@ -114,6 +148,17 @@ int SettingsMan::ReadProperty(const std::string_view& propName, Reader& reader) 
 	MatchProperty("ResolutionY", { reader >> g_WindowMan.m_ResY; });
 	MatchProperty("ResolutionMultiplier", { reader >> g_WindowMan.m_ResMultiplier; });
 	MatchProperty("EnableVSync", { reader >> g_WindowMan.m_EnableVSync; });
+	MatchProperty("FPSLimit", { SetFPSLimit(std::stoi(reader.ReadPropValue())); });
+	MatchProperty("PerformanceOverlayLevel", { g_PerformanceMan.SetOverlayLevel(std::stoi(reader.ReadPropValue())); });
+	MatchProperty("ParticleLimitLevel", { SetParticleLimitLevel(std::stoi(reader.ReadPropValue())); });
+	MatchProperty("GibLimitLevel", { SetGibLimitLevel(std::stoi(reader.ReadPropValue())); });
+	MatchProperty("DebrisLifetimeLevel", { SetDebrisLifetimeLevel(std::stoi(reader.ReadPropValue())); });
+	MatchProperty("ParticleLifetimePercent", { SetParticleLifetimePercent(std::stoi(reader.ReadPropValue())); });
+	MatchProperty("MaximumMovableObjects", { SetMaximumMovableObjects(std::stoi(reader.ReadPropValue())); });
+	MatchProperty("BackgroundEffectsLevel", { SetBackgroundEffectsLevel(std::stoi(reader.ReadPropValue())); });
+	MatchProperty("ScreenEffectsLevel", { SetScreenEffectsLevel(std::stoi(reader.ReadPropValue())); });
+	MatchProperty("GoreDensityPercent", { SetGoreDensityPercent(std::stoi(reader.ReadPropValue())); });
+	MatchProperty("PerformancePreset", { SetPerformancePreset(std::stoi(reader.ReadPropValue())); });
 	MatchProperty("Fullscreen", { reader >> g_WindowMan.m_Fullscreen; });
 	MatchProperty("UseMultiDisplays", { reader >> g_WindowMan.m_UseMultiDisplays; });
 	MatchProperty("TwoPlayerSplitscreenVertSplit", { reader >> g_FrameMan.m_TwoPlayerVSplit; });
@@ -222,6 +267,17 @@ int SettingsMan::Save(Writer& writer) const {
 	writer.NewPropertyWithValue("ResolutionMultiplier", g_WindowMan.m_ResMultiplier);
 	writer.NewPropertyWithValue("Fullscreen", g_WindowMan.m_Fullscreen);
 	writer.NewPropertyWithValue("EnableVSync", g_WindowMan.m_EnableVSync);
+	writer.NewPropertyWithValue("FPSLimit", m_FPSLimit);
+	writer.NewPropertyWithValue("PerformanceOverlayLevel", g_PerformanceMan.GetOverlayLevel());
+	writer.NewPropertyWithValue("ParticleLimitLevel", m_ParticleLimitLevel);
+	writer.NewPropertyWithValue("GibLimitLevel", m_GibLimitLevel);
+	writer.NewPropertyWithValue("DebrisLifetimeLevel", m_DebrisLifetimeLevel);
+	writer.NewPropertyWithValue("ParticleLifetimePercent", m_ParticleLifetimePercent);
+	writer.NewPropertyWithValue("MaximumMovableObjects", m_MaximumMovableObjects);
+	writer.NewPropertyWithValue("BackgroundEffectsLevel", m_BackgroundEffectsLevel);
+	writer.NewPropertyWithValue("ScreenEffectsLevel", m_ScreenEffectsLevel);
+	writer.NewPropertyWithValue("GoreDensityPercent", m_GoreDensityPercent);
+	writer.NewPropertyWithValue("PerformancePreset", m_PerformancePreset);
 	writer.NewPropertyWithValue("UseMultiDisplays", g_WindowMan.m_UseMultiDisplays);
 	writer.NewPropertyWithValue("TwoPlayerSplitscreenVertSplit", g_FrameMan.m_TwoPlayerVSplit);
 

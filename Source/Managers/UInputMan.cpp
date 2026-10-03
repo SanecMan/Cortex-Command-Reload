@@ -8,6 +8,7 @@
 #include "ConsoleMan.h"
 #include "PresetMan.h"
 #include "PerformanceMan.h"
+#include "SettingsMan.h"
 #include "MenuMan.h"
 #include "Icon.h"
 #include "GameActivity.h"
@@ -1236,6 +1237,9 @@ void UInputMan::HandleSpecialInput() {
 			} else {
 				RTEError::ShowMessageBox("Cannot Save Game - This Activity Does Not Allow QuickSaving!");
 			}
+		} else if (KeyPressed(SDLK_F8)) {
+			g_PerformanceMan.CycleOverlayLevel();
+			g_SettingsMan.UpdateSettingsFile();
 		} else if (KeyPressed(SDLK_F9)) {
 			g_ActivityMan.LoadAndLaunchGame("QuickSave");
 		} else if (KeyPressed(SDLK_F10)) {

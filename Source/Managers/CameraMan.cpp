@@ -6,6 +6,7 @@
 #include "Scene.h"
 #include "SceneMan.h"
 #include "SLTerrain.h"
+#include "SettingsMan.h"
 
 using namespace RTE;
 
@@ -166,6 +167,8 @@ void CameraMan::ResetAllScreenShake() {
 }
 
 void CameraMan::AddScreenShake(float magnitude, const Vector& position) {
+	if (g_SettingsMan.GetScreenEffectsLevel() == 2) return;
+	if (g_SettingsMan.GetScreenEffectsLevel() == 1) magnitude *= 0.5F;
 	for (int screenId = 0; screenId < g_FrameMan.GetScreenCount(); ++screenId) {
 		Screen& screen = m_Screens[screenId];
 

@@ -48,6 +48,7 @@
 #include "CameraMan.h"
 #include "ActivityMan.h"
 #include "MovableMan.h"
+#include "MovableObject.h"
 #include "PrimitiveMan.h"
 #include "ThreadMan.h"
 #include "LuaMan.h"
@@ -114,6 +115,7 @@ namespace {
 		bool StressStarted = false;
 		bool Passed = false;
 		bool HostSessionTestPassed = true;
+		bool OverlayCaptureEnabled = false;
 		int UpdateLimit = 600;
 		int SimulationUpdates = 0;
 		int RenderedFrames = 0;
@@ -161,6 +163,9 @@ namespace {
 
 	bool ParseDebugRunArguments(int argc, char** argv) {
 		DebugRunState& state = GetDebugRunState();
+		for (int i = 1; i < argc; ++i) {
+			if (std::string_view(argv[i]) == "-debug-overlay") state.OverlayCaptureEnabled = true;
+		}
 		for (int i = 1; i < argc; ++i) {
 			if (std::string_view(argv[i]) != "-debug-run") {
 				continue;
@@ -699,6 +704,20 @@ namespace {
 		std::ifstream unicodeFontProbe(unicodeFontFilePath, std::ios::binary);
 		state.Log << "utf8_unicode_font_path=" << unicodeFontFilePath.generic_string() << " exists=" << (unicodeFontProbe ? "yes" : "no") << '\n' << std::flush;
 		state.Log << "utf8_glyph_render_smoke=" << (utf8GlyphRenderPassed ? "passed" : "failed") << '\n' << std::flush;
+		const MovableMan::SceneStats sceneStats = g_MovableMan.CollectSceneStats();
+		const bool performanceCountersPassed = g_MovableMan.GetMovableObjectCount() > 0 && sceneStats.Actors > 0 && MovableObject::GetSceneSpawnEvents() > 0;
+		state.Log << "performance_counters_smoke=" << (performanceCountersPassed ? "passed" : "failed")
+		          << " actors=" << sceneStats.Actors << " items=" << sceneStats.Items << " mos_rotating=" << sceneStats.MOSRotating
+		          << " mos_particle=" << sceneStats.MOSParticles << " mo_pixel=" << sceneStats.MOPixels << " gibs=" << sceneStats.Gibs
+		          << " spawned=" << MovableObject::GetSceneSpawnEvents() << " deleted=" << MovableObject::GetSceneDeleteEvents()
+		          << " overlay_level=" << g_PerformanceMan.GetOverlayLevel() << " fps_limit=" << g_SettingsMan.GetFPSLimit() << '\n' << std::flush;
+		state.Log << "performance_settings=" << "preset:" << g_SettingsMan.GetPerformancePreset()
+		          << ",particles:" << g_SettingsMan.GetParticleLimitLevel() << ",gibs:" << g_SettingsMan.GetGibLimitLevel()
+		          << ",debris_life:" << g_SettingsMan.GetDebrisLifetimeLevel() << ",particle_life:" << g_SettingsMan.GetParticleLifetimePercent()
+		          << ",max_mos:" << g_SettingsMan.GetMaximumMovableObjects() << ",background:" << g_SettingsMan.GetBackgroundEffectsLevel()
+		          << ",screen_fx:" << g_SettingsMan.GetScreenEffectsLevel() << ",gore:" << g_SettingsMan.GetGoreDensityPercent()
+		          << ",vsync:" << g_WindowMan.GetVSyncEnabled() << '\n' << std::flush;
+		success = success && performanceCountersPassed;
 		success = success && utf8GlyphRenderPassed && state.HostSessionTestPassed && worldIdentityStable && replicaSmokePassed && transientPixelReplicaPassed &&
 		          networkInputApplicationPassed && worldSnapshotPassed && snapshotCompressionPassed && liveSnapshotTransportPassed;
 		const double elapsedSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - state.StartTime).count();
@@ -979,6 +998,7 @@ void RunMenuLoop() {
 	g_UInputMan.TrapMousePos(false);
 
 	while (!System::IsSetToQuit()) {
+		const auto frameWallStart = std::chrono::steady_clock::now();
 		DiscordPresence::SetActivity("At the main menu", "Cortex Command Reload");
 		g_WindowMan.ClearBackbuffer();
 		PollSDLEvents();
@@ -1012,6 +1032,10 @@ void RunMenuLoop() {
 		g_ConsoleMan.Draw(g_FrameMan.GetBackBuffer32());
 		g_WindowMan.GetScreenBuffer()->End();
 		g_WindowMan.UploadFrame();
+		if (g_SettingsMan.GetFPSLimit() > 0) {
+			const auto frameInterval = std::chrono::duration<double>(1.0 / g_SettingsMan.GetFPSLimit());
+			std::this_thread::sleep_until(frameWallStart + std::chrono::duration_cast<std::chrono::steady_clock::duration>(frameInterval));
+		}
 	}
 
 	g_MenuMan.SetIsInMenuScreen(false);
@@ -1044,6 +1068,7 @@ void RunGameLoop() {
 	long long drawTotalTime = 0;
 
 	while (!System::IsSetToQuit()) {
+		const auto frameWallStart = std::chrono::steady_clock::now();
 		if (const Activity* activity = g_ActivityMan.GetActivity(); g_ActivityMan.IsInActivity() && activity) {
 			DiscordPresence::SetActivity("Playing " + activity->GetPresetName(), "Cortex Command Reload");
 		} else {
@@ -1073,10 +1098,15 @@ void RunGameLoop() {
 			}
 
 			g_PerformanceMan.StartPerformanceMeasurement(PerformanceMan::SimTotal);
+			g_LuaMan.ClearScriptTimings();
 
+			g_PerformanceMan.StartPerformanceMeasurement(PerformanceMan::LuaManagerUpdate);
 			g_LuaMan.Update();
+			g_PerformanceMan.StopPerformanceMeasurement(PerformanceMan::LuaManagerUpdate);
 
+			g_PerformanceMan.StartPerformanceMeasurement(PerformanceMan::InputUpdate);
 			g_UInputMan.Update();
+			g_PerformanceMan.StopPerformanceMeasurement(PerformanceMan::InputUpdate);
 			if (worldStateClient && worldStateClient->IsConnected()) {
 				WorldStateProtocol::InputCommand inputCommand;
 				inputCommand.ClientTick = static_cast<std::uint32_t>(g_TimerMan.GetSimUpdateCount());
@@ -1121,14 +1151,13 @@ void RunGameLoop() {
 				g_SceneMan.GetScene()->Update();
 			}
 
-			g_LuaMan.ClearScriptTimings();
 			g_MovableMan.Update();
-			g_PerformanceMan.UpdateSortedScriptTimings(g_LuaMan.GetScriptTimings());
 
 			g_AudioMan.Update();
 			g_MusicMan.Update();
 
 			g_ActivityMan.LateUpdateGlobalScripts();
+			if (g_PerformanceMan.GetOverlayLevel() == 2) g_PerformanceMan.UpdateSortedScriptTimings(g_LuaMan.GetScriptTimings());
 			if (worldStateClient && worldStateClient->HasSnapshot()) {
 				const std::uint32_t snapshotCount = worldStateClient->GetReceivedSnapshotCount();
 				if (snapshotCount != worldStateClientLastLoggedSnapshotCount) {
@@ -1188,6 +1217,7 @@ void RunGameLoop() {
 		updateTotalTime = updateEndAndDrawStartTime - updateStartTime;
 		drawStartTime = updateEndAndDrawStartTime;
 
+		g_PerformanceMan.SetConnectedNetworkPlayers(worldStateServer ? worldStateServer->GetConnectedClientCount() : (worldStateClient && worldStateClient->IsConnected() ? 1 : 0));
 		g_FrameMan.Draw();
 		g_WindowMan.DrawPostProcessBuffer();
 		g_WindowMan.UploadFrame();
@@ -1198,7 +1228,12 @@ void RunGameLoop() {
 			debugRunState.TotalFrameTimeMilliseconds += static_cast<double>(updateTotalTime + drawTotalTime) / 1000.0;
 			debugRunState.TotalRenderTimeMilliseconds += static_cast<double>(drawTotalTime) / 1000.0;
 		}
-		g_PerformanceMan.UpdateMSPF(updateTotalTime, drawTotalTime);
+		if (!System::IsDebugRun() && g_SettingsMan.GetFPSLimit() > 0) {
+			const auto frameInterval = std::chrono::duration<double>(1.0 / g_SettingsMan.GetFPSLimit());
+			std::this_thread::sleep_until(frameWallStart + std::chrono::duration_cast<std::chrono::steady_clock::duration>(frameInterval));
+		}
+		const auto actualFrameTime = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - frameWallStart).count();
+		g_PerformanceMan.UpdateMSPF(updateTotalTime, drawTotalTime, actualFrameTime);
 		CaptureDebugRunFrame();
 	}
 }
@@ -1249,6 +1284,9 @@ int main(int argc, char** argv) {
 		allegro_exit();
 		SDL_Quit();
 		return EXIT_FAILURE;
+	}
+	if (debugRun && GetDebugRunState().OverlayCaptureEnabled) {
+		g_PerformanceMan.SetOverlayLevel(2);
 	}
 	if (debugRun) {
 		GetDebugRunState().Log << "stage=managers_initialized\n" << std::flush;

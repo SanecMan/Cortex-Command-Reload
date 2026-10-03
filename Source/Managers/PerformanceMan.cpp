@@ -2,18 +2,46 @@
 #include "MovableMan.h"
 #include "FrameMan.h"
 #include "AudioMan.h"
+#include "MovableObject.h"
+#include "SettingsMan.h"
+#include "WindowMan.h"
 
 #include "GUI.h"
 #include "AllegroBitmap.h"
 
 #include <array>
+#include <chrono>
+#include <fstream>
+#ifdef _WIN32
+#include <windows.h>
+#include <psapi.h>
+#elif defined(__linux__)
+#include <unistd.h>
+#endif
 
 using namespace RTE;
 
-const std::array<std::string, PerformanceMan::PerformanceCounters::PerfCounterCount> PerformanceMan::m_PerfCounterNames = {"Total", "Act AI", "Act Travel", "Act Update", "Prt Travel", "Prt Update", "Activity", "Scripts"};
+const std::array<std::string, PerformanceMan::PerformanceCounters::PerfCounterCount> PerformanceMan::m_PerfCounterNames = {"Total", "Input", "Lua VM", "Act AI", "Act Travel", "Act Update", "Prt Travel", "Prt Update", "Activity", "Scripts"};
 
 thread_local std::array<uint64_t, PerformanceMan::PerformanceCounters::PerfCounterCount> s_PerfMeasureStart; //!< Current measurement start time in microseconds.
 thread_local std::array<uint64_t, PerformanceMan::PerformanceCounters::PerfCounterCount> s_PerfMeasureStop; //!< Current measurement stop time in microseconds.
+
+namespace {
+	std::uint64_t ReadResidentMemoryBytes() {
+#ifdef _WIN32
+		PROCESS_MEMORY_COUNTERS_EX counters{};
+		return GetProcessMemoryInfo(GetCurrentProcess(), reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&counters), sizeof(counters)) ? counters.WorkingSetSize : 0;
+#elif defined(__linux__)
+		std::ifstream statm("/proc/self/statm");
+		std::uint64_t pages = 0;
+		std::uint64_t resident = 0;
+		const long pageSize = sysconf(_SC_PAGESIZE);
+	return (statm >> pages >> resident) && pageSize > 0 ? resident * static_cast<std::uint64_t>(pageSize) : 0;
+#else
+		return 0;
+#endif
+	}
+}
 
 PerformanceMan::PerformanceMan() {
 	Clear();
@@ -24,7 +52,8 @@ PerformanceMan::~PerformanceMan() {
 }
 
 void PerformanceMan::Clear() {
-	m_ShowPerfStats = false;
+	m_OverlayLevel = 0;
+	m_ConnectedNetworkPlayers = 0;
 	m_AdvancedPerfStats = true;
 	m_Sample = 0;
 	m_SimUpdateTimer = nullptr;
@@ -32,6 +61,8 @@ void PerformanceMan::Clear() {
 	m_MSPSUAverage = 0;
 	m_MSPFs.clear();
 	m_MSPFAverage = 0;
+	m_ActualFrameTimes.clear();
+	m_ActualFrameAverage = 0;
 	m_MSPUs.clear();
 	m_MSPUAverage = 0;
 	m_MSPDs.clear();
@@ -73,7 +104,8 @@ void PerformanceMan::NewPerformanceSample() {
 
 void PerformanceMan::CalculateSamplePercentages() {
 	for (int counter = 0; counter < PerformanceCounters::PerfCounterCount; ++counter) {
-		int samplePercentage = static_cast<int>(static_cast<float>(m_PerfData[counter][m_Sample]) / static_cast<float>(m_PerfData[counter][PerformanceCounters::SimTotal]) * 100);
+		const auto total = m_PerfData[PerformanceCounters::SimTotal][m_Sample].load(std::memory_order_relaxed);
+		int samplePercentage = total > 0 ? static_cast<int>(static_cast<float>(m_PerfData[counter][m_Sample]) / static_cast<float>(total) * 100) : 0;
 		m_PerfPercentages[counter][m_Sample] = samplePercentage;
 	}
 }
@@ -103,66 +135,96 @@ void PerformanceMan::CalculateTimeAverage(std::deque<float>& timeMeasurements, f
 	avgResult /= static_cast<float>(timeMeasurements.size());
 }
 
-void PerformanceMan::UpdateMSPF(long long measuredUpdateTime, long long measuredDrawTime) {
-	CalculateTimeAverage(m_MSPUs, m_MSPUAverage, static_cast<float>(measuredUpdateTime / 1000));
-	CalculateTimeAverage(m_MSPDs, m_MSPDAverage, static_cast<float>(measuredDrawTime / 1000));
-	CalculateTimeAverage(m_MSPFs, m_MSPFAverage, static_cast<float>((measuredUpdateTime + measuredDrawTime) / 1000));
+void PerformanceMan::UpdateMSPF(long long measuredUpdateTime, long long measuredDrawTime, long long actualFrameTime) {
+	CalculateTimeAverage(m_MSPUs, m_MSPUAverage, static_cast<float>(measuredUpdateTime) / 1000.0F);
+	CalculateTimeAverage(m_MSPDs, m_MSPDAverage, static_cast<float>(measuredDrawTime) / 1000.0F);
+	CalculateTimeAverage(m_MSPFs, m_MSPFAverage, static_cast<float>(measuredUpdateTime + measuredDrawTime) / 1000.0F);
+	CalculateTimeAverage(m_ActualFrameTimes, m_ActualFrameAverage, static_cast<float>(actualFrameTime) / 1000.0F);
 }
 
 void PerformanceMan::Draw(BITMAP* bitmapToDrawTo) {
-	if (m_ShowPerfStats) {
+	if (m_OverlayLevel != 0) {
 		AllegroBitmap drawBitmap(bitmapToDrawTo);
 
 		GUIFont* guiFont = g_FrameMan.GetLargeFont(true);
 		char str[128];
-
-		float fps = 1.0F / (m_MSPFAverage / 1000.0F);
-		float ups = 1.0F / (m_MSPSUAverage / 1000.0F);
-		std::snprintf(str, sizeof(str), "FPS: %.0f | UPS: %.0f", fps, ups);
-		guiFont->DrawAligned(&drawBitmap, c_StatsOffsetX, c_StatsHeight, str, GUIFont::Left);
-
-		std::snprintf(str, sizeof(str), "Frame: %.1fms | Update: %.1fms | Draw: %.1fms", m_MSPFAverage, m_MSPUAverage, m_MSPDAverage);
-		guiFont->DrawAligned(&drawBitmap, c_StatsOffsetX, c_StatsHeight + 10, str, GUIFont::Left);
-
-		std::snprintf(str, sizeof(str), "Time Scale: x%.2f ([1]-, [2]+, [RAlt+1]Rst) | Sim Speed: x%.2f", g_TimerMan.GetTimeScale(), g_TimerMan.GetSimSpeed());
-		guiFont->DrawAligned(&drawBitmap, c_StatsOffsetX, c_StatsHeight + 20, str, GUIFont::Left);
-
-		float deltaTime = g_TimerMan.GetDeltaTimeMS();
-		std::snprintf(str, sizeof(str), "DeltaTime: %.2f ms ([5]-, [6]+, [RAlt+5]Rst)", deltaTime);
-		guiFont->DrawAligned(&drawBitmap, c_StatsOffsetX, c_StatsHeight + 30, str, GUIFont::Left);
-
-		std::snprintf(str, sizeof(str), "Actors: %li", g_MovableMan.GetActorCount());
-		guiFont->DrawAligned(&drawBitmap, c_StatsOffsetX, c_StatsHeight + 40, str, GUIFont::Left);
-
-		std::snprintf(str, sizeof(str), "Particles: %li", g_MovableMan.GetParticleCount());
-		guiFont->DrawAligned(&drawBitmap, c_StatsOffsetX, c_StatsHeight + 50, str, GUIFont::Left);
-
-		std::snprintf(str, sizeof(str), "Objects: %i", g_MovableMan.GetKnownObjectsCount());
-		guiFont->DrawAligned(&drawBitmap, c_StatsOffsetX, c_StatsHeight + 60, str, GUIFont::Left);
-
-		std::snprintf(str, sizeof(str), "MOIDs: %i", g_MovableMan.GetMOIDCount());
-		guiFont->DrawAligned(&drawBitmap, c_StatsOffsetX, c_StatsHeight + 70, str, GUIFont::Left);
-
-		if (int totalPlayingChannelCount = 0, realPlayingChannelCount = 0; g_AudioMan.GetPlayingChannelCount(&totalPlayingChannelCount, &realPlayingChannelCount)) {
-			std::snprintf(str, sizeof(str), "Sound Channels: %d / %d Real | %d / %d Virtual", realPlayingChannelCount, g_AudioMan.GetTotalRealChannelCount(), totalPlayingChannelCount - realPlayingChannelCount, g_AudioMan.GetTotalVirtualChannelCount());
+		static auto lastMemoryRead = std::chrono::steady_clock::time_point{};
+		static std::uint64_t residentMemory = 0;
+		const auto now = std::chrono::steady_clock::now();
+		if (now - lastMemoryRead >= std::chrono::seconds(1)) {
+			residentMemory = ReadResidentMemoryBytes();
+			lastMemoryRead = now;
 		}
-		guiFont->DrawAligned(&drawBitmap, c_StatsOffsetX, c_StatsHeight + 80, str, GUIFont::Left);
-
-		if (!m_SortedScriptTimings.empty()) {
-			std::snprintf(str, sizeof(str), "Lua scripts taking the most time to call Update() this frame:");
-			guiFont->DrawAligned(&drawBitmap, c_StatsOffsetX, c_StatsHeight + 100, str, GUIFont::Left);
-
-			for (int i = 0; i < std::min((size_t)3, m_SortedScriptTimings.size()); i++) {
-				std::pair<std::string, ScriptTiming> scriptTiming = m_SortedScriptTimings.at(i);
-
-				std::snprintf(str, sizeof(str), "%.1fms total with %i calls in %s", scriptTiming.second.m_Time / 1000.0, scriptTiming.second.m_CallCount, scriptTiming.first.c_str());
-				guiFont->DrawAligned(&drawBitmap, c_StatsOffsetX, c_StatsHeight + 110 + i * 10, str, GUIFont::Left);
-			}
+		if (m_OverlayLevel == 1) {
+			rectfill(bitmapToDrawTo, 8, 8, 285, 66, makecol(12, 16, 24));
+			const auto draw = [&](int row, const char* value) { guiFont->DrawAligned(&drawBitmap, c_StatsOffsetX, c_StatsHeight + row * 10, value, GUIFont::Left); };
+			draw(0, "PERFORMANCE [F8: details]");
+			std::snprintf(str, sizeof(str), "FPS: %.0f | Frame: %.1f ms", m_ActualFrameAverage > 0 ? 1000.0F / m_ActualFrameAverage : 0.0F, m_ActualFrameAverage);
+			draw(1, str);
+			std::snprintf(str, sizeof(str), "Simulation: %.1f ms | Render: %.1f ms", m_MSPUAverage, m_MSPDAverage);
+			draw(2, str);
+			std::snprintf(str, sizeof(str), "Actors: %li | MovableObjects: %li", g_MovableMan.GetActorCount(), g_MovableMan.GetMovableObjectCount());
+			draw(3, str);
+			std::snprintf(str, sizeof(str), "RAM: %.0f MiB", static_cast<double>(residentMemory) / (1024.0 * 1024.0));
+			draw(4, str);
+			return;
 		}
 
-		if (m_AdvancedPerfStats) {
-			DrawPeformanceGraphs(drawBitmap);
+		const float fps = m_ActualFrameAverage > 0 ? 1000.0F / m_ActualFrameAverage : 0.0F;
+		static auto lastSceneRead = std::chrono::steady_clock::time_point{};
+		static MovableMan::SceneStats sceneStats;
+		static std::uint64_t previousSpawns = 0;
+		static std::uint64_t previousDeletes = 0;
+		static std::uint64_t spawnRate = 0;
+		static std::uint64_t deleteRate = 0;
+		if (now - lastSceneRead >= std::chrono::seconds(1)) {
+			sceneStats = g_MovableMan.CollectSceneStats();
+			const std::uint64_t spawns = MovableObject::GetSceneSpawnEvents();
+			const std::uint64_t deletes = MovableObject::GetSceneDeleteEvents();
+			const double seconds = lastSceneRead == std::chrono::steady_clock::time_point{} ? 1.0 : std::chrono::duration<double>(now - lastSceneRead).count();
+			spawnRate = static_cast<std::uint64_t>((spawns - previousSpawns) / seconds);
+			deleteRate = static_cast<std::uint64_t>((deletes - previousDeletes) / seconds);
+			previousSpawns = spawns;
+			previousDeletes = deletes;
+			lastSceneRead = now;
 		}
+		rectfill(bitmapToDrawTo, 8, 8, 625, 160, makecol(12, 16, 24));
+		const auto drawSummary = [&](int row, const char* value) { guiFont->DrawAligned(&drawBitmap, c_StatsOffsetX, c_StatsHeight + row * 10, value, GUIFont::Left); };
+		drawSummary(0, "PERFORMANCE [F8: off]");
+		std::snprintf(str, sizeof(str), "FPS %.0f | Frame %.1f ms", fps, m_ActualFrameAverage);
+		drawSummary(1, str);
+		std::snprintf(str, sizeof(str), "Simulation %.1f | Render %.1f ms", m_MSPUAverage, m_MSPDAverage);
+		drawSummary(2, str);
+		std::snprintf(str, sizeof(str), "Input/upd %.2f | Lua/upd %.2f ms", GetPerformanceCounterAverage(InputUpdate) / 1000.0, (GetPerformanceCounterAverage(LuaManagerUpdate) + GetPerformanceCounterAverage(ScriptsUpdate)) / 1000.0);
+		drawSummary(3, str);
+		std::snprintf(str, sizeof(str), "Physics/upd %.2f | AI/upd %.2f ms", (GetPerformanceCounterAverage(ActorsTravel) + GetPerformanceCounterAverage(ParticlesTravel)) / 1000.0, GetPerformanceCounterAverage(ActorsAI) / 1000.0);
+		drawSummary(4, str);
+		std::snprintf(str, sizeof(str), "Actors %li | MOs %li | Items %li", g_MovableMan.GetActorCount(), g_MovableMan.GetMovableObjectCount(), g_MovableMan.GetItemCount());
+		drawSummary(5, str);
+		std::snprintf(str, sizeof(str), "RAM %.0f MiB | Players %d", static_cast<double>(residentMemory) / (1024.0 * 1024.0), m_ConnectedNetworkPlayers);
+		drawSummary(6, str);
+		std::snprintf(str, sizeof(str), "%dx%d | VSync %s | Cap %d", g_WindowMan.GetResX(), g_WindowMan.GetResY(), g_WindowMan.GetVSyncEnabled() ? "on" : "off", g_SettingsMan.GetFPSLimit());
+		drawSummary(7, str);
+		int luaCallbackCount = 0;
+		for (const auto& [script, timing] : m_SortedScriptTimings) luaCallbackCount += timing.m_CallCount;
+		std::snprintf(str, sizeof(str), "Tracked Lua calls/update %d", luaCallbackCount);
+		drawSummary(8, str);
+		const int detailsX = 310;
+		const auto drawDetails = [&](int row, const char* value) { guiFont->DrawAligned(&drawBitmap, detailsX, c_StatsHeight + row * 10, value, GUIFont::Left); };
+		drawDetails(0, "SCENE (top-level objects)");
+		std::snprintf(str, sizeof(str), "MO %li | Items %li | MOIDs %i", g_MovableMan.GetMovableObjectCount(), g_MovableMan.GetItemCount(), g_MovableMan.GetMOIDCount());
+		drawDetails(1, str);
+		std::snprintf(str, sizeof(str), "Actors %zu | MOSRotating %zu", sceneStats.Actors, sceneStats.MOSRotating);
+		drawDetails(2, str);
+		std::snprintf(str, sizeof(str), "MOSParticle %zu | MOPixel %zu", sceneStats.MOSParticles, sceneStats.MOPixels);
+		drawDetails(3, str);
+		std::snprintf(str, sizeof(str), "Gibs %zu | Projectile-like %zu", sceneStats.Gibs, sceneStats.ProjectileLike);
+		drawDetails(4, str);
+		std::snprintf(str, sizeof(str), "Collision-enabled %zu | Particles %li", sceneStats.CollisionEnabled, g_MovableMan.GetParticleCount());
+		drawDetails(5, str);
+		std::snprintf(str, sizeof(str), "Spawn/s %llu | Delete/s %llu", static_cast<unsigned long long>(spawnRate), static_cast<unsigned long long>(deleteRate));
+		drawDetails(6, str);
+		if (m_AdvancedPerfStats) DrawPeformanceGraphs(drawBitmap);
 	}
 }
 
@@ -177,8 +239,9 @@ void PerformanceMan::DrawPeformanceGraphs(AllegroBitmap& bitmapToDrawTo) {
 
 		guiFont->DrawAligned(&bitmapToDrawTo, c_StatsOffsetX, blockStart, m_PerfCounterNames[pc], GUIFont::Left);
 
-		int perc = static_cast<int>((static_cast<float>(GetPerformanceCounterAverage(static_cast<PerformanceCounters>(pc))) / static_cast<float>(GetPerformanceCounterAverage(PerformanceCounters::SimTotal)) * 100));
-		std::snprintf(str, sizeof(str), "%%: %u", perc);
+		const auto total = GetPerformanceCounterAverage(PerformanceCounters::SimTotal);
+		int perc = total > 0 ? static_cast<int>((static_cast<float>(GetPerformanceCounterAverage(static_cast<PerformanceCounters>(pc))) / static_cast<float>(total) * 100)) : 0;
+		std::snprintf(str, sizeof(str), "%%: %d", perc);
 		guiFont->DrawAligned(&bitmapToDrawTo, c_StatsOffsetX + 60, blockStart, str, GUIFont::Left);
 
 		// Print average processing time in milliseconds.

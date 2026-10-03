@@ -3,6 +3,7 @@
 #include "CameraMan.h"
 #include "WindowMan.h"
 #include "FrameMan.h"
+#include "SettingsMan.h"
 #include "Scene.h"
 #include "ContentFile.h"
 #include "Matrix.h"
@@ -348,8 +349,8 @@ void PostProcessMan::PostProcess() {
 
 	m_PostProcessShader->Begin();
 
-	DrawDotGlowEffects();
-	DrawPostScreenEffects();
+	if (g_SettingsMan.GetScreenEffectsLevel() == 0) DrawDotGlowEffects();
+	if (g_SettingsMan.GetScreenEffectsLevel() < 2) DrawPostScreenEffects();
 
 	// Clear the effects list for this frame
 	m_PostScreenEffects.clear();

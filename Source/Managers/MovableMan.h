@@ -248,6 +248,21 @@ namespace RTE {
 		/// Gets the number of actors currently held.
 		/// @return The number of actors.
 		long GetActorCount() const { return m_Actors.size(); }
+		long GetItemCount() const { return m_Items.size(); }
+		long GetMovableObjectCount() const { return m_Actors.size() + m_Items.size() + m_Particles.size(); }
+
+		struct SceneStats {
+			std::size_t Actors = 0;
+			std::size_t Items = 0;
+			std::size_t MOSParticles = 0;
+			std::size_t MOSRotating = 0;
+			std::size_t MOPixels = 0;
+			std::size_t Gibs = 0;
+			std::size_t ProjectileLike = 0;
+			std::size_t CollisionEnabled = 0;
+		};
+		/// Scans live top-level scene objects. Intended for the Detailed overlay's once-per-second cache.
+		SceneStats CollectSceneStats() const;
 
 		/// Gets the number of particles (MOPixel:s) currently held.
 		/// @return The number of particles.

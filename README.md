@@ -26,6 +26,8 @@ If you've got any C++ experience, experience with the game's ini data through mo
 # More Information
 See the [Information and Recommendations](https://github.com/cortex-command-community/Cortex-Command-Community-Project/wiki/Information,-Recommended-Plugins-and-Useful-Links) page for more details and useful development tools.
 
+For Cortex Command Reload's FPS limiter, visual quality settings, and F8 performance overlay, see [Performance settings and diagnostics](Documentation/PerformanceSettings.md).
+
 ***
 
 # Windows Build Instructions

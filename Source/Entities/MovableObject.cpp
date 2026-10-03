@@ -24,6 +24,8 @@ using namespace RTE;
 AbstractClassInfo(MovableObject, SceneObject);
 
 std::atomic<long> MovableObject::m_UniqueIDCounter = 1;
+std::atomic<std::uint64_t> MovableObject::m_SceneSpawnEvents = 0;
+std::atomic<std::uint64_t> MovableObject::m_SceneDeleteEvents = 0;
 std::string MovableObject::ms_EmptyString = "";
 
 MovableObject::MovableObject() {
@@ -31,6 +33,9 @@ MovableObject::MovableObject() {
 }
 
 MovableObject::~MovableObject() {
+	if (m_HasEverBeenAddedToMovableMan) {
+		m_SceneDeleteEvents.fetch_add(1, std::memory_order_relaxed);
+	}
 	Destroy(true);
 }
 
@@ -71,6 +76,7 @@ void MovableObject::Clear() {
 	m_MOID = g_NoMOID;
 	m_RootMOID = g_NoMOID;
 	m_HasEverBeenAddedToMovableMan = false;
+	m_IsGibDebris = false;
 	m_MOIDFootprint = 0;
 	m_AlreadyHitBy.clear();
 	m_VelOscillations = 0;
@@ -221,6 +227,7 @@ int MovableObject::Create(const MovableObject& reference) {
 	m_pMOToNotHit = reference.m_pMOToNotHit;
 	m_MOIgnoreTimer = reference.m_MOIgnoreTimer;
 	m_MissionCritical = reference.m_MissionCritical;
+	m_IsGibDebris = reference.m_IsGibDebris;
 	m_CanBeSquished = reference.m_CanBeSquished;
 	m_HUDVisible = reference.m_HUDVisible;
 	m_PostEffectEnabled = reference.m_PostEffectEnabled;

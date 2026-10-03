@@ -17,6 +17,8 @@
 
 #include "RTEError.h"
 
+#include <cstdint>
+
 using namespace RTE;
 
 ConcreteClassInfo(MOSRotating, MOSprite, 500);
@@ -917,13 +919,25 @@ void MOSRotating::CreateGibsWhenGibbing(const Vector& impactImpulse, MovableObje
 		g_CameraMan.AddScreenShake(m_GibScreenShakeAmount, m_Pos);
 	}
 
+	unsigned int gibGroupOrdinal = 0;
 	for (const Gib* gibSettingsObject: m_Gibs) {
+		++gibGroupOrdinal;
 		if (gibSettingsObject->GetCount() == 0) {
 			continue;
 		}
 		MovableObject* gibParticleClone = dynamic_cast<MovableObject*>(gibSettingsObject->GetParticlePreset()->Clone());
 
 		int count = gibSettingsObject->GetCount();
+		const int gorePercent = g_SettingsMan.GetGoreDensityPercent();
+		if (gorePercent < 100 && !gibParticleClone->IsMissionCritical() && !gibParticleClone->HitsMOs() &&
+		    !gibParticleClone->GetsHitByMOs() && !gibParticleClone->HasAnyScripts() && gibParticleClone->GetLifetime() > 0) {
+			const std::int64_t scaled = static_cast<std::int64_t>(count) * gorePercent;
+			count = scaled / 100 + ((static_cast<unsigned long>(GetUniqueID()) + gibGroupOrdinal) % 100 < static_cast<unsigned long>(scaled % 100) ? 1 : 0);
+			if (count == 0) {
+				delete gibParticleClone;
+				continue;
+			}
+		}
 		float lifeVariation = gibSettingsObject->GetLifeVariation();
 		float spread = gibSettingsObject->GetSpread();
 		float minVelocity = gibSettingsObject->GetMinVelocity();
@@ -984,6 +998,7 @@ void MOSRotating::CreateGibsWhenGibbing(const Vector& impactImpulse, MovableObje
 					gibParticleClone->SetIgnoresTeamHits(true);
 				}
 
+				gibParticleClone->SetGibDebris();
 				g_MovableMan.AddParticle(gibParticleClone);
 			}
 		} else {
@@ -1042,6 +1057,7 @@ void MOSRotating::CreateGibsWhenGibbing(const Vector& impactImpulse, MovableObje
 					gibParticleClone->SetIgnoresTeamHits(true);
 				}
 
+				gibParticleClone->SetGibDebris();
 				g_MovableMan.AddParticle(gibParticleClone);
 			}
 		}

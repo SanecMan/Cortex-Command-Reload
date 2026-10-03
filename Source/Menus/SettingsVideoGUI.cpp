@@ -129,6 +129,7 @@ void SettingsVideoGUI::SetEnabled(bool enable) const {
 	m_VideoSettingsBox->SetEnabled(enable);
 
 	if (enable) {
+		m_EnableVSyncCheckbox->SetCheck(g_WindowMan.GetVSyncEnabled());
 		m_CustomResolutionWidthTextBox->SetText(std::to_string(static_cast<int>(g_WindowMan.GetResX())));
 		m_CustomResolutionHeightTextBox->SetText(std::to_string(static_cast<int>(g_WindowMan.GetResY())));
 #if __cpp_lib_format >= 201907L && !(defined(__APPLE__) && defined(__GNUC__))

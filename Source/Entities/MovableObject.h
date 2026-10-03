@@ -13,6 +13,8 @@
 #include "Material.h"
 #include "MovableMan.h"
 
+#include <atomic>
+#include <cstdint>
 #include <set>
 
 struct BITMAP;
@@ -246,6 +248,11 @@ namespace RTE {
 		/// Returns whether or not this MovableObject has ever been added to MovableMan. Does not account for removal from MovableMan.
 		/// @return Whether or not this MovableObject has ever been added to MovableMan.
 		bool HasEverBeenAddedToMovableMan() const { return m_HasEverBeenAddedToMovableMan; }
+		/// Cumulative scene admission and destruction events, for low-cost spawn-rate diagnostics.
+		static std::uint64_t GetSceneSpawnEvents() { return m_SceneSpawnEvents.load(std::memory_order_relaxed); }
+		static std::uint64_t GetSceneDeleteEvents() { return m_SceneDeleteEvents.load(std::memory_order_relaxed); }
+		bool IsGibDebris() const { return m_IsGibDebris; }
+		void SetGibDebris(bool value = true) { m_IsGibDebris = value; }
 
 		/// Gets the sharpness factor of this MO.
 		/// @return The sharpness factor of this MO. 1.0 means normal sharpness, no alter-
@@ -468,8 +475,9 @@ namespace RTE {
 		/// Sets this MovableObject as having been added to MovableMan. Should only really be done in MovableMan::Add/Remove Actor/Item/Particle.
 		/// @param addedToMovableMan Whether or not this MovableObject has been added to MovableMan.
 		void SetAsAddedToMovableMan(bool addedToMovableMan = true) {
-			if (addedToMovableMan) {
+			if (addedToMovableMan && !m_HasEverBeenAddedToMovableMan) {
 				m_HasEverBeenAddedToMovableMan = true;
+				m_SceneSpawnEvents.fetch_add(1, std::memory_order_relaxed);
 			}
 		}
 
@@ -1144,6 +1152,8 @@ namespace RTE {
 		static Entity::ClassInfo m_sClass;
 		// Global counter with unique ID's
 		static std::atomic<long> m_UniqueIDCounter;
+		static std::atomic<std::uint64_t> m_SceneSpawnEvents;
+		static std::atomic<std::uint64_t> m_SceneDeleteEvents;
 		// The type of MO this is, either Actor, Item, or Particle
 		int m_MOType;
 		float m_Mass; // In metric kilograms (kg).
@@ -1215,6 +1225,7 @@ namespace RTE {
 		int m_MOIDFootprint;
 		// Whether or not this object has ever been added to MovableMan. Does not take into account the object being removed from MovableMan, though in practice it usually will, cause objects are usually only removed when they're deleted.
 		bool m_HasEverBeenAddedToMovableMan;
+		bool m_IsGibDebris;
 		// A set of ID:s of MO:s that already have collided with this MO during this frame.
 		std::set<MOID> m_AlreadyHitBy;
 		int m_VelOscillations; //!< A counter for oscillations in translational velocity, in order to detect settling.

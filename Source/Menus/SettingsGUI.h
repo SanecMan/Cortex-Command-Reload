@@ -16,6 +16,7 @@ namespace RTE {
 	class GUIControlManager;
 	class GUIButton;
 	class GUITab;
+	class GUIComboBox;
 
 	/// Handling for the settings menu screen composition and sub-menu interaction.
 	class SettingsGUI {
@@ -58,6 +59,7 @@ namespace RTE {
 			InputSettingsMenu,
 			GameplaySettingsMenu,
 			MiscSettingsMenu,
+			PerformanceSettingsMenu,
 			SettingsMenuCount
 		};
 
@@ -70,6 +72,10 @@ namespace RTE {
 		std::unique_ptr<SettingsInputGUI> m_InputSettingsMenu; //!< The input settings sub-menu.
 		std::unique_ptr<SettingsGameplayGUI> m_GameplaySettingsMenu; //!< The gameplay settings sub-menu.
 		std::unique_ptr<SettingsMiscGUI> m_MiscSettingsMenu; //!< The misc settings sub-menu.
+		GUICollectionBox* m_PerformanceSettingsBox;
+		enum PerformanceControl { Preset, Overlay, FPSLimit, VSync, Particles, Gibs, DebrisLife, ParticleLife, MaxMO, Background, Screen, Gore, PerformanceControlCount };
+		std::array<GUIComboBox*, PerformanceControlCount> m_PerformanceCombos{};
+		std::array<int, PerformanceControlCount> m_LastPerformanceSelections{};
 
 		/// GUI elements that compose the settings menu screen.
 		GUICollectionBox* m_SettingsTabberBox;
@@ -84,6 +90,8 @@ namespace RTE {
 		/// @param activeMenu Which settings menu screen to display. See the SettingsMenuScreen enumeration.
 		/// @param playButtonPressSound Whether to play a sound if the menu screen change is triggered by a button/tab press.
 		void SetActiveSettingsMenuScreen(SettingsMenuScreen activeMenu, bool playButtonPressSound = true);
+		void RefreshPerformanceControls();
+		void HandlePerformanceSelection(PerformanceControl control);
 #pragma endregion
 
 		// Disallow the use of some implicit methods.

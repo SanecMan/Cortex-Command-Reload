@@ -2613,8 +2613,13 @@ void SceneMan::Draw(BITMAP* targetBitmap, BITMAP* targetGUIBitmap, const Vector&
 			break;
 		default:
 			if (!skipBackgroundLayers) {
+				const int backgroundLevel = g_SettingsMan.GetBackgroundEffectsLevel();
+				int layerIndex = 0;
 				for (std::list<SLBackground*>::reverse_iterator backgroundLayer = m_pCurrentScene->GetBackLayers().rbegin(); backgroundLayer != m_pCurrentScene->GetBackLayers().rend(); ++backgroundLayer) {
-					(*backgroundLayer)->Draw(targetDimensions, targetBox);
+					if (backgroundLevel == 0 || (backgroundLevel == 1 && layerIndex % 2 == 0) || (backgroundLevel == 2 && layerIndex == 0)) {
+						(*backgroundLayer)->Draw(targetDimensions, targetBox);
+					}
+					++layerIndex;
 				}
 			}
 			if (!skipTerrain) {

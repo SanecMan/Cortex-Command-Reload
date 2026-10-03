@@ -3,6 +3,7 @@
 #include "Singleton.h"
 #include "Timer.h"
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <unordered_map>
@@ -24,6 +25,8 @@ namespace RTE {
 		/// Enumeration of all available performance counters.
 		enum PerformanceCounters {
 			SimTotal = 0,
+			InputUpdate,
+			LuaManagerUpdate,
 			ActorsAI,
 			ActorsTravel,
 			ActorsUpdate,
@@ -59,11 +62,15 @@ namespace RTE {
 #pragma region Getters and Setters
 		/// Tells whether to display the performance stats on-screen or not.
 		/// @return Whether to show the performance stats or not.
-		bool IsShowingPerformanceStats() const { return m_ShowPerfStats; }
+		bool IsShowingPerformanceStats() const { return m_OverlayLevel != 0; }
 
 		/// Sets whether to display the performance stats on-screen or not.
 		/// @param showStats Whether to show the performance stats or not.
-		void ShowPerformanceStats(bool showStats = true) { m_ShowPerfStats = showStats; }
+		void ShowPerformanceStats(bool showStats = true) { m_OverlayLevel = showStats ? 1 : 0; }
+		int GetOverlayLevel() const { return m_OverlayLevel; }
+		void SetOverlayLevel(int level) { m_OverlayLevel = std::clamp(level, 0, 2); }
+		void CycleOverlayLevel() { m_OverlayLevel = (m_OverlayLevel + 1) % 3; }
+		void SetConnectedNetworkPlayers(int count) { m_ConnectedNetworkPlayers = count; }
 
 		/// Tells whether to display the performance graphs on-screen or not.
 		/// @return Whether to show the performance graphs or not.
@@ -107,6 +114,7 @@ namespace RTE {
 		void ResetPerformanceTimings() {
 			m_MSPSUs.clear();
 			m_MSPFs.clear();
+			m_ActualFrameTimes.clear();
 			m_MSPUs.clear();
 			m_MSPDs.clear();
 		}
@@ -117,7 +125,7 @@ namespace RTE {
 		/// Updates the frame time measurements and recalculates the averages. Supposed to be done every game loop iteration.
 		/// @param measuredUpdateTime The total sim update time measured in the game loop iteration.
 		/// @param measuredDrawTime The total draw time measured in the game loop iteration.
-		void UpdateMSPF(long long measuredUpdateTime, long long measuredDrawTime);
+		void UpdateMSPF(long long measuredUpdateTime, long long measuredDrawTime, long long actualFrameTime);
 
 		/// Updates the individual sim update time measurements and recalculates the average. Supposed to be done every sim update.
 		void UpdateMSPSU() {
@@ -149,7 +157,8 @@ namespace RTE {
 		const int c_GraphHeight = 20; //!< Height of the performance graph.
 		const int c_GraphBlockHeight = 34; //!< Height of the whole graph block (text height and graph height combined).
 
-		bool m_ShowPerfStats; //!< Whether to show performance stats on screen or not.
+		int m_OverlayLevel; //!< 0=off, 1=basic, 2=detailed.
+		int m_ConnectedNetworkPlayers;
 		bool m_AdvancedPerfStats; //!< Whether to show performance graphs on screen or not.
 
 		int m_Sample; //!< Sample counter.
@@ -163,6 +172,8 @@ namespace RTE {
 
 		float m_MSPSUAverage; //!< The average of the MSPSU reading buffer, calculated each sim update.
 		float m_MSPFAverage; //!< The average of the MSPF reading buffer, calculated each game loop iteration.
+		std::deque<float> m_ActualFrameTimes;
+		float m_ActualFrameAverage;
 		float m_MSPUAverage; //!< The average of the MSPU reading buffer, calculated each game loop iteration.
 		float m_MSPDAverage; //!< The average of the MSPD reading buffer, calculated each game loop iteration.
 

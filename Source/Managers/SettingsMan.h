@@ -48,6 +48,31 @@ namespace RTE {
 
 		/// Overwrites the settings file to save changes made from within the game.
 		void UpdateSettingsFile() const;
+		int GetFPSLimit() const { return m_FPSLimit; }
+		void SetFPSLimit(int limit) {
+			switch (limit) {
+				case 0: case 30: case 45: case 60: case 75: case 90: case 120: case 144: m_FPSLimit = limit; break;
+				default: m_FPSLimit = 0; break;
+			}
+		}
+		int GetPerformancePreset() const { return m_PerformancePreset; }
+		void SetPerformancePreset(int preset);
+		int GetParticleLimitLevel() const { return m_ParticleLimitLevel; }
+		void SetParticleLimitLevel(int level) { m_ParticleLimitLevel = std::clamp(level, 0, 4); m_PerformancePreset = 4; }
+		int GetGibLimitLevel() const { return m_GibLimitLevel; }
+		void SetGibLimitLevel(int level) { m_GibLimitLevel = std::clamp(level, 0, 3); m_PerformancePreset = 4; }
+		int GetDebrisLifetimeLevel() const { return m_DebrisLifetimeLevel; }
+		void SetDebrisLifetimeLevel(int level) { m_DebrisLifetimeLevel = std::clamp(level, 0, 3); m_PerformancePreset = 4; }
+		int GetParticleLifetimePercent() const { return m_ParticleLifetimePercent; }
+		void SetParticleLifetimePercent(int percent) { m_ParticleLifetimePercent = percent == 75 || percent == 50 || percent == 25 ? percent : 100; m_PerformancePreset = 4; }
+		int GetMaximumMovableObjects() const { return m_MaximumMovableObjects; }
+		void SetMaximumMovableObjects(int limit) { m_MaximumMovableObjects = std::clamp(limit, 0, 50000); m_PerformancePreset = 4; }
+		int GetBackgroundEffectsLevel() const { return m_BackgroundEffectsLevel; }
+		void SetBackgroundEffectsLevel(int level) { m_BackgroundEffectsLevel = std::clamp(level, 0, 3); m_PerformancePreset = 4; }
+		int GetScreenEffectsLevel() const { return m_ScreenEffectsLevel; }
+		void SetScreenEffectsLevel(int level) { m_ScreenEffectsLevel = std::clamp(level, 0, 2); m_PerformancePreset = 4; }
+		int GetGoreDensityPercent() const { return m_GoreDensityPercent; }
+		void SetGoreDensityPercent(int percent) { m_GoreDensityPercent = percent == 75 || percent == 50 || percent == 25 || percent == 0 ? percent : 100; m_PerformancePreset = 4; }
 #pragma endregion
 
 #pragma region Engine Settings
@@ -371,6 +396,16 @@ namespace RTE {
 	protected:
 		bool m_SettingsNeedOverwrite; //!< Whether the settings file was generated with minimal defaults and needs to be overwritten to be fully populated.
 		bool m_DiscordPresenceEnabled; //!< Whether Discord Rich Presence should be published.
+		int m_FPSLimit; //!< Maximum rendered frames per second; zero means unlimited.
+		int m_PerformancePreset; //!< 0=Quality, 1=Balanced, 2=Performance, 3=Potato, 4=Custom.
+		int m_ParticleLimitLevel;
+		int m_GibLimitLevel;
+		int m_DebrisLifetimeLevel;
+		int m_ParticleLifetimePercent;
+		int m_MaximumMovableObjects;
+		int m_BackgroundEffectsLevel;
+		int m_ScreenEffectsLevel;
+		int m_GoreDensityPercent;
 
 		bool m_ShowForeignItems; //!< Do not show foreign items in buy menu.
 		bool m_FlashOnBrainDamage; //!< Whether red flashes on brain damage are on or off.

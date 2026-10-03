@@ -7,6 +7,8 @@
 #include "AEmitter.h"
 #include "AHuman.h"
 #include "MOPixel.h"
+#include "MOSParticle.h"
+#include "MOSRotating.h"
 #include "HeldDevice.h"
 #include "SLTerrain.h"
 #include "Controller.h"
@@ -24,6 +26,9 @@
 #include "tracy/Tracy.hpp"
 
 #include <execution>
+#include <array>
+#include <chrono>
+#include <limits>
 
 using namespace RTE;
 
@@ -33,6 +38,33 @@ AlarmEvent::AlarmEvent(const Vector& pos, int team, float range) :
 	m_Range(range * g_FrameMan.GetPlayerScreenWidth() * 0.51F) {}
 
 const std::string MovableMan::c_ClassName = "MovableMan";
+
+namespace {
+	bool IsDisposableVisual(const MovableObject* object) {
+		return object && (object->IsGibDebris() || dynamic_cast<const MOSParticle*>(object) != nullptr) &&
+		       !object->IsActor() && !object->IsDevice() && !object->IsMissionCritical() && !object->HitsMOs() &&
+		       !object->GetsHitByMOs() && !object->HasAnyScripts() && object->GetLifetime() > 0;
+	}
+}
+
+MovableMan::SceneStats MovableMan::CollectSceneStats() const {
+	SceneStats stats;
+	auto countObject = [&stats](const MovableObject* object) {
+		if (!object) return;
+		stats.Actors += dynamic_cast<const Actor*>(object) != nullptr;
+		stats.Items += object->IsDevice();
+		stats.MOSParticles += dynamic_cast<const MOSParticle*>(object) != nullptr;
+		stats.MOSRotating += dynamic_cast<const MOSRotating*>(object) != nullptr;
+		stats.MOPixels += dynamic_cast<const MOPixel*>(object) != nullptr;
+		stats.Gibs += object->IsGibDebris();
+		stats.CollisionEnabled += object->HitsMOs() || object->GetsHitByMOs();
+		stats.ProjectileLike += !object->IsActor() && !object->IsDevice() && object->HitsMOs() && object->GetLifetime() > 0;
+	};
+	for (const MovableObject* object : m_Actors) countObject(object);
+	for (const MovableObject* object : m_Items) countObject(object);
+	for (const MovableObject* object : m_Particles) countObject(object);
+	return stats;
+}
 
 // Comparison functor for sorting movable objects by their X position using STL's sort
 struct MOXPosComparison {
@@ -729,6 +761,17 @@ void MovableMan::AddItem(HeldDevice* itemToAdd) {
 
 void MovableMan::AddParticle(MovableObject* particleToAdd) {
 	if (particleToAdd && g_ActivityMan.GetActivity()) {
+		if ((g_SettingsMan.GetParticleLifetimePercent() < 100 ||
+		     (particleToAdd->IsGibDebris() && g_SettingsMan.GetDebrisLifetimeLevel() > 0)) && IsDisposableVisual(particleToAdd)) {
+			int lifetime = static_cast<int>(std::min<unsigned long>(particleToAdd->GetLifetime(), std::numeric_limits<int>::max()));
+			lifetime = static_cast<int>(std::max<std::int64_t>(1, static_cast<std::int64_t>(lifetime) * g_SettingsMan.GetParticleLifetimePercent() / 100));
+			if (particleToAdd->IsGibDebris()) {
+				const std::array<int, 4> debrisCaps = {0, 30000, 12000, 5000};
+				const int cap = debrisCaps[g_SettingsMan.GetDebrisLifetimeLevel()];
+				if (cap > 0) lifetime = std::min(lifetime, cap);
+			}
+			particleToAdd->SetLifetime(lifetime);
+		}
 		g_ActivityMan.GetActivity()->ForceSetTeamAsActive(particleToAdd->GetTeam());
 
 		particleToAdd->SetAsAddedToMovableMan();
@@ -1275,6 +1318,43 @@ void MovableMan::Update() {
 	}
 
 	m_SimUpdateFrameNumber++;
+	// Reclaim only finite-lived, non-colliding, script-free effects. The normal update already
+	// deletes objects marked here; this extra scan runs at most once per second when enabled.
+	if (g_SettingsMan.GetParticleLimitLevel() || g_SettingsMan.GetGibLimitLevel() ||
+	    g_SettingsMan.GetMaximumMovableObjects() || g_SettingsMan.GetDebrisLifetimeLevel()) {
+		static auto lastVisualLimitCheck = std::chrono::steady_clock::time_point{};
+		const auto now = std::chrono::steady_clock::now();
+		if (now - lastVisualLimitCheck >= std::chrono::seconds(1)) {
+			lastVisualLimitCheck = now;
+			const std::array<std::size_t, 5> particleCaps = {0, 10000, 6000, 3000, 1000};
+			const std::array<std::size_t, 4> gibCaps = {0, 2000, 1000, 400};
+			const std::array<int, 4> debrisCaps = {0, 30000, 12000, 5000};
+			const std::size_t particleCap = particleCaps[g_SettingsMan.GetParticleLimitLevel()];
+			const std::size_t gibCap = gibCaps[g_SettingsMan.GetGibLimitLevel()];
+			const int debrisCap = debrisCaps[g_SettingsMan.GetDebrisLifetimeLevel()];
+			std::size_t visualCount = 0;
+			std::size_t gibCount = 0;
+			for (const MovableObject* object : m_Particles) {
+				if (!object->IsSetToDelete() && IsDisposableVisual(object)) {
+					++visualCount;
+					gibCount += object->IsGibDebris();
+				}
+			}
+			std::size_t totalCount = GetMovableObjectCount();
+			const std::size_t totalCap = static_cast<std::size_t>(g_SettingsMan.GetMaximumMovableObjects());
+			for (MovableObject* object : m_Particles) {
+				if (object->IsSetToDelete() || !IsDisposableVisual(object)) continue;
+				if (debrisCap > 0 && object->IsGibDebris() && object->GetLifetime() > static_cast<unsigned long>(debrisCap)) object->SetLifetime(debrisCap);
+				if ((gibCap > 0 && object->IsGibDebris() && gibCount > gibCap) ||
+				    (particleCap > 0 && visualCount > particleCap) || (totalCap > 0 && totalCount > totalCap)) {
+					object->SetToDelete(true);
+					--visualCount;
+					gibCount -= object->IsGibDebris();
+					--totalCount;
+				}
+			}
+		}
+	}
 
 	// ---TEMP ---
 	// These are here for multithreaded AI, but will be unnecessary when multithreaded-sim-and-render is in!
