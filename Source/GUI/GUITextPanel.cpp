@@ -1,5 +1,6 @@
 #include "GUI.h"
 #include "GUITextPanel.h"
+#include "../System/UTF8.h"
 
 #include <cassert>
 
@@ -165,7 +166,7 @@ void GUITextPanel::OnKeyPress(int KeyCode, int Modifier) {
 			RemoveSelectionText();
 		} else {
 			if (m_CursorIndex > 0) {
-				int newCursorIndex = ModKey ? GetStartOfPreviousCharacterGroup(m_Text, m_CursorIndex) : m_CursorIndex - 1;
+				int newCursorIndex = ModKey ? GetStartOfPreviousCharacterGroup(m_Text, m_CursorIndex) : static_cast<int>(UTF8::PreviousBoundary(m_Text, m_CursorIndex));
 				m_Text.erase(newCursorIndex, m_CursorIndex - newCursorIndex);
 				m_CursorIndex = newCursorIndex;
 			}
@@ -181,7 +182,7 @@ void GUITextPanel::OnKeyPress(int KeyCode, int Modifier) {
 			RemoveSelectionText();
 		} else {
 			if (m_CursorIndex < m_Text.size()) {
-				int nextCursorIndex = ModKey ? GetStartOfNextCharacterGroup(m_Text, m_CursorIndex) : m_CursorIndex + 1;
+				int nextCursorIndex = ModKey ? GetStartOfNextCharacterGroup(m_Text, m_CursorIndex) : static_cast<int>(UTF8::NextBoundary(m_Text, m_CursorIndex));
 				m_Text.erase(m_CursorIndex, nextCursorIndex - m_CursorIndex);
 			}
 		}
@@ -193,7 +194,7 @@ void GUITextPanel::OnKeyPress(int KeyCode, int Modifier) {
 	// Left Arrow
 	if (KeyCode == GUIInput::Key_LeftArrow) {
 		if (m_CursorIndex > 0) {
-			int newCursorIndex = ModKey ? GetStartOfPreviousCharacterGroup(m_Text, m_CursorIndex) : m_CursorIndex - 1;
+			int newCursorIndex = ModKey ? GetStartOfPreviousCharacterGroup(m_Text, m_CursorIndex) : static_cast<int>(UTF8::PreviousBoundary(m_Text, m_CursorIndex));
 			if (Shift) {
 				DoSelection(m_CursorIndex, newCursorIndex);
 			} else {
@@ -207,7 +208,7 @@ void GUITextPanel::OnKeyPress(int KeyCode, int Modifier) {
 
 	// Right Arrow
 	if (KeyCode == GUIInput::Key_RightArrow) {
-		int newCursorIndex = ModKey ? GetStartOfNextCharacterGroup(m_Text, m_CursorIndex) : m_CursorIndex + 1;
+		int newCursorIndex = ModKey ? GetStartOfNextCharacterGroup(m_Text, m_CursorIndex) : static_cast<int>(UTF8::NextBoundary(m_Text, m_CursorIndex));
 		if (m_CursorIndex < m_Text.size()) {
 			if (Shift) {
 				DoSelection(m_CursorIndex, newCursorIndex);
@@ -289,30 +290,31 @@ void GUITextPanel::OnKeyPress(int KeyCode, int Modifier) {
 }
 
 void GUITextPanel::OnTextInput(std::string_view inputText) {
-	int minValidKeyCode = 32;
-	int maxValidKeyCode = 126;
-	if (m_NumericOnly) {
-		minValidKeyCode = 48;
-		maxValidKeyCode = 57;
-	}
-
-	for (auto characterIterator = inputText.begin(); characterIterator < inputText.end(); ++characterIterator) {
-		char character = *characterIterator;
-		if (character >= minValidKeyCode && character <= maxValidKeyCode) {
+	for (std::size_t offset = 0; offset < inputText.size();) {
+		std::uint32_t codePoint = 0;
+		std::size_t byteCount = 1;
+		if (!UTF8::Decode(inputText, offset, codePoint, byteCount)) {
+			offset += byteCount;
+			continue;
+		}
+		const bool accepted = m_NumericOnly ? (codePoint >= '0' && codePoint <= '9') : (codePoint >= 32 && codePoint != 127);
+		if (accepted) {
 			RemoveSelectionText();
-			if (m_MaxTextLength > 0 && m_Text.length() >= m_MaxTextLength) {
+			if (m_MaxTextLength > 0 && UTF8::CountCodepoints(m_Text) >= static_cast<std::size_t>(m_MaxTextLength)) {
 				return;
 			}
-			m_Text.insert(m_Text.begin() + m_CursorIndex, character);
-			m_CursorIndex++;
+			m_Text.insert(static_cast<std::size_t>(m_CursorIndex), inputText.substr(offset, byteCount));
+			m_CursorIndex += static_cast<int>(byteCount);
 
 			if (m_NumericOnly && m_MaxNumericValue > 0 && std::stoi(m_Text) > m_MaxNumericValue) {
 				m_Text = std::to_string(m_MaxNumericValue);
+				m_CursorIndex = static_cast<int>(m_Text.size());
 			}
 
 			SendSignal(Changed, 0);
 			UpdateText(true);
 		}
+		offset += byteCount;
 	}
 }
 
@@ -343,12 +345,14 @@ void GUITextPanel::OnMouseDown(int X, int Y, int Buttons, int Modifier) {
 
 	// Go through each character until we to the mouse point
 	int TX = m_X;
-	for (int i = 0; i < Text.size(); i++) {
-		TX += m_Font->CalculateWidth(Text.at(i));
+	for (std::size_t i = 0; i < Text.size();) {
+		const std::size_t next = UTF8::NextBoundary(Text, i);
+		TX += m_Font->CalculateWidth(Text.substr(i, next - i));
 		if (TX > X) {
-			m_CursorIndex = i + m_StartIndex;
+			m_CursorIndex = static_cast<int>(i) + m_StartIndex;
 			break;
 		}
+		i = next;
 	}
 
 	// Do a selection if holding the shift button
@@ -367,14 +371,16 @@ void GUITextPanel::OnMouseMove(int X, int Y, int Buttons, int Modifier) {
 	// Select from the mouse down point to where the mouse is currently
 	std::string Text = m_Text.substr(m_StartIndex, m_Text.size() - m_StartIndex);
 	int TX = m_X;
-	for (int i = 0; i < Text.size(); i++) {
-		TX += m_Font->CalculateWidth(Text.at(i));
+	for (std::size_t i = 0; i < Text.size();) {
+		const std::size_t next = UTF8::NextBoundary(Text, i);
+		TX += m_Font->CalculateWidth(Text.substr(i, next - i));
 		if (TX >= X) {
-			DoSelection(m_CursorIndex, i + m_StartIndex);
-			m_CursorIndex = i + m_StartIndex;
+			DoSelection(m_CursorIndex, static_cast<int>(i) + m_StartIndex);
+			m_CursorIndex = static_cast<int>(i) + m_StartIndex;
 			UpdateText(false, true);
 			break;
 		}
+		i = next;
 	}
 
 	// Double check for the mouse at the end of the text
@@ -407,7 +413,10 @@ void GUITextPanel::UpdateText(bool Typing, bool DoIncrement) {
 
 	// Make sure the cursor is greater or equal to the start index
 	if (m_CursorIndex <= m_StartIndex && DoIncrement) {
-		m_StartIndex = m_CursorIndex - Increment;
+		m_StartIndex = static_cast<int>(UTF8::PreviousBoundary(m_Text, m_CursorIndex));
+		for (int i = 1; i < Increment && m_StartIndex > 0; ++i) {
+			m_StartIndex = static_cast<int>(UTF8::PreviousBoundary(m_Text, m_StartIndex));
+		}
 	}
 
 	// Clamp it
@@ -416,12 +425,16 @@ void GUITextPanel::UpdateText(bool Typing, bool DoIncrement) {
 	// If the cursor is greater than the length of text panel, adjust the start index
 	std::string Sub = m_Text.substr(m_StartIndex, m_CursorIndex - m_StartIndex);
 	while (m_Font->CalculateWidth(Sub) > m_Width - Spacer * 2 && DoIncrement) {
-		m_StartIndex += Increment;
+		m_StartIndex = static_cast<int>(UTF8::Advance(m_Text, m_StartIndex, Increment));
 		Sub = m_Text.substr(m_StartIndex, m_CursorIndex - m_StartIndex);
 	}
 
 	// Clamp it
-	m_StartIndex = std::max(0, std::min(m_StartIndex, static_cast<int>(m_Text.size() - 1)));
+	m_StartIndex = std::max(0, std::min(m_StartIndex, static_cast<int>(m_Text.size())));
+	while (m_StartIndex > 0 && m_StartIndex < static_cast<int>(m_Text.size()) &&
+	       (static_cast<unsigned char>(m_Text[m_StartIndex]) & 0xC0) == 0x80) {
+		--m_StartIndex;
+	}
 
 	// Adjust the cursor position
 	m_CursorX = m_Font->CalculateWidth(m_Text.substr(m_StartIndex, m_CursorIndex - m_StartIndex));
@@ -467,45 +480,59 @@ void GUITextPanel::DoSelection(int Start, int End) {
 }
 
 int GUITextPanel::GetStartOfNextCharacterGroup(const std::string_view& stringToCheck, int currentIndex) const {
-	auto isNormalCharacter = [](char charToCheck) {
-		return (std::isalnum(charToCheck) || charToCheck == '_');
+	currentIndex = std::clamp(currentIndex, 0, static_cast<int>(stringToCheck.size()));
+	auto classify = [&](std::size_t offset, std::uint32_t& codePoint) {
+		std::size_t bytes = 1;
+		UTF8::Decode(stringToCheck, offset, codePoint, bytes);
+		const bool space = codePoint == ' ' || codePoint == '\t' || codePoint == '\n' || codePoint == '\r';
+		const bool word = codePoint >= 0x80 || codePoint == '_' || (codePoint < 0x80 && std::isalnum(static_cast<unsigned char>(codePoint)));
+		return std::pair<bool, bool>{word, space};
 	};
-	auto isNormalCharacterOrSpace = [](char charToCheck) {
-		return (std::isalnum(charToCheck) || charToCheck == '_' || std::isspace(charToCheck));
-	};
-	auto isSpecialCharacterOrSpace = [](char charToCheck) {
-		return !(std::isalnum(charToCheck) || charToCheck == '_');
-	};
-
-	std::string_view::const_iterator currentIterator = stringToCheck.cbegin() + currentIndex;
-	currentIterator = isNormalCharacter(*currentIterator) ? std::find_if(currentIterator, stringToCheck.cend(), isSpecialCharacterOrSpace) : std::find_if(currentIterator, stringToCheck.cend(), isNormalCharacterOrSpace);
-
-	if (currentIterator != stringToCheck.cend() && std::isspace(*currentIterator)) {
-		currentIterator = std::find_if_not(currentIterator, stringToCheck.cend(), isspace);
+	std::size_t cursor = static_cast<std::size_t>(currentIndex);
+	if (cursor >= stringToCheck.size()) return static_cast<int>(cursor);
+	std::uint32_t cp = 0;
+	auto [word, space] = classify(cursor, cp);
+	while (cursor < stringToCheck.size()) {
+		std::uint32_t nextCp = 0;
+		auto [nextWord, nextSpace] = classify(cursor, nextCp);
+		if (cursor != static_cast<std::size_t>(currentIndex) && (nextSpace || nextWord != word)) break;
+		cursor = UTF8::NextBoundary(stringToCheck, cursor);
 	}
-	return std::distance(stringToCheck.cbegin(), currentIterator);
+	while (cursor < stringToCheck.size()) {
+		std::uint32_t nextCp = 0;
+		std::size_t bytes = 1;
+		UTF8::Decode(stringToCheck, cursor, nextCp, bytes);
+		if (nextCp != ' ' && nextCp != '\t' && nextCp != '\n' && nextCp != '\r') break;
+		cursor = UTF8::NextBoundary(stringToCheck, cursor);
+	}
+	return static_cast<int>(cursor);
 }
 
 int GUITextPanel::GetStartOfPreviousCharacterGroup(const std::string_view& stringToCheck, int currentIndex) const {
-	auto isNormalCharacter = [](char charToCheck) {
-		return (std::isalnum(charToCheck) || charToCheck == '_');
+	currentIndex = std::clamp(currentIndex, 0, static_cast<int>(stringToCheck.size()));
+	std::size_t cursor = static_cast<std::size_t>(currentIndex);
+	if (cursor == 0) return 0;
+	auto decodePrevious = [&](std::size_t end, std::uint32_t& cp) {
+		const std::size_t start = UTF8::PreviousBoundary(stringToCheck, end);
+		std::size_t bytes = 1;
+		UTF8::Decode(stringToCheck, start, cp, bytes);
+		return start;
 	};
-	auto isNormalCharacterOrSpace = [](char charToCheck) {
-		return (std::isalnum(charToCheck) || charToCheck == '_' || std::isspace(charToCheck));
-	};
-	auto isSpecialCharacterOrSpace = [](char charToCheck) {
-		return !(std::isalnum(charToCheck) || charToCheck == '_');
-	};
-
-	std::string_view::reverse_iterator currentIterator = stringToCheck.crbegin() + (m_Text.size() - currentIndex);
-	if (std::isspace(*currentIterator)) {
-		currentIterator = std::find_if_not(currentIterator, stringToCheck.crend(), isspace);
+	std::uint32_t cp = 0;
+	cursor = decodePrevious(cursor, cp);
+	auto isSpace = [](std::uint32_t value) { return value == ' ' || value == '\t' || value == '\n' || value == '\r'; };
+	auto isWord = [](std::uint32_t value) { return value >= 0x80 || value == '_' || (value < 0x80 && std::isalnum(static_cast<unsigned char>(value))); };
+	while (isSpace(cp) && cursor > 0) cursor = decodePrevious(cursor, cp);
+	const bool word = isWord(cp);
+	while (cursor > 0) {
+		const std::size_t previous = UTF8::PreviousBoundary(stringToCheck, cursor);
+		std::uint32_t previousCp = 0;
+		std::size_t bytes = 1;
+		UTF8::Decode(stringToCheck, previous, previousCp, bytes);
+		if (isSpace(previousCp) || isWord(previousCp) != word) break;
+		cursor = previous;
 	}
-
-	if (currentIterator != stringToCheck.crend()) {
-		currentIterator = isNormalCharacter(*currentIterator) ? std::find_if(currentIterator, stringToCheck.crend(), isSpecialCharacterOrSpace) : std::find_if(currentIterator, stringToCheck.crend(), isNormalCharacterOrSpace);
-	}
-	return std::distance(stringToCheck.cbegin(), currentIterator.base());
+	return static_cast<int>(cursor);
 }
 
 void GUITextPanel::RemoveSelectionText() {
@@ -534,11 +561,15 @@ void GUITextPanel::SetCursorPos(int cursorPos) {
 	if (cursorPos <= 0) {
 		cursorPos = 0;
 	}
-	if (cursorPos > m_Text.size()) {
-		cursorPos = m_Text.size();
+	if (cursorPos > static_cast<int>(m_Text.size())) {
+		cursorPos = static_cast<int>(m_Text.size());
+	}
+	while (cursorPos > 0 && cursorPos < static_cast<int>(m_Text.size()) &&
+	       (static_cast<unsigned char>(m_Text[cursorPos]) & 0xC0) == 0x80) {
+		--cursorPos;
 	}
 
-	m_CursorIndex = m_Text.size();
+	m_CursorIndex = cursorPos;
 
 	UpdateText();
 }

@@ -894,6 +894,12 @@ void FrameMan::Draw() {
 		set_clip_state(drawScreen, 1);
 
 		DrawScreenText(playerScreen, playerGUIBitmap);
+		if (System::IsDebugRun()) {
+			GUIFont* debugFont = GetLargeFont();
+			playerGUIBitmap.DrawRectangle(10, 30, 230, debugFont->GetFontHeight() + 8, 0, true);
+			debugFont->SetColor(15);
+			debugFont->Draw(&playerGUIBitmap, 14, 34, "UTF-8 test: Привет, Ёжик!");
+		}
 
 		// The position of the current draw screen on the backbuffer
 		Vector screenOffset;

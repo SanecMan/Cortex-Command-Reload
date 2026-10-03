@@ -1,10 +1,29 @@
 #include "GUI.h"
+#include "../Managers/PresetMan.h"
+#include "../System/UTF8.h"
 
 #include <cassert>
+#include <filesystem>
+#include <fstream>
+
+#define STBTT_STATIC
+#define STB_TRUETYPE_IMPLEMENTATION
+#include "imgui/imstb_truetype.h"
 
 using namespace RTE;
 
+struct GUIFont::TrueTypeFont {
+	std::vector<unsigned char> m_Data;
+	stbtt_fontinfo m_Info{};
+	float m_Scale = 0.0F;
+	int m_Ascent = 0;
+	std::unordered_map<std::uint32_t, GUIFont::TrueTypeGlyph> m_Glyphs;
+};
+
+std::unordered_map<int, std::weak_ptr<GUIFont::TrueTypeFont>> GUIFont::s_TrueTypeFonts;
+
 GUIFont::GUIFont(const std::string& Name) :
+	m_TrueTypeFont(nullptr),
 	m_Font(nullptr),
 	m_Screen(nullptr),
 	m_FontHeight(0),
@@ -101,11 +120,28 @@ bool GUIFont::Load(GUIScreen* Screen, const std::string& Filename) {
 		}
 	}
 
+	// Keep the original bitmap font for its existing glyphs and use a bundled
+	// Unicode font only for characters which the 8-bit atlas cannot represent.
+	m_TrueTypeFont = s_TrueTypeFonts[m_FontHeight].lock();
+	if (!m_TrueTypeFont) {
+		const std::string unicodeFontPath = g_PresetMan.GetFullModulePath("Base.rte/GUIS/Fonts/Roboto-Medium.ttf");
+		std::ifstream unicodeFontStream(std::filesystem::u8path(unicodeFontPath), std::ios::binary);
+		if (unicodeFontStream) {
+			auto unicodeFont = std::make_shared<TrueTypeFont>();
+			unicodeFont->m_Data.assign(std::istreambuf_iterator<char>(unicodeFontStream), std::istreambuf_iterator<char>());
+			if (!unicodeFont->m_Data.empty() && stbtt_InitFont(&unicodeFont->m_Info, unicodeFont->m_Data.data(), stbtt_GetFontOffsetForIndex(unicodeFont->m_Data.data(), 0))) {
+				unicodeFont->m_Scale = stbtt_ScaleForPixelHeight(&unicodeFont->m_Info, static_cast<float>(m_FontHeight));
+				stbtt_GetFontVMetrics(&unicodeFont->m_Info, &unicodeFont->m_Ascent, nullptr, nullptr);
+				m_TrueTypeFont = unicodeFont;
+				s_TrueTypeFonts[m_FontHeight] = unicodeFont;
+			}
+		}
+	}
+
 	return true;
 }
 
 void GUIFont::Draw(GUIBitmap* Bitmap, int X, int Y, const std::string& Text, unsigned long Shadow) {
-	unsigned char c;
 	GUIRect Rect;
 	GUIBitmap* Surf = m_CurrentBitmap;
 	int initX = X;
@@ -122,39 +158,52 @@ void GUIFont::Draw(GUIBitmap* Bitmap, int X, int Y, const std::string& Text, uns
 		}
 	}
 
-	// Go through every character
-	for (int i = 0; i < Text.length(); i++) {
-		c = Text.at(i);
-
-		if (c == '\n') {
+	// Walk UTF-8 by code point, preserving the existing atlas for legacy glyphs.
+	for (std::size_t i = 0; i < Text.size();) {
+		std::uint32_t codePoint = 0;
+		std::size_t byteCount = 1;
+		UTF8::Decode(Text, i, codePoint, byteCount);
+		if (codePoint == '\n') {
 			Y += m_FontHeight;
 			X = initX;
+			i += byteCount;
+			continue;
 		}
-		if (c == '\t') {
+		if (codePoint == '\t') {
 			X += m_Characters[' '].m_Width * 4;
+			i += byteCount;
+			continue;
 		}
-		if (c < 0) {
-			c += m_CharIndexCap;
-		}
-		if (c < 32 || c >= m_CharIndexCap) {
+		if (codePoint < 32) {
+			i += byteCount;
 			continue;
 		}
 
-		int CharWidth = m_Characters[c].m_Width;
-		int offX = m_Characters[c].m_Offset;
-		int offY = ((c - 32) / 16) * m_FontHeight;
-		SetRect(&Rect, offX, offY, offX + CharWidth, offY + m_FontHeight);
+		if (codePoint >= m_CharIndexCap && m_TrueTypeFont) {
+			if (const TrueTypeGlyph* glyph = GetTrueTypeGlyph(codePoint)) {
+				if (Shadow) DrawTrueTypeGlyph(Bitmap, X + 1, Y + 1, *glyph, Shadow);
+				DrawTrueTypeGlyph(Bitmap, X, Y, *glyph, m_CurrentColor);
+				X += glyph->m_Advance + m_Kerning;
+			} else {
+				const unsigned char c = '?';
+				const int charWidth = m_Characters[c].m_Width;
+				SetRect(&Rect, m_Characters[c].m_Offset, 0, m_Characters[c].m_Offset + charWidth, m_FontHeight);
+				if (Shadow && FSC) FSC->m_Bitmap->DrawTrans(Bitmap, X + 1, Y + 1, &Rect);
+				Surf->DrawTrans(Bitmap, X, Y, &Rect);
+				X += charWidth + m_Kerning;
+			}
+		} else {
+			unsigned char c = codePoint < m_CharIndexCap ? static_cast<unsigned char>(codePoint) : static_cast<unsigned char>('?');
+			int CharWidth = m_Characters[c].m_Width;
+			int offX = m_Characters[c].m_Offset;
+			int offY = ((c - 32) / 16) * m_FontHeight;
+			SetRect(&Rect, offX, offY, offX + CharWidth, offY + m_FontHeight);
 
-		// Draw the shadow
-		if (Shadow && FSC) {
-			FSC->m_Bitmap->DrawTrans(Bitmap, X + 1, Y + 1, &Rect);
+			if (Shadow && FSC) FSC->m_Bitmap->DrawTrans(Bitmap, X + 1, Y + 1, &Rect);
+			Surf->DrawTrans(Bitmap, X, Y, &Rect);
+			X += CharWidth + m_Kerning;
 		}
-
-		// Draw the main color
-		Surf->DrawTrans(Bitmap, X, Y, &Rect);
-
-		// Find the starting position
-		X += CharWidth + m_Kerning;
+		i += byteCount;
 	}
 }
 
@@ -254,33 +303,28 @@ void GUIFont::SetColor(unsigned long Color) {
 }
 
 int GUIFont::CalculateWidth(const std::string& Text) {
-	unsigned char c;
 	int Width = 0;
 	int WidestLine = 0;
 
-	// Go through every character
-	for (int i = 0; i < Text.length(); i++) {
-		c = Text.at(i);
+	for (std::size_t i = 0; i < Text.size();) {
+		std::uint32_t codePoint = 0;
+		std::size_t byteCount = 1;
+		UTF8::Decode(Text, i, codePoint, byteCount);
 		// Reset line counting if newline encountered
-		if (c == '\n') {
+		if (codePoint == '\n') {
 			if (Width > WidestLine) {
 				WidestLine = Width;
 			}
 			Width = 0;
+			i += byteCount;
 			continue;
 		}
-		if (c < 0) {
-			c += m_CharIndexCap;
-		}
-
-		if (c < 32 || c >= m_CharIndexCap) {
+		if (codePoint < 32) {
+			i += byteCount;
 			continue;
 		}
-
-		Width += m_Characters[c].m_Width;
-
-		// Add kerning
-		Width += m_Kerning;
+		Width += GetCodepointWidth(codePoint) + m_Kerning;
+		i += byteCount;
 	}
 	if (Width > WidestLine) {
 		WidestLine = Width;
@@ -290,8 +334,9 @@ int GUIFont::CalculateWidth(const std::string& Text) {
 }
 
 int GUIFont::CalculateWidth(const char Character) {
-	if (Character >= 32 && Character < m_CharIndexCap) {
-		return m_Characters[Character].m_Width + m_Kerning;
+	const unsigned char character = static_cast<unsigned char>(Character);
+	if (character >= 32 && character < m_CharIndexCap) {
+		return m_Characters[character].m_Width + m_Kerning;
 	}
 	return 0;
 }
@@ -300,29 +345,32 @@ int GUIFont::CalculateHeight(const std::string& Text, int MaxWidth) {
 	if (Text.empty()) {
 		return 0;
 	}
-	unsigned char c;
 	int Width = 0;
 	int Height = m_FontHeight;
 	int lastSpacePos = 0;
 
 	// Go through every character
-	for (int i = 0; i < Text.length(); i++) {
-		c = Text.at(i);
+	for (std::size_t i = 0; i < Text.size();) {
+		std::uint32_t codePoint = 0;
+		std::size_t byteCount = 1;
+		UTF8::Decode(Text, i, codePoint, byteCount);
 
 		// Add the new line's height if newline encountered
-		if (c == '\n') {
+		if (codePoint == '\n') {
 			Width = 0;
 			Height += m_FontHeight;
+			i += byteCount;
 			continue;
 		}
-		if (c < 32 || c >= m_CharIndexCap) {
+		if (codePoint < 32) {
+			i += byteCount;
 			continue;
 		}
-		if (c == ' ') {
+		if (codePoint == ' ') {
 			lastSpacePos = i;
 		}
 
-		Width += m_Characters[c].m_Width + m_Kerning;
+		Width += GetCodepointWidth(codePoint) + m_Kerning;
 		if (MaxWidth > 0 && Width > MaxWidth) {
 			// Rewind to the last space, and do line break, but only if we've passed a space since last wrap
 			if (lastSpacePos > 0) {
@@ -331,8 +379,10 @@ int GUIFont::CalculateHeight(const std::string& Text, int MaxWidth) {
 				Width = 0;
 				Height += m_FontHeight;
 			}
+			i += byteCount;
 			continue;
 		}
+		i += byteCount;
 	}
 
 	return Height;
@@ -401,7 +451,70 @@ int GUIFont::GetKerning() const {
 	return m_Kerning;
 }
 
+const GUIFont::TrueTypeGlyph* GUIFont::GetTrueTypeGlyph(std::uint32_t codePoint) {
+	if (!m_TrueTypeFont) {
+		return nullptr;
+	}
+	if (const auto existing = m_TrueTypeFont->m_Glyphs.find(codePoint); existing != m_TrueTypeFont->m_Glyphs.end()) {
+		return &existing->second;
+	}
+	if (m_TrueTypeFont->m_Glyphs.size() >= 512) {
+		return nullptr;
+	}
+
+	TrueTypeGlyph glyph;
+	int xOffset = 0;
+	int yOffset = 0;
+	unsigned char* bitmap = stbtt_GetCodepointBitmap(&m_TrueTypeFont->m_Info, m_TrueTypeFont->m_Scale, m_TrueTypeFont->m_Scale,
+		static_cast<int>(codePoint), &glyph.m_Width, &glyph.m_Height, &xOffset, &yOffset);
+	if (!bitmap && (glyph.m_Width != 0 || glyph.m_Height != 0)) {
+		return nullptr;
+	}
+	glyph.m_OffsetX = xOffset;
+	glyph.m_OffsetY = static_cast<int>(std::lround(m_TrueTypeFont->m_Ascent * m_TrueTypeFont->m_Scale)) + yOffset;
+	int advance = 0;
+	stbtt_GetCodepointHMetrics(&m_TrueTypeFont->m_Info, static_cast<int>(codePoint), &advance, nullptr);
+	glyph.m_Advance = std::max(1, static_cast<int>(std::lround(advance * m_TrueTypeFont->m_Scale)));
+	if (bitmap) {
+		glyph.m_Alpha.assign(bitmap, bitmap + static_cast<std::size_t>(glyph.m_Width) * glyph.m_Height);
+		stbtt_FreeBitmap(bitmap, nullptr);
+	}
+	return &m_TrueTypeFont->m_Glyphs.emplace(codePoint, std::move(glyph)).first->second;
+}
+
+int GUIFont::GetCodepointWidth(std::uint32_t codePoint) {
+	if (codePoint < m_CharIndexCap) {
+		return m_Characters[codePoint].m_Width;
+	}
+	if (const TrueTypeGlyph* glyph = GetTrueTypeGlyph(codePoint)) {
+		return glyph->m_Advance;
+	}
+	return m_Characters['?'].m_Width;
+}
+
+void GUIFont::DrawTrueTypeGlyph(GUIBitmap* bitmap, int x, int y, const TrueTypeGlyph& glyph, unsigned long color) {
+	if (!bitmap || glyph.m_Alpha.empty()) {
+		return;
+	}
+	GUIRect clip{};
+	bitmap->GetClipRect(&clip);
+	const int left = std::max(0, std::max(static_cast<int>(clip.left), x + glyph.m_OffsetX));
+	const int top = std::max(0, std::max(static_cast<int>(clip.top), y + glyph.m_OffsetY));
+	const int right = std::min(bitmap->GetWidth() - 1, std::min(static_cast<int>(clip.right), x + glyph.m_OffsetX + glyph.m_Width - 1));
+	const int bottom = std::min(bitmap->GetHeight() - 1, std::min(static_cast<int>(clip.bottom), y + glyph.m_OffsetY + glyph.m_Height - 1));
+	for (int destY = top; destY <= bottom; ++destY) {
+		const int sourceY = destY - y - glyph.m_OffsetY;
+		for (int destX = left; destX <= right; ++destX) {
+			const int sourceX = destX - x - glyph.m_OffsetX;
+			if (glyph.m_Alpha[static_cast<std::size_t>(sourceY) * glyph.m_Width + sourceX] >= 112) {
+				bitmap->SetPixel(destX, destY, color);
+			}
+		}
+	}
+}
+
 void GUIFont::Destroy() {
+	m_TrueTypeFont.reset();
 	if (m_Font) {
 		m_Font->Destroy();
 		delete m_Font;

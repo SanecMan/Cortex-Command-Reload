@@ -1,5 +1,10 @@
 #pragma once
 
+#include <cstdint>
+#include <memory>
+#include <unordered_map>
+#include <vector>
+
 namespace RTE {
 
 	/// A class to handle the drawing of text.
@@ -91,6 +96,19 @@ namespace RTE {
 		void SetKerning(int newKerning = 1) { m_Kerning = newKerning; }
 
 	private:
+		struct TrueTypeFont;
+		struct TrueTypeGlyph {
+			int m_Width = 0;
+			int m_Height = 0;
+			int m_OffsetX = 0;
+			int m_OffsetY = 0;
+			int m_Advance = 0;
+			std::vector<unsigned char> m_Alpha;
+		};
+
+		std::shared_ptr<TrueTypeFont> m_TrueTypeFont;
+		static std::unordered_map<int, std::weak_ptr<TrueTypeFont>> s_TrueTypeFonts;
+
 		GUIBitmap* m_Font;
 		GUIScreen* m_Screen;
 		std::vector<FontColor> m_ColorCache;
@@ -106,5 +124,9 @@ namespace RTE {
 
 		int m_Kerning; // Spacing between characters
 		int m_Leading; // Spacing between lines
+
+		const TrueTypeGlyph* GetTrueTypeGlyph(std::uint32_t codePoint);
+		int GetCodepointWidth(std::uint32_t codePoint);
+		void DrawTrueTypeGlyph(GUIBitmap* bitmap, int x, int y, const TrueTypeGlyph& glyph, unsigned long color);
 	};
 } // namespace RTE

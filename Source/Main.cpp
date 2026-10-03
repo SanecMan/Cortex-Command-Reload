@@ -52,6 +52,7 @@
 #include "LuaMan.h"
 #include "MusicMan.h"
 #include "System.h"
+#include "System/UTF8.h"
 #include "DiscordPresence.h"
 
 #include "RenderTarget.h"
@@ -161,6 +162,19 @@ namespace {
 		state.Log.open(state.OutputDirectory / "DebugRun.log", std::ios::out | std::ios::trunc);
 		if (!state.Log) {
 			std::cerr << "Unable to open DebugRun.log for writing.\n";
+			return false;
+		}
+		const std::string utf8Probe = "Aя🙂";
+		const bool utf8DecodePassed = UTF8::CountCodepoints(utf8Probe) == 3 && UTF8::NextBoundary(utf8Probe, 1) == 3 && UTF8::PreviousBoundary(utf8Probe, 3) == 1 && UTF8::CountCodepoints("\xF0\x28\x8C\x28") == 4;
+		state.Log << "utf8_decoder_smoke=" << (utf8DecodePassed ? "passed" : "failed") << '\n' << std::flush;
+		if (!utf8DecodePassed) {
+			return false;
+		}
+		std::istringstream bomStream("\xEF\xBB\xBF" "ModuleName = UTF-8");
+		UTF8::SkipByteOrderMark(bomStream);
+		const bool utf8BOMPassed = bomStream.peek() == 'M';
+		state.Log << "utf8_bom_smoke=" << (utf8BOMPassed ? "passed" : "failed") << '\n' << std::flush;
+		if (!utf8BOMPassed) {
 			return false;
 		}
 		state.StartTime = std::chrono::steady_clock::now();

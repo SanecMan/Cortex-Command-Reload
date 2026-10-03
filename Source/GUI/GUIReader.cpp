@@ -1,5 +1,6 @@
 #include "GUI.h"
 #include "GUIReader.h"
+#include "../System/UTF8.h"
 
 #include <fstream>
 
@@ -34,7 +35,10 @@ int GUIReader::Create(const std::string& fileName) {
 	// Extract the file name and module name from the path
 	m_FileName = m_FilePath.substr(m_FilePath.find_last_of("/\\") + 1);
 
-	m_Stream = std::make_unique<std::ifstream>(fileName);
+	m_Stream = std::make_unique<std::ifstream>(std::filesystem::u8path(fileName));
+	if (m_Stream->good()) {
+		UTF8::SkipByteOrderMark(*m_Stream);
+	}
 	return m_Stream->good() ? 0 : -1;
 }
 
@@ -257,7 +261,7 @@ bool GUIReader::StartIncludeFile() {
 	m_StreamStack.emplace(StreamInfo(m_Stream.release(), m_FilePath, m_CurrentLine, m_PreviousIndent));
 
 	m_FilePath = includeFilePath;
-	m_Stream = std::make_unique<std::ifstream>(m_FilePath);
+	m_Stream = std::make_unique<std::ifstream>(std::filesystem::u8path(m_FilePath));
 
 	if (m_Stream->fail() || !std::filesystem::exists(includeFilePath)) {
 		// Backpedal and set up to read the next property in the old stream
@@ -269,6 +273,7 @@ bool GUIReader::StartIncludeFile() {
 		DiscardEmptySpace();
 		return false;
 	}
+	UTF8::SkipByteOrderMark(*m_Stream);
 
 	// Line counting starts with 1, not 0
 	m_CurrentLine = 1;

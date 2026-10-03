@@ -3,6 +3,7 @@
 #include "PresetMan.h"
 #include "SettingsMan.h"
 #include "System.h"
+#include "UTF8.h"
 
 #include <fstream>
 
@@ -57,7 +58,7 @@ int Reader::Create(const std::string& fileName, bool overwrites, const ProgressC
 		m_DataModuleID = g_PresetMan.GetModuleID(m_DataModuleName);
 	}
 	
-	return Create(std::make_unique<std::ifstream>(m_FilePath), fileName, overwrites, progressCallback, failOK);
+	return Create(std::make_unique<std::ifstream>(std::filesystem::u8path(m_FilePath)), fileName, overwrites, progressCallback, failOK);
 }
 
 int Reader::Create(std::unique_ptr<std::istream>&& stream, const std::string& fileName, bool overwrites, const ProgressCallback& progressCallback, bool failOK) {
@@ -83,6 +84,9 @@ int Reader::Create(std::unique_ptr<std::istream>&& stream, const std::string& fi
 	m_CanFail = failOK;
 
 	m_Stream = std::move(stream);
+	if (m_Stream && m_Stream->good()) {
+		UTF8::SkipByteOrderMark(*m_Stream);
+	}
 
 	if (!m_CanFail) {
 		RTEAssert(m_Stream->good(), "Failed to open data file \"" + m_FilePath + "\"!");
@@ -347,7 +351,7 @@ bool Reader::StartIncludeFile() {
 	m_StreamStack.push(StreamInfo(m_Stream.release(), m_FilePath, m_CurrentLine, m_PreviousIndent));
 
 	m_FilePath = includeFilePath;
-	m_Stream = std::make_unique<std::ifstream>(m_FilePath);
+	m_Stream = std::make_unique<std::ifstream>(std::filesystem::u8path(m_FilePath));
 
 	if (m_Stream->fail() || !System::PathExistsCaseSensitive(includeFilePath)) {
 		// Backpedal and set up to read the next property in the old stream
@@ -362,6 +366,7 @@ bool Reader::StartIncludeFile() {
 		DiscardEmptySpace();
 		return false;
 	}
+	UTF8::SkipByteOrderMark(*m_Stream);
 
 	// Line counting starts with 1, not 0
 	m_CurrentLine = 1;
