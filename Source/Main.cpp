@@ -78,7 +78,6 @@
 #include <chrono>
 #include <fstream>
 #include <filesystem>
-#include <span>
 #include <sstream>
 #include <string_view>
 #include <thread>
@@ -137,7 +136,7 @@ namespace {
 		return 0;
 	}
 
-	bool VerifyWorldStateTransportLoopback(std::span<const std::uint8_t> packet, const WorldStateProtocol::Snapshot& expectedSnapshot, std::ofstream& log);
+	bool VerifyWorldStateTransportLoopback(const WorldStateProtocol::Snapshot& expectedSnapshot, std::ofstream& log);
 
 	bool ParseDebugRunArguments(int argc, char** argv) {
 		DebugRunState& state = GetDebugRunState();
@@ -255,7 +254,7 @@ namespace {
 		if (!networkRoundTripPassed || !malformedNetworkRejected) {
 			return false;
 		}
-		if (!VerifyWorldStateTransportLoopback(networkPacket, networkSnapshot, state.Log)) {
+		if (!VerifyWorldStateTransportLoopback(networkSnapshot, state.Log)) {
 			return false;
 		}
 		const std::string legacyCyrillicProbe("\xCF\xF0\xE8\xE2\xE5\xF2", 6);
@@ -319,7 +318,7 @@ namespace {
 		return snapshotBuilder.Capture(static_cast<std::uint32_t>(GetDebugRunState().SimulationUpdates));
 	}
 
-	bool VerifyWorldStateTransportLoopback(std::span<const std::uint8_t> packet, const WorldStateProtocol::Snapshot& expectedSnapshot, std::ofstream& log) {
+	bool VerifyWorldStateTransportLoopback(const WorldStateProtocol::Snapshot& expectedSnapshot, std::ofstream& log) {
 		bool loopbackPassed = false;
 		bool serverStarted = false;
 		bool clientsStarted = false;
@@ -354,7 +353,7 @@ namespace {
 							}
 						}
 						if (!broadcastSent && acceptedClientCount == expectedClientCount) {
-							broadcastSent = serverTransport.BroadcastWorldState(packet);
+							broadcastSent = serverTransport.BroadcastSnapshot(expectedSnapshot, expectedSnapshot.Tick);
 							sendCount += broadcastSent ? expectedClientCount : 0;
 						}
 					for (std::size_t clientIndex = 0; clientIndex < clientTransports.size(); ++clientIndex) {
@@ -366,7 +365,9 @@ namespace {
 								continue;
 							}
 							WorldStateProtocol::Snapshot transportedSnapshot;
-							clientReceivedSnapshot[clientIndex] = WorldStateProtocol::DecodeSnapshot(received.Payload, transportedSnapshot) &&
+							std::uint32_t receivedSequence = 0;
+							clientReceivedSnapshot[clientIndex] = WorldStateProtocol::DecodeSnapshot(received.Payload, transportedSnapshot, &receivedSequence) &&
+							                                         receivedSequence == expectedSnapshot.Tick &&
 							                                         transportedSnapshot.Tick == expectedSnapshot.Tick &&
 							                                         transportedSnapshot.ScenePreset == expectedSnapshot.ScenePreset &&
 							                                         transportedSnapshot.Objects.size() == expectedSnapshot.Objects.size() &&
@@ -407,7 +408,7 @@ namespace {
 		const bool worldSnapshotPassed = WorldStateProtocol::EncodeSnapshot(worldSnapshot, state.SimulationUpdates, worldSnapshotPacket) &&
 		                                 WorldStateProtocol::DecodeSnapshot(worldSnapshotPacket, decodedWorldSnapshot) &&
 		                                 decodedWorldSnapshot.Objects.size() == worldSnapshot.Objects.size();
-		const bool liveSnapshotTransportPassed = worldSnapshotPassed && VerifyWorldStateTransportLoopback(worldSnapshotPacket, worldSnapshot, state.Log);
+		const bool liveSnapshotTransportPassed = worldSnapshotPassed && VerifyWorldStateTransportLoopback(worldSnapshot, state.Log);
 		state.Log << "captured_world_snapshot_objects=" << worldSnapshot.Objects.size()
 		          << " bytes=" << worldSnapshotPacket.size()
 		          << " result=" << (worldSnapshotPassed ? "passed" : "failed") << '\n' << std::flush;

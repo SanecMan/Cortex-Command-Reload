@@ -15,6 +15,8 @@ namespace RTE {
 
 	private:
 		std::uint32_t m_SceneRevision = 0;
+		std::uintptr_t m_LastActivityAddress = 0;
+		std::uintptr_t m_LastSceneAddress = 0;
 		std::string m_LastScenePreset;
 		std::string m_LastActivityPreset;
 	};

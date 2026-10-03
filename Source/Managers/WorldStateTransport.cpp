@@ -69,6 +69,16 @@ bool WorldStateTransport::BroadcastWorldState(std::span<const std::uint8_t> pack
 	return Send(RakNet::UNASSIGNED_SYSTEM_ADDRESS, packet, true);
 }
 
+bool WorldStateTransport::SendSnapshot(const RakNet::AddressOrGUID& target, const WorldStateProtocol::Snapshot& snapshot, std::uint32_t sequence) {
+	std::vector<std::uint8_t> packet;
+	return WorldStateProtocol::EncodeSnapshot(snapshot, sequence, packet) && SendWorldState(target, packet);
+}
+
+bool WorldStateTransport::BroadcastSnapshot(const WorldStateProtocol::Snapshot& snapshot, std::uint32_t sequence) {
+	std::vector<std::uint8_t> packet;
+	return WorldStateProtocol::EncodeSnapshot(snapshot, sequence, packet) && BroadcastWorldState(packet);
+}
+
 bool WorldStateTransport::Send(const RakNet::AddressOrGUID& target, std::span<const std::uint8_t> packet, bool broadcast) {
 	if (!m_Peer || packet.empty() || packet.size() > WorldStateProtocol::c_MaxPacketSize) {
 		return false;
