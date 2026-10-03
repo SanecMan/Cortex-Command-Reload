@@ -524,6 +524,7 @@ namespace {
 		          << " result=" << (worldSnapshotPassed ? "passed" : "failed") << '\n' << std::flush;
 		state.Log << "live_world_state_transport=" << (liveSnapshotTransportPassed ? "passed" : "failed") << '\n' << std::flush;
 		const bool utf8GlyphRenderPassed = g_FrameMan.DidDebugUTF8GlyphProbePass();
+		state.Log << "utf8_unicode_font_loaded=" << (g_FrameMan.DidDebugUTF8GlyphFontLoad() ? "yes" : "no") << '\n' << std::flush;
 		state.Log << "utf8_glyph_render_smoke=" << (utf8GlyphRenderPassed ? "passed" : "failed") << '\n' << std::flush;
 		success = success && utf8GlyphRenderPassed && state.HostSessionTestPassed && worldIdentityStable && replicaSmokePassed && worldSnapshotPassed && liveSnapshotTransportPassed;
 		const double elapsedSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - state.StartTime).count();

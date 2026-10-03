@@ -66,6 +66,7 @@ FrameMan::~FrameMan() {
 void FrameMan::Clear() {
 	m_DebugUTF8GlyphProbePassed = false;
 	m_DebugUTF8GlyphProbeDrawn = false;
+	m_DebugUTF8GlyphFontLoaded = false;
 	m_HSplit = false;
 	m_VSplit = false;
 	m_TwoPlayerVSplit = false;
@@ -898,6 +899,7 @@ void FrameMan::Draw() {
 		if (System::IsDebugRun() && !m_DebugUTF8GlyphProbeDrawn) {
 			GUIFont* debugFont = GetLargeFont();
 			const std::string probe = "UTF-8 test: Привет, Ёжик!";
+			m_DebugUTF8GlyphFontLoaded = debugFont && debugFont->HasUnicodeFont();
 			m_DebugUTF8GlyphProbePassed = debugFont && debugFont->SupportsCodepoint(0x041F) && debugFont->SupportsCodepoint(0x0451) &&
 			                              debugFont->SupportsCodepoint(0x0436);
 			m_ScreenText[playerScreen] = probe;

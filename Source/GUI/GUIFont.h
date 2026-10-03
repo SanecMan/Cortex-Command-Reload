@@ -77,6 +77,9 @@ namespace RTE {
 		/// Returns whether the loaded font can render the requested Unicode code point.
 		bool SupportsCodepoint(std::uint32_t codePoint);
 
+		/// Returns whether the bundled TrueType Unicode fallback loaded successfully.
+		bool HasUnicodeFont() const { return static_cast<bool>(m_TrueTypeFont); }
+
 		/// Calculates the height of a piece of text, if it's wrapped within a
 		/// max width.
 		/// @param Text Text, and the max width. If 0, no wrapping is done.

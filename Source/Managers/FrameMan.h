@@ -57,6 +57,7 @@ namespace RTE {
 		/// Draws the current frame to the screen.
 		void Draw();
 		bool DidDebugUTF8GlyphProbePass() const { return m_DebugUTF8GlyphProbePassed; }
+		bool DidDebugUTF8GlyphFontLoad() const { return m_DebugUTF8GlyphFontLoaded; }
 #pragma endregion
 
 #pragma region Getters
@@ -327,6 +328,7 @@ namespace RTE {
 		bool m_TwoPlayerVSplit; //!< Whether the screen is set to be split vertically when in two player splitscreen, or is default split horizontally.
 		bool m_DebugUTF8GlyphProbePassed = false;
 		bool m_DebugUTF8GlyphProbeDrawn = false;
+		bool m_DebugUTF8GlyphFontLoaded = false;
 
 		ContentFile m_PaletteFile; //!< File of the screen palette.
 		PALETTE m_Palette; //!< The current array of RGB entries read from the palette file.
