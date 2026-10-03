@@ -431,11 +431,22 @@ namespace {
 			}
 			std::this_thread::sleep_for(std::chrono::milliseconds(5));
 		}
-		const bool passed = serverSession.GetConnectedClientCount() == expectedClientCount &&
-		                    std::find(receivedSnapshot.begin(), receivedSnapshot.end(), false) == receivedSnapshot.end();
+		const bool allConnectedAndReceived = serverSession.GetConnectedClientCount() == expectedClientCount &&
+		                                    std::find(receivedSnapshot.begin(), receivedSnapshot.end(), false) == receivedSnapshot.end();
+		for (WorldStateTransport& client : clients) {
+			client.Stop();
+		}
+		const auto disconnectDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+		while (serverSession.GetConnectedClientCount() > 0 && std::chrono::steady_clock::now() < disconnectDeadline) {
+			serverSession.Update(++worldStateServerSimulationTick);
+			std::this_thread::sleep_for(std::chrono::milliseconds(5));
+		}
+		const bool remainedAvailableAfterDisconnect = serverSession.IsStarted() && serverSession.GetConnectedClientCount() == 0;
+		const bool passed = allConnectedAndReceived && remainedAvailableAfterDisconnect;
 		log << "world_state_host_session_smoke=" << (passed ? "passed" : "failed")
-		    << " clients_connected=" << serverSession.GetConnectedClientCount()
-		    << " clients_received=" << std::count(receivedSnapshot.begin(), receivedSnapshot.end(), true) << '\n' << std::flush;
+		    << " clients_accepted=" << expectedClientCount
+		    << " clients_received=" << std::count(receivedSnapshot.begin(), receivedSnapshot.end(), true)
+		    << " server_alive_after_disconnect=" << remainedAvailableAfterDisconnect << '\n' << std::flush;
 		return passed;
 	}
 
