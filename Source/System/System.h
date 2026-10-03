@@ -22,6 +22,10 @@ namespace RTE {
 		/// @return Whether the program was set to be terminated by the user.
 		static bool IsSetToQuit() { return s_Quit; }
 
+		/// Whether the executable was started in the automated diagnostic mode.
+		static bool IsDebugRun() { return s_DebugRun; }
+		static void SetDebugRun(bool enabled) { s_DebugRun = enabled; }
+
 		/// Sets the program to be terminated.
 		/// @param quitOrNot Terminate or not.
 		static void SetQuit(bool quitOrNot = true) { s_Quit = quitOrNot; }
@@ -130,6 +134,7 @@ namespace RTE {
 
 	private:
 		static bool s_Quit; //!< Whether the user requested program termination through GUI or the window close button.
+		static bool s_DebugRun; //!< Whether the executable is running an automated, non-interactive diagnostic session.
 		static bool s_LogToCLI; //!< Bool to tell whether to print the loading log and anything specified with PrintToCLI to command-line or not.
 		static bool s_ExternalModuleValidation; //!< Whether to run the program in a special mode where it will immediately quit without any messages after either successful loading of all modules or aborting during loading. For use by an external tool.
 		static std::string s_ThisExePathAndName; //!< String containing the absolute path to this executable. Used for relaunching via abort message.

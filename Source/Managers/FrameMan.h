@@ -296,6 +296,8 @@ namespace RTE {
 		/// @param nameBase The filename of the file to save to, WITHOUT EXTENSION.
 		/// @return 0 for success, anything below 0 is a sign of failure.
 		int SaveScreenToPNG(const char* nameBase) { return SaveBitmap(ScreenDump, nameBase); }
+		/// Saves a screenshot synchronously. Intended for automated diagnostic runs that exit immediately afterward.
+		int SaveScreenToPNGBlocking(const std::string& relativePath);
 
 		/// Dumps a bitmap of everything on the scene to a PNG file.
 		/// @param nameBase The filename of the file to save to, WITHOUT EXTENSION.

@@ -33,6 +33,7 @@
 #include <SDL3_image/SDL_image.h>
 
 #include <array>
+#include <filesystem>
 
 using namespace RTE;
 
@@ -629,6 +630,15 @@ void FrameMan::SaveScreenToBitmap() {
 	for (size_t y = 0; y < m_ScreenDumpBuffer->h / 2; ++y) {
 		std::swap_ranges(pixels + y * pitch, pixels + (y + 1) * pitch, pixels + (m_ScreenDumpBuffer->h - y - 1) * pitch);
 	}
+}
+
+int FrameMan::SaveScreenToPNGBlocking(const std::string& relativePath) {
+	if (!m_ScreenDumpBuffer || relativePath.empty()) {
+		return -1;
+	}
+	SaveScreenToBitmap();
+	const std::filesystem::path outputPath = std::filesystem::path(System::GetWorkingDirectory()) / System::GetScreenshotDirectory() / relativePath;
+	return IMG_SavePNG(m_ScreenDumpBuffer.get(), outputPath.string().c_str()) ? 0 : -1;
 }
 
 int FrameMan::SaveIndexedPNG(const char* fileName, BITMAP* bitmapToSave) const {

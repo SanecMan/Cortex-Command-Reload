@@ -63,11 +63,201 @@
 #include "windows.h"
 #endif
 
+#include <algorithm>
+#include <charconv>
+#include <chrono>
+#include <fstream>
+#include <filesystem>
+#include <sstream>
+#include <string_view>
+#include <unordered_set>
+
 extern "C" {
 FILE __iob_func[3] = {*stdin, *stdout, *stderr};
 }
 
 using namespace RTE;
+
+namespace {
+	struct DebugRunState {
+		bool Enabled = false;
+		bool StressStarted = false;
+		int UpdateLimit = 600;
+		int SimulationUpdates = 0;
+		int RenderedFrames = 0;
+		int InitialActorCount = 0;
+		int InitialParticleCount = 0;
+		bool InitialScreenshotCaptured = false;
+		bool MidpointScreenshotCaptured = false;
+		bool FinalScreenshotCaptured = false;
+		std::filesystem::path OutputDirectory;
+		std::ofstream Log;
+		std::chrono::steady_clock::time_point StartTime;
+		std::chrono::steady_clock::time_point ModuleLoadStartTime;
+		std::chrono::steady_clock::time_point ModuleLoadEndTime;
+		std::chrono::steady_clock::time_point SimulationStartTime;
+	};
+
+	DebugRunState& GetDebugRunState() {
+		static DebugRunState state;
+		return state;
+	}
+
+	bool ParseDebugRunArguments(int argc, char** argv) {
+		DebugRunState& state = GetDebugRunState();
+		for (int i = 1; i < argc; ++i) {
+			if (std::string_view(argv[i]) != "-debug-run") {
+				continue;
+			}
+			state.Enabled = true;
+			if (i + 1 < argc) {
+				int requestedUpdates = 0;
+				const std::string_view nextArgument(argv[i + 1]);
+				const auto [end, error] = std::from_chars(nextArgument.data(), nextArgument.data() + nextArgument.size(), requestedUpdates);
+				if (error == std::errc{} && end == nextArgument.data() + nextArgument.size() && requestedUpdates > 0) {
+					state.UpdateLimit = std::clamp(requestedUpdates, 60, 36000);
+					++i;
+				}
+			}
+			return true;
+		}
+		return false;
+	}
+
+	bool StartDebugRun() {
+		DebugRunState& state = GetDebugRunState();
+		if (!state.Enabled) {
+			return true;
+		}
+
+		state.OutputDirectory = std::filesystem::path(System::GetWorkingDirectory()) / System::GetScreenshotDirectory() / "DebugRuns";
+		std::error_code filesystemError;
+		const std::filesystem::file_status existingPathStatus = std::filesystem::symlink_status(state.OutputDirectory, filesystemError);
+		if (!filesystemError && std::filesystem::is_symlink(existingPathStatus)) {
+			std::cerr << "Debug run output path must not be a symlink: " << state.OutputDirectory.string() << '\n';
+			return false;
+		}
+		filesystemError.clear();
+		std::filesystem::create_directories(state.OutputDirectory, filesystemError);
+		if (filesystemError) {
+			std::cerr << "Unable to create debug run output directory: " << filesystemError.message() << '\n';
+			return false;
+		}
+		for (const std::filesystem::directory_entry& entry : std::filesystem::directory_iterator(state.OutputDirectory, filesystemError)) {
+			if (filesystemError) {
+				break;
+			}
+			const std::string name = entry.path().filename().string();
+			const bool isDebugArtifact = name == "DebugRun.log" || name == "LogLoading.txt" || name == "LogLoadingWarning.txt" || name == "LogConsole.txt" || name.starts_with("debug-run-");
+			if (isDebugArtifact && (entry.is_regular_file(filesystemError) || entry.is_symlink(filesystemError))) {
+				filesystemError.clear();
+				std::filesystem::remove(entry.path(), filesystemError);
+			}
+			filesystemError.clear();
+		}
+		state.Log.open(state.OutputDirectory / "DebugRun.log", std::ios::out | std::ios::trunc);
+		if (!state.Log) {
+			std::cerr << "Unable to open DebugRun.log for writing.\n";
+			return false;
+		}
+		state.StartTime = std::chrono::steady_clock::now();
+		state.Log << "mode=automated-gameplay-smoke\nupdates=" << state.UpdateLimit << "\nscene=Tutorial Bunker\n" << std::flush;
+		return true;
+	}
+
+	void SpawnDebugStressBatch() {
+		DebugRunState& state = GetDebugRunState();
+		std::ostringstream script;
+		script << "for i = 1, 16 do "
+		          "local actor = CreateAHuman('Fat Culled Clone', 'Base.rte'); "
+		          "if actor then actor.Team = 0; actor.Pos = SceneMan:MovePointToGround(Vector(180 + i * 8, 0), 0, 3); MovableMan:AddActor(actor); end; "
+		          "end; "
+		          "for i = 1, 256 do "
+		          "local particle = CreateMOPixel('Explosion Flame Glow', 'Base.rte'); "
+		          "if particle then particle.Pos = Vector(220 + math.random(-100, 100), 260 + math.random(-50, 50)); particle.Vel = Vector(math.random(-30, 30), math.random(-30, 30)); MovableMan:AddParticle(particle); end; "
+		          "end";
+		const int result = g_LuaMan.GetMasterScriptState().RunScriptString(script.str());
+		const int actorCount = g_MovableMan.GetActorCount();
+		const int particleCount = g_MovableMan.GetParticleCount();
+		state.Log << "stress_batch_update=" << state.SimulationUpdates << " result=" << result
+		          << " actors=" << actorCount << " particles=" << particleCount << '\n' << std::flush;
+		state.StressStarted = state.StressStarted || (result >= 0 && actorCount > state.InitialActorCount && particleCount > state.InitialParticleCount);
+	}
+
+	void AdvanceDebugRunSimulation() {
+		DebugRunState& state = GetDebugRunState();
+		if (!state.Enabled || System::IsSetToQuit()) {
+			return;
+		}
+		++state.SimulationUpdates;
+		if (state.SimulationUpdates == 1) {
+			state.InitialActorCount = g_MovableMan.GetActorCount();
+			state.InitialParticleCount = g_MovableMan.GetParticleCount();
+		}
+		if (state.SimulationUpdates == 1 || state.SimulationUpdates == state.UpdateLimit / 2) {
+			SpawnDebugStressBatch();
+		}
+		if (state.SimulationUpdates % 60 == 0) {
+			state.Log << "simulation_update=" << state.SimulationUpdates << " actors=" << g_MovableMan.GetActorCount()
+			          << " particles=" << g_MovableMan.GetParticleCount() << '\n' << std::flush;
+		}
+	}
+
+	void FinishDebugRun(bool success) {
+		DebugRunState& state = GetDebugRunState();
+		if (!state.Enabled || System::IsSetToQuit()) {
+			return;
+		}
+		const double elapsedSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - state.StartTime).count();
+		const double simulationSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - state.SimulationStartTime).count();
+		state.Log << "result=" << (success ? "passed" : "failed") << "\nupdates_done=" << state.SimulationUpdates
+		          << "\nrendered_frames=" << state.RenderedFrames << "\nelapsed_seconds=" << elapsedSeconds
+		          << "\nsimulation_seconds=" << simulationSeconds
+		          << "\nmodule_load_seconds=" << std::chrono::duration<double>(state.ModuleLoadEndTime - state.ModuleLoadStartTime).count()
+		          << "\naverage_frame_ms=" << (state.RenderedFrames > 0 ? simulationSeconds * 1000.0 / state.RenderedFrames : 0.0)
+		          << "\nsimulation_updates_per_second=" << (simulationSeconds > 0.0 ? state.SimulationUpdates / simulationSeconds : 0.0)
+		          << "\nactors=" << g_MovableMan.GetActorCount() << "\nparticles=" << g_MovableMan.GetParticleCount() << '\n';
+		state.Log.flush();
+		g_ConsoleMan.SaveAllText((state.OutputDirectory / "LogConsole.txt").string());
+		for (const char* logName : {"LogLoading.txt", "LogLoadingWarning.txt"}) {
+			const std::filesystem::path source = std::filesystem::path(System::GetWorkingDirectory()) / logName;
+			if (std::filesystem::exists(source)) {
+				std::error_code copyError;
+				std::filesystem::copy_file(source, state.OutputDirectory / logName, std::filesystem::copy_options::overwrite_existing, copyError);
+			}
+		}
+		state.Log.close();
+		System::SetQuit();
+	}
+
+	void CaptureDebugRunFrame() {
+		DebugRunState& state = GetDebugRunState();
+		if (!state.Enabled || System::IsSetToQuit()) {
+			return;
+		}
+		++state.RenderedFrames;
+		const auto capture = [&](const char* label) {
+			const std::string imageName = "DebugRuns/debug-run-" + std::string(label) + ".png";
+			const int screenshotResult = g_FrameMan.SaveScreenToPNGBlocking(imageName);
+			state.Log << "screenshot=" << imageName << " result=" << screenshotResult << '\n' << std::flush;
+		};
+		if (!state.InitialScreenshotCaptured && state.SimulationUpdates >= 1) {
+			state.InitialScreenshotCaptured = true;
+			capture("initial");
+		}
+		if (!state.MidpointScreenshotCaptured && state.SimulationUpdates >= state.UpdateLimit / 2) {
+			state.MidpointScreenshotCaptured = true;
+			capture("stress");
+		}
+		if (!state.FinalScreenshotCaptured && state.SimulationUpdates >= state.UpdateLimit) {
+			state.FinalScreenshotCaptured = true;
+			capture("final");
+		}
+		if (state.SimulationUpdates >= state.UpdateLimit) {
+			FinishDebugRun(state.StressStarted);
+		}
+	}
+}
 
 /// <summary>
 /// Initializes all the essential managers.
@@ -365,6 +555,7 @@ void RunGameLoop() {
 			g_MusicMan.Update();
 
 			g_ActivityMan.LateUpdateGlobalScripts();
+			AdvanceDebugRunSimulation();
 
 			// This is to support hot reloading entities in SceneEditorGUI. It's a bit hacky to put it in Main like this, but PresetMan has no update in which to clear the value, and I didn't want to set up a listener for the job.
 			// It's in this spot to allow it to be set by UInputMan update and ConsoleMan update, and read from ActivityMan update.
@@ -374,6 +565,10 @@ void RunGameLoop() {
 			g_UInputMan.EndFrame();
 
 			if (!g_ActivityMan.IsInActivity()) {
+				if (System::IsDebugRun()) {
+					FinishDebugRun(false);
+					break;
+				}
 				g_TimerMan.PauseSim(true);
 
 				if (!g_ActivityMan.ActivitySetToRestart()) {
@@ -402,6 +597,7 @@ void RunGameLoop() {
 		g_FrameMan.Draw();
 		g_WindowMan.DrawPostProcessBuffer();
 		g_WindowMan.UploadFrame();
+		CaptureDebugRunFrame();
 
 		drawTotalTime = g_TimerMan.GetAbsoluteTime() - drawStartTime;
 		g_PerformanceMan.UpdateMSPF(updateTotalTime, drawTotalTime);
@@ -420,6 +616,8 @@ static const bool RTESetExceptionHandlers = []() {
 /// Implementation of the main function.
 /// </summary>
 int main(int argc, char** argv) {
+	const bool debugRun = ParseDebugRunArguments(argc, argv);
+	System::SetDebugRun(debugRun);
 	install_allegro(SYSTEM_NONE, &errno, std::atexit);
 	loadpng_init();
 
@@ -447,12 +645,40 @@ int main(int argc, char** argv) {
 	SeedRNG();
 
 	InitializeManagers();
+	if (!StartDebugRun()) {
+		DestroyManagers();
+		allegro_exit();
+		SDL_Quit();
+		return EXIT_FAILURE;
+	}
+	if (debugRun) {
+		GetDebugRunState().Log << "stage=managers_initialized\n" << std::flush;
+	}
 	DiscordPresence::SetEnabled(g_SettingsMan.DiscordPresenceEnabled());
 	DiscordPresence::Initialize();
+	if (debugRun) {
+		GetDebugRunState().Log << "stage=discord_initialized\n" << std::flush;
+	}
 
 	HandleMainArgs(argc, argv);
+	if (debugRun) {
+		GetDebugRunState().Log << "stage=arguments_handled\n" << std::flush;
+	}
 
+	if (debugRun) {
+		g_SettingsMan.MeasureModuleLoadTime(true);
+		GetDebugRunState().ModuleLoadStartTime = std::chrono::steady_clock::now();
+	}
 	g_PresetMan.LoadAllDataModules();
+	if (debugRun) {
+		GetDebugRunState().ModuleLoadEndTime = std::chrono::steady_clock::now();
+		GetDebugRunState().SimulationStartTime = GetDebugRunState().ModuleLoadEndTime;
+		GetDebugRunState().Log << "stage=modules_loaded\n" << std::flush;
+	}
+	if (debugRun) {
+		g_ActivityMan.SetStartTutorialActivity();
+		g_ActivityMan.SetRestartActivity();
+	}
 
 	if (!System::IsInExternalModuleValidationMode()) {
 		// Load the different input device icons. This can't be done during UInputMan::Create() because the icon presets don't exist so we need to do this after modules are loaded.
@@ -470,7 +696,7 @@ int main(int argc, char** argv) {
 			}
 		}
 
-		if (!g_ActivityMan.Initialize()) {
+		if (!g_ActivityMan.Initialize() && !debugRun) {
 			RunMenuLoop();
 		}
 

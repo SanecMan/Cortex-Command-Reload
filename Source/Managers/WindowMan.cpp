@@ -10,6 +10,7 @@
 #include "PostProcessMan.h"
 #include "RenderTarget.h"
 #include "GLResourceMan.h"
+#include "System.h"
 
 #include "GLCheck.h"
 #include <SDL3/SDL.h>
@@ -183,6 +184,7 @@ void WindowMan::CreatePrimaryWindow() {
 	SDL_SetStringProperty(windowProps, SDL_PROP_WINDOW_CREATE_TITLE_STRING, windowTitle.c_str());
 	SDL_SetBooleanProperty(windowProps, SDL_PROP_WINDOW_CREATE_RESIZABLE_BOOLEAN, true);
 	SDL_SetBooleanProperty(windowProps, SDL_PROP_WINDOW_CREATE_OPENGL_BOOLEAN, true);
+	SDL_SetBooleanProperty(windowProps, SDL_PROP_WINDOW_CREATE_HIDDEN_BOOLEAN, System::IsDebugRun());
 	SDL_SetBooleanProperty(windowProps, SDL_PROP_WINDOW_CREATE_FULLSCREEN_BOOLEAN, m_Fullscreen);
 	SDL_SetNumberProperty(windowProps, SDL_PROP_WINDOW_CREATE_X_NUMBER, windowPosX);
 	SDL_SetNumberProperty(windowProps, SDL_PROP_WINDOW_CREATE_Y_NUMBER, windowPosY);
@@ -197,7 +199,8 @@ void WindowMan::CreatePrimaryWindow() {
 		m_ResMultiplier = 1;
 		g_SettingsMan.SetSettingsNeedOverwrite();
 
-		m_PrimaryWindow = std::shared_ptr<SDL_Window>(SDL_CreateWindow(windowTitle.c_str(), m_ResX * m_ResMultiplier, m_ResY * m_ResMultiplier, SDL_WINDOW_OPENGL), SDLWindowDeleter());
+		const SDL_WindowFlags fallbackWindowFlags = static_cast<SDL_WindowFlags>(SDL_WINDOW_OPENGL | (System::IsDebugRun() ? SDL_WINDOW_HIDDEN : 0));
+		m_PrimaryWindow = std::shared_ptr<SDL_Window>(SDL_CreateWindow(windowTitle.c_str(), m_ResX * m_ResMultiplier, m_ResY * m_ResMultiplier, fallbackWindowFlags), SDLWindowDeleter());
 		if (!m_PrimaryWindow) {
 			RTEAbort("Failed to create window because:\n" + std::string(SDL_GetError()));
 		}
