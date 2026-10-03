@@ -46,6 +46,8 @@ WorldStateProtocol::Snapshot WorldStateSnapshotBuilder::Capture(std::uint32_t ti
 	g_MovableMan.GetAllParticles(false, objects);
 	std::unordered_set<std::uint64_t> includedObjectIds;
 	includedObjectIds.reserve(objects.size());
+	std::unordered_set<long> liveRuntimeIds;
+	liveRuntimeIds.reserve(objects.size());
 	snapshot.Objects.reserve(objects.size());
 	for (const SceneObject* sceneObject : objects) {
 		const auto* movableObject = dynamic_cast<const MovableObject*>(sceneObject);
@@ -56,7 +58,15 @@ WorldStateProtocol::Snapshot WorldStateSnapshotBuilder::Capture(std::uint32_t ti
 		if (uniqueId <= 0) {
 			continue;
 		}
-		const std::uint64_t networkId = static_cast<std::uint64_t>(uniqueId);
+		liveRuntimeIds.insert(uniqueId);
+		auto [networkIdEntry, inserted] = m_NetworkIdsByRuntimeId.try_emplace(uniqueId, m_NextNetworkId);
+		if (inserted) {
+			++m_NextNetworkId;
+			if (m_NextNetworkId == 0) {
+				m_NextNetworkId = 1;
+			}
+		}
+		const std::uint64_t networkId = networkIdEntry->second;
 		if (!includedObjectIds.insert(networkId).second) {
 			continue;
 		}
@@ -82,6 +92,13 @@ WorldStateProtocol::Snapshot WorldStateSnapshotBuilder::Capture(std::uint32_t ti
 		}
 		object.Team = static_cast<std::int16_t>(movableObject->GetTeam());
 		snapshot.Objects.push_back(std::move(object));
+	}
+	for (auto networkIdEntry = m_NetworkIdsByRuntimeId.begin(); networkIdEntry != m_NetworkIdsByRuntimeId.end();) {
+		if (!liveRuntimeIds.contains(networkIdEntry->first)) {
+			networkIdEntry = m_NetworkIdsByRuntimeId.erase(networkIdEntry);
+		} else {
+			++networkIdEntry;
+		}
 	}
 	return snapshot;
 }

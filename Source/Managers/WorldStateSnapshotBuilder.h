@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <string>
+#include <unordered_map>
 
 namespace RTE {
 
@@ -19,6 +20,8 @@ namespace RTE {
 		std::uintptr_t m_LastSceneAddress = 0;
 		std::string m_LastScenePreset;
 		std::string m_LastActivityPreset;
+		std::unordered_map<long, std::uint64_t> m_NetworkIdsByRuntimeId;
+		std::uint64_t m_NextNetworkId = 1;
 	};
 
 } // namespace RTE
