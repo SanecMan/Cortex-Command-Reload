@@ -7,7 +7,7 @@
 #include "System.h"
 #include "UTF8.h"
 
-#include <SDL3/SDL_messagebox.h>
+#include <SDL3/SDL.h>
 
 #ifdef _WIN32
 #include "Windows.h"
@@ -464,23 +464,35 @@ void RTEError::AssertFunc(const std::string& description, const std::source_loca
 }
 
 void RTEError::DumpHardwareInfo() {
-	std::string glVersion = reinterpret_cast<const char*>(glGetString(GL_VERSION));
-	std::string glVendor = reinterpret_cast<const char*>(glGetString(GL_VENDOR));
-	std::string glRenderer = reinterpret_cast<const char*>(glGetString(GL_RENDERER));
+	std::string hwInfo;
+	if (!SDL_GL_GetCurrentContext()) {
+		hwInfo = "OpenGL hardware details unavailable: no current OpenGL context.\n";
+	} else {
+		auto safeGLString = [](GLenum name) {
+			const GLubyte* value = glGetString(name);
+			return value ? std::string(reinterpret_cast<const char*>(value)) : std::string("unavailable");
+		};
+		const std::string glVersion = safeGLString(GL_VERSION);
+		const std::string glVendor = safeGLString(GL_VENDOR);
+		const std::string glRenderer = safeGLString(GL_RENDERER);
 
-	std::string glExtentions = "";
-	GLint numExt = 0;
-	glGetIntegerv(GL_NUM_EXTENSIONS, &numExt);
-	for(GLint i = 0; i < numExt; i++) {
-		glExtentions += "\t";
-		glExtentions += reinterpret_cast<const char*>(glGetStringi(GL_EXTENSIONS, i));
-		glExtentions += "\n";
+		std::string glExtensions;
+		GLint numExtensions = 0;
+		glGetIntegerv(GL_NUM_EXTENSIONS, &numExtensions);
+		for (GLint index = 0; index < numExtensions; ++index) {
+			const GLubyte* extension = glGetStringi(GL_EXTENSIONS, index);
+			if (extension) {
+				glExtensions += "\t";
+				glExtensions += reinterpret_cast<const char*>(extension);
+				glExtensions += "\n";
+			}
+		}
+
+		hwInfo = "GL Version: " + glVersion + "\n" +
+		         "GL Vendor: " + glVendor + "\n" +
+		         "GL Renderer: " + glRenderer + "\n" +
+		         "Available Extensions: \n" + glExtensions + "\n";
 	}
-
-	std::string hwInfo = "GL Version: " + glVersion + "\n" +
-	                     "GL Vendor: " + glVendor + "\n" +
-	                     "GL Renderer: " + glRenderer + "\n" +
-	                     "Available Extensions: \n" + glExtentions + "\n";
 
 #if defined(_MSC_VER) || defined(__linux__)
 	int vendorRegs[4] = {0};

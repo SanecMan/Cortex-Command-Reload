@@ -19,3 +19,5 @@ These limits intentionally prefer preserving game and mod behavior to enforcing 
 Current eligible-particle budgets are High 10,000, Medium 6,000, Low 3,000, and Very Low 1,000. Gib budgets are High 2,000, Medium 1,000, and Low 400. Debris lifetimes are Long 30 s, Normal 12 s, and Short 5 s. Unlimited leaves that particular limit off.
 
 For an automated stress capture, run `Cortex Command.debug.minimal.exe -debug-run 60 -debug-overlay`. The run writes `ScreenShots/DebugRuns/DebugRun.log` and three screenshots, then exits. The next debug run replaces the old debug artifacts. Use `CCCP_SETTINGSPATH` to point to a separate settings file when benchmarking different presets without changing personal settings.
+
+For checks that do not need graphics, use `Cortex Command.debug.minimal.exe -debug-run 60 -debug-run-preflight-only`. This runs UTF-8, protocol, dirty-terrain-grid and four-client transport checks, then exits before SDL/window initialization. A full gameplay stress capture still creates a hidden OpenGL window; SDL's Windows offscreen video driver can initialize here, but it cannot create the engine's OpenGL window without a usable OpenGL display/context.

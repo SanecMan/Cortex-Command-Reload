@@ -43,6 +43,7 @@
 #include "PostProcessMan.h"
 #include "SceneMan.h"
 #include "Scene.h"
+#include "SLTerrain.h"
 #include "MetaMan.h"
 #include "WindowMan.h"
 #include "GLResourceMan.h"
@@ -804,6 +805,50 @@ namespace {
 			worldIdentityStable = worldSnapshot.Objects[index].NetworkId == repeatedWorldSnapshot.Objects[index].NetworkId;
 		}
 		state.Log << "world_state_identity_smoke=" << (worldIdentityStable ? "passed" : "failed") << '\n' << std::flush;
+		bool terrainPatchApplyPassed = false;
+		if (Scene* scene = g_SceneMan.GetScene(); scene && scene->GetTerrain() && worldSnapshot.SceneRevision != 0 &&
+		    g_SceneMan.GetSceneWidth() > 0 && g_SceneMan.GetSceneHeight() > 0) {
+			SLTerrain* terrain = scene->GetTerrain();
+			const int testX = g_SceneMan.GetSceneWidth() / 2;
+			const int testY = g_SceneMan.GetSceneHeight() / 2;
+			const std::array<std::pair<WorldStateProtocol::TerrainLayer, std::uint8_t>, 3> originalPixels = {{
+			    {WorldStateProtocol::TerrainLayer::Material, static_cast<std::uint8_t>(terrain->GetMaterialPixel(testX, testY))},
+			    {WorldStateProtocol::TerrainLayer::Foreground, static_cast<std::uint8_t>(terrain->GetFGColorPixel(testX, testY))},
+			    {WorldStateProtocol::TerrainLayer::Background, static_cast<std::uint8_t>(terrain->GetBGColorPixel(testX, testY))}}};
+			auto applyPixel = [&](WorldStateProtocol::TerrainLayer layer, std::uint8_t pixelValue) {
+				WorldStateProtocol::TerrainPatch patch;
+				patch.SceneRevision = worldSnapshot.SceneRevision;
+				patch.X = static_cast<std::uint32_t>(testX);
+				patch.Y = static_cast<std::uint32_t>(testY);
+				patch.Width = 1;
+				patch.Height = 1;
+				patch.Layer = layer;
+				patch.Pixels = {pixelValue};
+				return worldStateClientReplica.ApplyTerrainPatch(patch);
+			};
+			bool allLayersAppliedAndRestored = true;
+			for (const auto& [layer, originalPixel] : originalPixels) {
+				const std::uint8_t changedPixel = static_cast<std::uint8_t>(originalPixel ^ 1U);
+				const bool applyPassed = applyPixel(layer, changedPixel);
+				int observedChangedPixel = 0;
+				switch (layer) {
+				case WorldStateProtocol::TerrainLayer::Material: observedChangedPixel = terrain->GetMaterialPixel(testX, testY); break;
+				case WorldStateProtocol::TerrainLayer::Foreground: observedChangedPixel = terrain->GetFGColorPixel(testX, testY); break;
+				case WorldStateProtocol::TerrainLayer::Background: observedChangedPixel = terrain->GetBGColorPixel(testX, testY); break;
+				}
+				const bool changedPixelObserved = applyPassed && observedChangedPixel == changedPixel;
+				const bool restorePassed = applyPixel(layer, originalPixel);
+				int observedRestoredPixel = 0;
+				switch (layer) {
+				case WorldStateProtocol::TerrainLayer::Material: observedRestoredPixel = terrain->GetMaterialPixel(testX, testY); break;
+				case WorldStateProtocol::TerrainLayer::Foreground: observedRestoredPixel = terrain->GetFGColorPixel(testX, testY); break;
+				case WorldStateProtocol::TerrainLayer::Background: observedRestoredPixel = terrain->GetBGColorPixel(testX, testY); break;
+				}
+				allLayersAppliedAndRestored = allLayersAppliedAndRestored && changedPixelObserved && restorePassed && observedRestoredPixel == originalPixel;
+			}
+			terrainPatchApplyPassed = allLayersAppliedAndRestored;
+		}
+		state.Log << "world_state_terrain_patch_apply_smoke=" << (terrainPatchApplyPassed ? "passed" : "unavailable-or-failed") << '\n' << std::flush;
 		WorldStateClientReplica replicaSmoke;
 		const WorldStateClientReplica::ApplyResult firstApply = replicaSmoke.Apply(worldSnapshot);
 		WorldStateProtocol::Snapshot emptyReplicaSnapshot = worldSnapshot;
@@ -922,7 +967,7 @@ namespace {
 		          << ",screen_fx:" << g_SettingsMan.GetScreenEffectsLevel() << ",gore:" << g_SettingsMan.GetGoreDensityPercent()
 		          << ",vsync:" << g_WindowMan.GetVSyncEnabled() << '\n' << std::flush;
 		success = success && performanceCountersPassed;
-		success = success && utf8GlyphRenderPassed && worldStateTransitionPassed && state.HostSessionTestPassed && worldIdentityStable && replicaSmokePassed && transientPixelReplicaPassed &&
+		success = success && utf8GlyphRenderPassed && worldStateTransitionPassed && state.HostSessionTestPassed && worldIdentityStable && replicaSmokePassed && transientPixelReplicaPassed && terrainPatchApplyPassed &&
 		          networkInputApplicationPassed && worldSnapshotPassed && snapshotCompressionPassed && liveSnapshotTransportPassed;
 		const double elapsedSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - state.StartTime).count();
 		const double simulationSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - state.SimulationStartTime).count();
