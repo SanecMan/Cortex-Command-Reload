@@ -17,6 +17,7 @@
 #include "LoadingScreen.h"
 #include "SettingsMan.h"
 #include "System.h"
+#include "System/UTF8.h"
 
 #include <array>
 #include <chrono>
@@ -147,12 +148,12 @@ bool PresetMan::LoadAllDataModules() {
 	} else {
 		std::vector<std::filesystem::directory_entry> modDirectoryFolders;
 		const std::string modDirectory = System::GetWorkingDirectory() + System::GetModDirectory();
-		std::copy_if(std::filesystem::directory_iterator(modDirectory), std::filesystem::directory_iterator(), std::back_inserter(modDirectoryFolders),
+		std::copy_if(std::filesystem::directory_iterator(UTF8::PathFromString(modDirectory)), std::filesystem::directory_iterator(), std::back_inserter(modDirectoryFolders),
 		             [](auto dirEntry) { return std::filesystem::is_directory(dirEntry); });
 		std::sort(modDirectoryFolders.begin(), modDirectoryFolders.end());
 
 		for (const std::filesystem::directory_entry& directoryEntry: modDirectoryFolders) {
-			std::string directoryEntryPath = directoryEntry.path().generic_string();
+			std::string directoryEntryPath = UTF8::PathToString(directoryEntry.path());
 			if (directoryEntryPath.ends_with(".rte")) {
 				std::string moduleName = directoryEntryPath.substr(directoryEntryPath.find_last_of('/') + 1, std::string::npos);
 				if (!g_SettingsMan.IsModDisabled(moduleName) && !IsModuleOfficial(moduleName) && !IsModuleUserdata(moduleName)) {
@@ -167,7 +168,7 @@ bool PresetMan::LoadAllDataModules() {
 
 		// Load userdata modules AFTER all other techs etc are loaded; might be referring to stuff in user mods.
 		for (const auto& [userdataModuleName, userdataModuleFriendlyName]: c_UserdataModules) {
-			if (!std::filesystem::exists(System::GetWorkingDirectory() + System::GetUserdataDirectory() + userdataModuleName)) {
+			if (!std::filesystem::exists(UTF8::PathFromString(System::GetWorkingDirectory() + System::GetUserdataDirectory() + userdataModuleName))) {
 				bool scanContentsAndIgnoreMissing = userdataModuleName == c_UserScenesModuleName;
 				DataModule::CreateOnDiskAsUserdata(userdataModuleName, userdataModuleFriendlyName, scanContentsAndIgnoreMissing, scanContentsAndIgnoreMissing);
 			}
@@ -287,7 +288,7 @@ bool PresetMan::IsModuleUserdata(const std::string& moduleName) const {
 std::string PresetMan::GetFullModulePath(const std::string& modulePath) const {
 	// Note: Mods may use mixed path separators, which aren't supported on non Windows systems.
 	// Since Windows supports both forward and backslash separators it's safe to replace all backslashes with forward slashes.
-	std::string modulePathGeneric = std::filesystem::path(modulePath).generic_string();
+	std::string modulePathGeneric = UTF8::PathToString(UTF8::PathFromString(UTF8::PreserveLegacyWindows1251(modulePath)));
 	std::replace(modulePathGeneric.begin(), modulePathGeneric.end(), '\\', '/');
 
 	const std::string pathTopDir = modulePathGeneric.substr(0, modulePathGeneric.find_first_of("/") + 1);
@@ -918,10 +919,10 @@ Actor* PresetMan::GetLoadout(std::string loadoutName, int moduleNumber, bool spa
 }
 
 void PresetMan::FindAndExtractZippedModules() const {
-	for (const std::filesystem::directory_entry& directoryEntry: std::filesystem::directory_iterator(System::GetWorkingDirectory() + System::GetModDirectory())) {
-		std::string zippedModulePath = std::filesystem::path(directoryEntry).generic_string();
+	for (const std::filesystem::directory_entry& directoryEntry: std::filesystem::directory_iterator(UTF8::PathFromString(System::GetWorkingDirectory() + System::GetModDirectory()))) {
+		std::string zippedModulePath = UTF8::PathToString(directoryEntry.path());
 		if (zippedModulePath.ends_with(System::GetZippedModulePackageExtension())) {
-			LoadingScreen::LoadingSplashProgressReport("Extracting Data Module from: " + directoryEntry.path().filename().generic_string(), true);
+			LoadingScreen::LoadingSplashProgressReport("Extracting Data Module from: " + UTF8::PathToString(directoryEntry.path().filename()), true);
 			LoadingScreen::LoadingSplashProgressReport(System::ExtractZippedDataModule(zippedModulePath), true);
 		}
 	}

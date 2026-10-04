@@ -53,7 +53,7 @@ void DataModule::Clear() {
 }
 
 int DataModule::Create(const std::string& moduleName, const ProgressCallback& progressCallback) {
-	m_FileName = UTF8::PathToString(UTF8::PathFromString(moduleName));
+	m_FileName = UTF8::PathToString(UTF8::PathFromString(UTF8::PreserveLegacyWindows1251(moduleName)));
 	m_ModuleID = g_PresetMan.GetModuleID(moduleName);
 	m_CrabToHumanSpawnRatio = 0;
 

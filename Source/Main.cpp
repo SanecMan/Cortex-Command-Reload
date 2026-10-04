@@ -350,12 +350,27 @@ namespace {
 			unicodeGUIReader.Create(unicodePath);
 			unicodeGUIReaderOpened = unicodeGUIReader.ReaderOK();
 		}
+		const std::string legacyFileName = "\xF2\xE5\xF1\xF2-\xEF\xF3\xF2\xFC.tmp";
+		const std::string legacyPath = UTF8::PathToString(state.OutputDirectory) + "/" + legacyFileName;
+		bool legacyReaderOpened = false;
+		{
+			Reader legacyPathReader(legacyPath, false, nullptr, true, true);
+			legacyReaderOpened = legacyPathReader.ReaderOK();
+		}
+		bool legacyGUIReaderOpened = false;
+		{
+			GUIReader legacyPathReader;
+			legacyPathReader.Create(legacyPath);
+			legacyGUIReaderOpened = legacyPathReader.ReaderOK();
+		}
 		std::error_code unicodeFileCleanupError;
 		const bool unicodeFileRemoved = std::filesystem::remove(UTF8::PathFromString(unicodePath), unicodeFileCleanupError);
-		const bool unicodeFilePathPassed = unicodeFileWritten && unicodeFileRead && unicodePathResolved && unicodeReaderOpened && unicodeGUIReaderOpened && unicodeFileRemoved && !unicodeFileCleanupError;
+		const bool unicodeFilePathPassed = unicodeFileWritten && unicodeFileRead && unicodePathResolved && unicodeReaderOpened && unicodeGUIReaderOpened &&
+		                                   legacyReaderOpened && legacyGUIReaderOpened && unicodeFileRemoved && !unicodeFileCleanupError;
 		state.Log << "utf8_file_path_smoke=" << (unicodeFilePathPassed ? "passed" : "failed")
 		          << " written=" << unicodeFileWritten << " read=" << unicodeFileRead << " resolved=" << unicodePathResolved
-		          << " reader_opened=" << unicodeReaderOpened << " gui_reader_opened=" << unicodeGUIReaderOpened << " removed=" << unicodeFileRemoved
+		          << " reader_opened=" << unicodeReaderOpened << " gui_reader_opened=" << unicodeGUIReaderOpened
+		          << " legacy_reader_opened=" << legacyReaderOpened << " legacy_gui_reader_opened=" << legacyGUIReaderOpened << " removed=" << unicodeFileRemoved
 		          << " cleanup_error=" << unicodeFileCleanupError.value() << '\n' << std::flush;
 		if (!unicodeFilePathPassed) {
 			return false;

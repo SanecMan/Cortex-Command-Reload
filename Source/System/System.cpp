@@ -54,7 +54,15 @@ const std::string System::s_ZippedModulePackageExtension = ".zip";
 const std::unordered_set<std::string> System::s_SupportedExtensions = {".ini", ".txt", ".lua", ".cfg", ".bmp", ".png", ".jpg", ".jpeg", ".wav", ".ogg", ".mp3", ".flac"};
 
 void System::Initialize(const char* thisExePathAndName) {
-	s_ThisExePathAndName = std::filesystem::path(thisExePathAndName).generic_string();
+	s_ThisExePathAndName = UTF8::PathToString(UTF8::PathFromString(UTF8::PreserveLegacyWindows1251(thisExePathAndName)));
+
+#ifdef _WIN32
+	std::array<wchar_t, 32768> executablePathBuffer{};
+	const DWORD executablePathLength = GetModuleFileNameW(nullptr, executablePathBuffer.data(), static_cast<DWORD>(executablePathBuffer.size()));
+	if (executablePathLength > 0 && executablePathLength < executablePathBuffer.size()) {
+		s_ThisExePathAndName = UTF8::PathToString(std::filesystem::path(std::wstring(executablePathBuffer.data(), executablePathLength)));
+	}
+#endif
 
 	s_WorkingDirectory = UTF8::PathToString(std::filesystem::current_path());
 
@@ -76,12 +84,12 @@ void System::Initialize(const char* thisExePathAndName) {
 	char pathBuffer[PATH_MAX];
 	if (CFURLGetFileSystemRepresentation(bundleURL, true, (UInt8*)pathBuffer, sizeof(pathBuffer))) {
 		// bundlePath now contains the path to the application bundle as a C string
-		auto bundlePath = std::filesystem::path(pathBuffer);
+		auto bundlePath = UTF8::PathFromString(pathBuffer);
 
 		if (std::filesystem::exists(bundlePath) && bundlePath.extension() == ".app") {
 			auto workingDirPath = bundlePath.parent_path();
 			std::filesystem::current_path(workingDirPath);
-			s_WorkingDirectory = workingDirPath.generic_string();
+			s_WorkingDirectory = UTF8::PathToString(workingDirPath);
 		}
 
 	} else {

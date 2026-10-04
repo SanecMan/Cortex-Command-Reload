@@ -27,7 +27,7 @@ GUIReader::GUIReader() {
 }
 
 int GUIReader::Create(const std::string& fileName) {
-	m_FilePath = UTF8::PathToString(UTF8::PathFromString(fileName));
+	m_FilePath = UTF8::PathToString(UTF8::PathFromString(UTF8::PreserveLegacyWindows1251(fileName)));
 
 	if (m_FilePath.empty()) {
 		return -1;
@@ -255,7 +255,7 @@ void GUIReader::ReportError(const std::string& errorDesc) const {
 
 bool GUIReader::StartIncludeFile() {
 	// Get the file path from the current stream before pushing it into the StreamStack, otherwise we can't open a new stream after releasing it because we can't read.
-	std::string includeFilePath = UTF8::PathToString(UTF8::PathFromString(ReadPropValue()));
+	std::string includeFilePath = UTF8::PathToString(UTF8::PathFromString(UTF8::PreserveLegacyWindows1251(ReadPropValue())));
 
 	// Push the current stream onto the StreamStack for future retrieval when the new include file has run out of data.
 	m_StreamStack.emplace(StreamInfo(m_Stream.release(), m_FilePath, m_CurrentLine, m_PreviousIndent));
