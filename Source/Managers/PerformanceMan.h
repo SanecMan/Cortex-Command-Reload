@@ -34,6 +34,7 @@ namespace RTE {
 			ParticlesUpdate,
 			ActivityUpdate,
 			ScriptsUpdate,
+			WorldStateSnapshot,
 			PerfCounterCount
 		};
 

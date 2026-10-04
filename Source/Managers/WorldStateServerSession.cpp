@@ -1,5 +1,6 @@
 #include "WorldStateServerSession.h"
 
+#include "PerformanceMan.h"
 #include "MessageIdentifiers.h"
 #include "ActivityMan.h"
 #include "NetworkMessages.h"
@@ -199,7 +200,9 @@ void WorldStateServerSession::Update(std::uint32_t simulationTick) {
 		return;
 	}
 	m_LastBroadcastTick = simulationTick;
+	g_PerformanceMan.StartPerformanceMeasurement(PerformanceMan::WorldStateSnapshot);
 	const WorldStateProtocol::Snapshot snapshot = m_SnapshotBuilder.Capture(simulationTick);
+	g_PerformanceMan.StopPerformanceMeasurement(PerformanceMan::WorldStateSnapshot);
 	if (!m_Transport.BroadcastSnapshot(snapshot, ++m_Sequence)) {
 		Log("ERROR: failed to encode or broadcast world snapshot");
 	} else {

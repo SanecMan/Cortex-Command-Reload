@@ -999,10 +999,10 @@ namespace {
 		          << "\nsimulation_updates_per_second=" << (simulationSeconds > 0.0 ? state.SimulationUpdates / simulationSeconds : 0.0)
 		          << "\nprocess_resident_memory_bytes=" << GetProcessResidentMemoryBytes()
 		          << "\nactors=" << g_MovableMan.GetActorCount() << "\nparticles=" << g_MovableMan.GetParticleCount() << '\n';
-		for (const auto& [name, counter] : std::array<std::pair<const char*, PerformanceMan::PerformanceCounters>, 8>{ {
+		for (const auto& [name, counter] : std::array<std::pair<const char*, PerformanceMan::PerformanceCounters>, 9>{ {
 		         {"simulation", PerformanceMan::SimTotal}, {"ai", PerformanceMan::ActorsAI}, {"actor_travel", PerformanceMan::ActorsTravel},
 		         {"actor_update", PerformanceMan::ActorsUpdate}, {"particle_travel", PerformanceMan::ParticlesTravel}, {"particle_update", PerformanceMan::ParticlesUpdate},
-		         {"activity", PerformanceMan::ActivityUpdate}, {"lua_scripts", PerformanceMan::ScriptsUpdate}
+		         {"activity", PerformanceMan::ActivityUpdate}, {"lua_scripts", PerformanceMan::ScriptsUpdate}, {"network_snapshot_capture", PerformanceMan::WorldStateSnapshot}
 	         } }) {
 			state.Log << "average_" << name << "_ms=" << static_cast<double>(g_PerformanceMan.GetAveragePerformanceTime(counter)) / 1000.0 << '\n';
 		}

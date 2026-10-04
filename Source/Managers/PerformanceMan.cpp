@@ -21,7 +21,7 @@
 
 using namespace RTE;
 
-const std::array<std::string, PerformanceMan::PerformanceCounters::PerfCounterCount> PerformanceMan::m_PerfCounterNames = {"Total", "Input", "Lua VM", "Act AI", "Act Travel", "Act Update", "Prt Travel", "Prt Update", "Activity", "Scripts"};
+const std::array<std::string, PerformanceMan::PerformanceCounters::PerfCounterCount> PerformanceMan::m_PerfCounterNames = {"Total", "Input", "Lua VM", "Act AI", "Act Travel", "Act Update", "Prt Travel", "Prt Update", "Activity", "Scripts", "Net Snapshot"};
 
 thread_local std::array<uint64_t, PerformanceMan::PerformanceCounters::PerfCounterCount> s_PerfMeasureStart; //!< Current measurement start time in microseconds.
 thread_local std::array<uint64_t, PerformanceMan::PerformanceCounters::PerfCounterCount> s_PerfMeasureStop; //!< Current measurement stop time in microseconds.
@@ -188,7 +188,7 @@ void PerformanceMan::Draw(BITMAP* bitmapToDrawTo) {
 			previousDeletes = deletes;
 			lastSceneRead = now;
 		}
-		rectfill(bitmapToDrawTo, 8, 8, 625, 160, makecol(12, 16, 24));
+		rectfill(bitmapToDrawTo, 8, 8, 625, 172, makecol(12, 16, 24));
 		const auto drawSummary = [&](int row, const char* value) { guiFont->DrawAligned(&drawBitmap, c_StatsOffsetX, c_StatsHeight + row * 10, value, GUIFont::Left); };
 		drawSummary(0, "PERFORMANCE [F8: off]");
 		std::snprintf(str, sizeof(str), "FPS %.0f | Frame %.1f ms", fps, m_ActualFrameAverage);
@@ -209,6 +209,8 @@ void PerformanceMan::Draw(BITMAP* bitmapToDrawTo) {
 		for (const auto& [script, timing] : m_SortedScriptTimings) luaCallbackCount += timing.m_CallCount;
 		std::snprintf(str, sizeof(str), "Tracked Lua calls/update %d", luaCallbackCount);
 		drawSummary(8, str);
+		std::snprintf(str, sizeof(str), "Network snapshot capture %.2f ms", GetPerformanceCounterAverage(WorldStateSnapshot) / 1000.0);
+		drawSummary(9, str);
 		const int detailsX = 310;
 		const auto drawDetails = [&](int row, const char* value) { guiFont->DrawAligned(&drawBitmap, detailsX, c_StatsHeight + row * 10, value, GUIFont::Left); };
 		drawDetails(0, "SCENE (top-level objects)");
