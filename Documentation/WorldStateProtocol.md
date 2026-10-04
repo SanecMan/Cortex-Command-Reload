@@ -12,6 +12,10 @@ Clients send 32-byte `InputCommand` payloads through RakNet reliable ordered del
 
 `WorldStateClientReplica` applies received transforms, velocity, rotation, actor health and team on the simulation thread. It matches objects by identity where possible, clones locally available `.rte` presets, creates transient `MOPixel` instances from the additional fields, and removes client-owned clones when they disappear from a later full snapshot. Missing mod presets are reported and skipped. Existing locally owned actors/items are not destroyed when absent from a snapshot because Activities may retain direct pointers. The client still runs its own simulation between snapshots.
 
+When an established client receives a new `SceneRevision`, it resolves and queues the host's Activity and Scene by module identity, then restarts into that pair before applying the new snapshot. If the client lacks the requested `.rte` preset, it logs the mismatch and disconnects instead of continuing to replicate on a different map. The initial connection uses the same resolver.
+
+This revision-following path is implemented but still needs a live two-process test that changes the host Activity or Scene while a client remains connected; the current debug smoke validates protocol, snapshot application and startup, not this transition.
+
 The experimental host and graphical client can be started with:
 
 ```text

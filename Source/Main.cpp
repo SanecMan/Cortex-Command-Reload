@@ -110,6 +110,37 @@ namespace {
 	WorldStateClientReplica worldStateClientReplica;
 	std::ofstream worldStateClientLog;
 	std::uint32_t worldStateClientLastLoggedSnapshotCount = 0;
+	std::uint32_t worldStateClientAppliedSceneRevision = 0;
+	std::uint32_t worldStateClientRejectedSceneRevision = 0;
+
+	bool QueueWorldStateActivity(const WorldStateProtocol::Snapshot& snapshot, std::string& failureReason) {
+		if (snapshot.ActivityClassName.empty() || snapshot.ActivityPreset.empty() || snapshot.ScenePreset.empty()) {
+			failureReason = "server snapshot does not identify an Activity and Scene";
+			return false;
+		}
+
+		const int activityModule = snapshot.ActivityModuleName.empty() ? -1 : g_PresetMan.GetModuleID(snapshot.ActivityModuleName);
+		const Entity* activityPreset = g_PresetMan.GetEntityPreset(snapshot.ActivityClassName, snapshot.ActivityPreset, activityModule);
+		Entity* activityClone = activityPreset ? activityPreset->Clone() : nullptr;
+		Activity* activity = dynamic_cast<Activity*>(activityClone);
+		if (!activity) {
+			delete activityClone;
+			failureReason = "server Activity preset is unavailable locally: " + snapshot.ActivityModuleName + "/" + snapshot.ActivityClassName + "/" + snapshot.ActivityPreset;
+			return false;
+		}
+
+		const int sceneResult = snapshot.SceneModuleName.empty() ? g_SceneMan.SetSceneToLoad(snapshot.ScenePreset)
+		                                                       : g_SceneMan.SetSceneToLoad(snapshot.ScenePreset, snapshot.SceneModuleName);
+		if (sceneResult < 0) {
+			delete activity;
+			failureReason = "server Scene preset is unavailable locally: " + snapshot.SceneModuleName + "/" + snapshot.ScenePreset;
+			return false;
+		}
+
+		g_ActivityMan.SetStartActivity(activity);
+		g_ActivityMan.SetRestartActivity();
+		return true;
+	}
 
 	struct DebugRunState {
 		bool Enabled = false;
@@ -1146,6 +1177,30 @@ void RunGameLoop() {
 			if (worldStateServer && worldStateServer->IsStarted()) {
 				worldStateServer->Update(++worldStateServerSimulationTick);
 			}
+			bool worldStateSceneTransitionQueued = false;
+			if (worldStateClient && worldStateClient->IsConnected() && worldStateClient->HasSnapshot()) {
+				const WorldStateProtocol::Snapshot& snapshot = worldStateClient->GetLatestSnapshot();
+				if (snapshot.SceneRevision != worldStateClientAppliedSceneRevision && snapshot.SceneRevision != worldStateClientRejectedSceneRevision) {
+					std::string failureReason;
+					if (QueueWorldStateActivity(snapshot, failureReason)) {
+						worldStateClientAppliedSceneRevision = snapshot.SceneRevision;
+						worldStateClientReplica.Forget();
+						worldStateSceneTransitionQueued = true;
+						if (worldStateClientLog.is_open()) {
+							worldStateClientLog << "activity_transition_queued=true revision=" << snapshot.SceneRevision << " activity=" << snapshot.ActivityModuleName << '/'
+							                    << snapshot.ActivityClassName << '/' << snapshot.ActivityPreset << " scene=" << snapshot.SceneModuleName << '/' << snapshot.ScenePreset << '\n'
+							                    << std::flush;
+						}
+					} else {
+						worldStateClientRejectedSceneRevision = snapshot.SceneRevision;
+						g_ConsoleMan.PrintString("ERROR: Disconnecting from server because its Activity/Scene is not available locally: " + failureReason);
+						if (worldStateClientLog.is_open()) {
+							worldStateClientLog << "ERROR: rejected server Activity/Scene revision " << snapshot.SceneRevision << ": " << failureReason << '\n' << std::flush;
+						}
+						worldStateClient->Disconnect();
+					}
+				}
+			}
 
 			g_PerformanceMan.StartPerformanceMeasurement(PerformanceMan::SimTotal);
 			g_LuaMan.ClearScriptTimings();
@@ -1208,7 +1263,7 @@ void RunGameLoop() {
 
 			g_ActivityMan.LateUpdateGlobalScripts();
 			if (g_PerformanceMan.GetOverlayLevel() == 2) g_PerformanceMan.UpdateSortedScriptTimings(g_LuaMan.GetScriptTimings());
-			if (worldStateClient && worldStateClient->HasSnapshot()) {
+			if (worldStateClient && worldStateClient->HasSnapshot() && !worldStateSceneTransitionQueued) {
 				const std::uint32_t snapshotCount = worldStateClient->GetReceivedSnapshotCount();
 				if (snapshotCount != worldStateClientLastLoggedSnapshotCount) {
 					const WorldStateClientReplica::ApplyResult applied = worldStateClientReplica.Apply(worldStateClient->GetLatestSnapshot());
@@ -1386,26 +1441,16 @@ int main(int argc, char** argv) {
 			return EXIT_FAILURE;
 		}
 		const WorldStateProtocol::Snapshot& snapshot = worldStateClient->GetLatestSnapshot();
-		const int activityModule = snapshot.ActivityModuleName.empty() ? -1 : g_PresetMan.GetModuleID(snapshot.ActivityModuleName);
-		const Entity* activityPreset = g_PresetMan.GetEntityPreset(snapshot.ActivityClassName, snapshot.ActivityPreset, activityModule);
-		Entity* activityClone = activityPreset ? activityPreset->Clone() : nullptr;
-		Activity* activity = dynamic_cast<Activity*>(activityClone);
-		if (!activity) {
-			delete activityClone;
-		}
-		const int sceneResult = snapshot.SceneModuleName.empty() ? g_SceneMan.SetSceneToLoad(snapshot.ScenePreset)
-		                                                       : g_SceneMan.SetSceneToLoad(snapshot.ScenePreset, snapshot.SceneModuleName);
-		if (!activity || sceneResult < 0) {
-			std::cerr << "[NETWORK] Server Activity or Scene preset is unavailable locally; verify installed .rte modules\n";
-			delete activity;
+		std::string failureReason;
+		if (!QueueWorldStateActivity(snapshot, failureReason)) {
+			std::cerr << "[NETWORK] " << failureReason << "; verify installed .rte modules\n";
 			worldStateClient.reset();
 			DestroyManagers();
 			allegro_exit();
 			SDL_Quit();
 			return EXIT_FAILURE;
 		}
-		g_ActivityMan.SetStartActivity(activity);
-		g_ActivityMan.SetRestartActivity();
+		worldStateClientAppliedSceneRevision = snapshot.SceneRevision;
 		if (worldStateClientLog.is_open()) {
 			worldStateClientLog << "connected=true\nactivity=" << snapshot.ActivityClassName << '/' << snapshot.ActivityPreset << "\nscene=" << snapshot.SceneModuleName << '/' << snapshot.ScenePreset
 			                    << "\nsnapshot_objects=" << snapshot.Objects.size() << "\n" << std::flush;
