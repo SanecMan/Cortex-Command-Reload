@@ -371,7 +371,7 @@ bool Reader::StartIncludeFile() {
 	m_StreamStack.push(StreamInfo(m_Stream.release(), m_FilePath, m_CurrentLine, m_PreviousIndent));
 
 	m_FilePath = includeFilePath;
-	m_Stream = std::make_unique<std::ifstream>(std::filesystem::u8path(m_FilePath));
+	m_Stream = std::make_unique<std::ifstream>(UTF8::PathFromString(m_FilePath));
 
 	if (m_Stream->fail() || !System::PathExistsCaseSensitive(includeFilePath)) {
 		// Backpedal and set up to read the next property in the old stream

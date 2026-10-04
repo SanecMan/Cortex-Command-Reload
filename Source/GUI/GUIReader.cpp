@@ -27,7 +27,7 @@ GUIReader::GUIReader() {
 }
 
 int GUIReader::Create(const std::string& fileName) {
-	m_FilePath = std::filesystem::path(fileName).generic_string();
+	m_FilePath = UTF8::PathToString(UTF8::PathFromString(fileName));
 
 	if (m_FilePath.empty()) {
 		return -1;
@@ -35,7 +35,7 @@ int GUIReader::Create(const std::string& fileName) {
 	// Extract the file name and module name from the path
 	m_FileName = m_FilePath.substr(m_FilePath.find_last_of("/\\") + 1);
 
-	m_Stream = std::make_unique<std::ifstream>(std::filesystem::u8path(fileName));
+	m_Stream = std::make_unique<std::ifstream>(UTF8::PathFromString(m_FilePath));
 	if (m_Stream->good()) {
 		UTF8::SkipByteOrderMark(*m_Stream);
 	}
@@ -255,15 +255,15 @@ void GUIReader::ReportError(const std::string& errorDesc) const {
 
 bool GUIReader::StartIncludeFile() {
 	// Get the file path from the current stream before pushing it into the StreamStack, otherwise we can't open a new stream after releasing it because we can't read.
-	std::string includeFilePath = std::filesystem::path(ReadPropValue()).generic_string();
+	std::string includeFilePath = UTF8::PathToString(UTF8::PathFromString(ReadPropValue()));
 
 	// Push the current stream onto the StreamStack for future retrieval when the new include file has run out of data.
 	m_StreamStack.emplace(StreamInfo(m_Stream.release(), m_FilePath, m_CurrentLine, m_PreviousIndent));
 
 	m_FilePath = includeFilePath;
-	m_Stream = std::make_unique<std::ifstream>(std::filesystem::u8path(m_FilePath));
+	m_Stream = std::make_unique<std::ifstream>(UTF8::PathFromString(m_FilePath));
 
-	if (m_Stream->fail() || !std::filesystem::exists(includeFilePath)) {
+	if (m_Stream->fail() || !std::filesystem::exists(UTF8::PathFromString(includeFilePath))) {
 		// Backpedal and set up to read the next property in the old stream
 		m_Stream.reset(m_StreamStack.top().Stream); // Destructs the current m_Stream and takes back ownership and management of the raw StreamInfo std::ifstream pointer.
 		m_FilePath = m_StreamStack.top().FilePath;

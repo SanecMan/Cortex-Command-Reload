@@ -24,6 +24,7 @@
 
 #include "GUI.h"
 #include "GUIInputWrapper.h"
+#include "GUIReader.h"
 #include "AllegroScreen.h"
 #include "AllegroBitmap.h"
 
@@ -343,12 +344,18 @@ namespace {
 			Reader unicodePathReader(unicodePath, false, nullptr, true, true);
 			unicodeReaderOpened = unicodePathReader.ReaderOK();
 		}
+		bool unicodeGUIReaderOpened = false;
+		{
+			GUIReader unicodeGUIReader;
+			unicodeGUIReader.Create(unicodePath);
+			unicodeGUIReaderOpened = unicodeGUIReader.ReaderOK();
+		}
 		std::error_code unicodeFileCleanupError;
 		const bool unicodeFileRemoved = std::filesystem::remove(UTF8::PathFromString(unicodePath), unicodeFileCleanupError);
-		const bool unicodeFilePathPassed = unicodeFileWritten && unicodeFileRead && unicodePathResolved && unicodeReaderOpened && unicodeFileRemoved && !unicodeFileCleanupError;
+		const bool unicodeFilePathPassed = unicodeFileWritten && unicodeFileRead && unicodePathResolved && unicodeReaderOpened && unicodeGUIReaderOpened && unicodeFileRemoved && !unicodeFileCleanupError;
 		state.Log << "utf8_file_path_smoke=" << (unicodeFilePathPassed ? "passed" : "failed")
 		          << " written=" << unicodeFileWritten << " read=" << unicodeFileRead << " resolved=" << unicodePathResolved
-		          << " reader_opened=" << unicodeReaderOpened << " removed=" << unicodeFileRemoved
+		          << " reader_opened=" << unicodeReaderOpened << " gui_reader_opened=" << unicodeGUIReaderOpened << " removed=" << unicodeFileRemoved
 		          << " cleanup_error=" << unicodeFileCleanupError.value() << '\n' << std::flush;
 		if (!unicodeFilePathPassed) {
 			return false;
