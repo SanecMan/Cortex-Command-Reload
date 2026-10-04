@@ -12,6 +12,12 @@ Output is written to `ScreenShots/DebugRuns/`. Starting another debug run clears
 
 The process exits with code 0 only when the smoke run completes successfully. A failed check, missing activity, interrupted run, or output setup error returns a nonzero exit code, so CI and scripts can detect failures without parsing screenshots.
 
+Use `-debug-run-preflight-only` to run the UTF-8, file-path and local world-state protocol/transport checks, then exit before SDL, content loading, simulation and rendering. This is useful for automated checks on Windows sessions without an interactive display. It does not count as a gameplay or rendering smoke test and creates no screenshots:
+
+```powershell
+& '.\Cortex Command.debug.minimal.exe' -debug-run 60 -debug-run-preflight-only
+```
+
 `-debug-run-output <name>` writes a run to `ScreenShots/<name>/`; the name must be one directory component. This allows host and client smoke processes to write separate reports and screenshots. To exercise live host Activity/Scene changes, start these two processes from the game directory in separate terminals:
 
 ```powershell

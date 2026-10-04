@@ -148,6 +148,7 @@ namespace {
 		bool Passed = false;
 		bool HostSessionTestPassed = true;
 		bool OverlayCaptureEnabled = false;
+		bool PreflightOnly = false;
 		bool RequestHostWorldStateTransition = false;
 		bool RequireWorldStateTransition = false;
 		bool WorldStateTransitionObserved = false;
@@ -222,6 +223,7 @@ namespace {
 		for (int i = 1; i < argc; ++i) {
 			const std::string_view argument(argv[i]);
 			if (argument == "-debug-overlay") state.OverlayCaptureEnabled = true;
+			if (argument == "-debug-run-preflight-only") state.PreflightOnly = true;
 			if (argument == "-debug-run-world-state-transition") state.RequestHostWorldStateTransition = true;
 			if (argument == "-debug-run-require-world-state-transition") state.RequireWorldStateTransition = true;
 			if (argument == "-debug-run-output" && i + 1 < argc) state.OutputDirectoryName = argv[++i];
@@ -475,7 +477,8 @@ namespace {
 			return false;
 		}
 		state.StartTime = std::chrono::steady_clock::now();
-		state.Log << "mode=automated-gameplay-smoke\nupdates=" << state.UpdateLimit << "\nscene=Tutorial Bunker\n" << std::flush;
+		state.Log << "mode=" << (state.PreflightOnly ? "preflight-only" : "automated-gameplay-smoke")
+		          << "\nupdates=" << state.UpdateLimit << "\nscene=Tutorial Bunker\n" << std::flush;
 		return true;
 	}
 
@@ -1438,6 +1441,14 @@ int main(int argc, char** argv) {
 	if (!StartDebugRun()) {
 		allegro_exit();
 		return EXIT_FAILURE;
+	}
+	if (debugRun && GetDebugRunState().PreflightOnly) {
+		DebugRunState& state = GetDebugRunState();
+		state.Passed = true;
+		state.Log << "result=passed\n" << std::flush;
+		state.Log.close();
+		allegro_exit();
+		return EXIT_SUCCESS;
 	}
 	if (debugRun) {
 		SDL_SetAssertionHandler(DebugRunSDLAssertionHandler, nullptr);
