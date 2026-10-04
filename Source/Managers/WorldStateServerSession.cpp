@@ -1,8 +1,11 @@
 #include "WorldStateServerSession.h"
 
 #include "MessageIdentifiers.h"
+#include "ActivityMan.h"
 #include "NetworkMessages.h"
 #include "UInputMan.h"
+
+#include <algorithm>
 
 using namespace RTE;
 
@@ -20,6 +23,11 @@ bool WorldStateServerSession::Start(const std::string& bindAddress, unsigned sho
 	m_InputCommandCount = 0;
 	m_LastInputSequenceByClient.clear();
 	m_PlayerSlotByClient.clear();
+	m_ResetVotesByClient.clear();
+	m_RestartVotesByClient.clear();
+	m_PreviousResetInputByClient.clear();
+	m_PreviousRestartInputByClient.clear();
+	m_LastActivityVoteAction = {};
 	m_InputSlotsInUse.fill(false);
 	// This session runs inside the playable host client. Keep its local PlayerOne
 	// input independent from network peers; use PlayerTwo through PlayerFour remotely.
@@ -36,6 +44,10 @@ void WorldStateServerSession::Stop() {
 	}
 	m_PlayerSlotByClient.clear();
 	m_LastInputSequenceByClient.clear();
+	m_ResetVotesByClient.clear();
+	m_RestartVotesByClient.clear();
+	m_PreviousResetInputByClient.clear();
+	m_PreviousRestartInputByClient.clear();
 	m_InputSlotsInUse.fill(false);
 	if (m_Transport.IsStarted()) {
 		m_Transport.Stop();
@@ -61,6 +73,10 @@ void WorldStateServerSession::Update(std::uint32_t simulationTick) {
 			++m_ConnectedClients;
 			const std::string clientAddress(packet.Sender.ToString(true));
 			m_LastInputSequenceByClient.erase(clientAddress);
+			m_ResetVotesByClient.erase(clientAddress);
+			m_RestartVotesByClient.erase(clientAddress);
+			m_PreviousResetInputByClient.erase(clientAddress);
+			m_PreviousRestartInputByClient.erase(clientAddress);
 			int assignedPlayer = Players::NoPlayer;
 			for (int player = Players::PlayerTwo; player < Players::MaxPlayerCount; ++player) {
 				if (!m_InputSlotsInUse[player]) {
@@ -81,6 +97,10 @@ void WorldStateServerSession::Update(std::uint32_t simulationTick) {
 			m_ConnectedClients = m_ConnectedClients > 0 ? static_cast<unsigned short>(m_ConnectedClients - 1) : 0;
 			const std::string clientAddress(packet.Sender.ToString(true));
 			m_LastInputSequenceByClient.erase(clientAddress);
+			m_ResetVotesByClient.erase(clientAddress);
+			m_RestartVotesByClient.erase(clientAddress);
+			m_PreviousResetInputByClient.erase(clientAddress);
+			m_PreviousRestartInputByClient.erase(clientAddress);
 			if (auto slot = m_PlayerSlotByClient.find(clientAddress); slot != m_PlayerSlotByClient.end()) {
 				g_UInputMan.ClearNetworkInputState(slot->second);
 				m_InputSlotsInUse[slot->second] = false;
@@ -103,6 +123,16 @@ void WorldStateServerSession::Update(std::uint32_t simulationTick) {
 				continue;
 			}
 			m_LastInputSequenceByClient[clientAddress] = sequence;
+			const bool previousReset = m_PreviousResetInputByClient[clientAddress];
+			const bool previousRestart = m_PreviousRestartInputByClient[clientAddress];
+			if (command.ResetActivityVote && !previousReset) {
+				m_ResetVotesByClient[clientAddress] = true;
+			}
+			if (command.RestartActivityVote && !previousRestart) {
+				m_RestartVotesByClient[clientAddress] = true;
+			}
+			m_PreviousResetInputByClient[clientAddress] = command.ResetActivityVote;
+			m_PreviousRestartInputByClient[clientAddress] = command.RestartActivityVote;
 			++m_InputCommandCount;
 			constexpr float c_AnalogScale = 1.0F / 32767.0F;
 			const Vector mouseMovement(static_cast<float>(command.MouseDeltaX), static_cast<float>(command.MouseDeltaY));
@@ -116,6 +146,7 @@ void WorldStateServerSession::Update(std::uint32_t simulationTick) {
 			}
 		}
 	}
+	ProcessActivityVotes();
 
 	// The simulation timer currently runs at 60 updates per second. Send 20 full snapshots/sec.
 	// Avoid walking every movable object and encoding a full snapshot while nobody is connected.
@@ -131,6 +162,46 @@ void WorldStateServerSession::Update(std::uint32_t simulationTick) {
 		Log("ERROR: failed to encode or broadcast world snapshot");
 	} else {
 		++m_SnapshotBroadcastCount;
+	}
+}
+
+void WorldStateServerSession::ProcessActivityVotes() {
+	if (!g_ActivityMan.IsInActivity() || !g_ActivityMan.GetActivity() ||
+	    g_ActivityMan.GetActivity()->GetPresetName() == "Multiplayer Lobby" || m_PlayerSlotByClient.empty()) {
+		return;
+	}
+	const auto now = std::chrono::steady_clock::now();
+	if (m_LastActivityVoteAction != std::chrono::steady_clock::time_point{} && now - m_LastActivityVoteAction < std::chrono::seconds(3)) {
+		return;
+	}
+	const bool resetUnanimous = m_ResetVotesByClient.size() == m_PlayerSlotByClient.size() &&
+	    std::all_of(m_PlayerSlotByClient.begin(), m_PlayerSlotByClient.end(), [this](const auto& client) {
+		    const auto vote = m_ResetVotesByClient.find(client.first);
+		    return vote != m_ResetVotesByClient.end() && vote->second;
+	    });
+	const bool restartUnanimous = m_RestartVotesByClient.size() == m_PlayerSlotByClient.size() &&
+	    std::all_of(m_PlayerSlotByClient.begin(), m_PlayerSlotByClient.end(), [this](const auto& client) {
+		    const auto vote = m_RestartVotesByClient.find(client.first);
+		    return vote != m_RestartVotesByClient.end() && vote->second;
+	    });
+	if (!resetUnanimous && !restartUnanimous) {
+		return;
+	}
+	for (auto& [client, vote] : m_ResetVotesByClient) {
+		vote = false;
+	}
+	for (auto& [client, vote] : m_RestartVotesByClient) {
+		vote = false;
+	}
+	m_LastActivityVoteAction = now;
+	if (resetUnanimous) {
+		Log("INFO: connected clients unanimously voted to end the current Activity");
+		g_ActivityMan.EndActivity();
+		g_ActivityMan.SetRestartActivity();
+		g_ActivityMan.SetInActivity(false);
+	} else {
+		Log("INFO: connected clients unanimously voted to restart the current Activity");
+		g_ActivityMan.SetRestartActivity();
 	}
 }
 

@@ -6,6 +6,7 @@
 
 #include <cstdint>
 #include <array>
+#include <chrono>
 #include <fstream>
 #include <string>
 #include <unordered_map>
@@ -28,6 +29,7 @@ namespace RTE {
 
 	private:
 		void Log(const std::string& message);
+		void ProcessActivityVotes();
 
 		WorldStateTransport m_Transport;
 		WorldStateSnapshotBuilder m_SnapshotBuilder;
@@ -39,6 +41,11 @@ namespace RTE {
 	unsigned short m_ConnectedClients = 0;
 	std::unordered_map<std::string, std::uint32_t> m_LastInputSequenceByClient;
 	std::unordered_map<std::string, int> m_PlayerSlotByClient;
+	std::unordered_map<std::string, bool> m_ResetVotesByClient;
+	std::unordered_map<std::string, bool> m_RestartVotesByClient;
+	std::unordered_map<std::string, bool> m_PreviousResetInputByClient;
+	std::unordered_map<std::string, bool> m_PreviousRestartInputByClient;
+	std::chrono::steady_clock::time_point m_LastActivityVoteAction{};
 	std::array<bool, Players::MaxPlayerCount> m_InputSlotsInUse{};
 	};
 
