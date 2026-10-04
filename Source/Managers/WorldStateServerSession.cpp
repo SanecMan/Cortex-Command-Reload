@@ -26,6 +26,8 @@ bool WorldStateServerSession::Start(const std::string& bindAddress, unsigned sho
 	m_LastBroadcastTick = 0;
 	m_Sequence = 0;
 	m_SnapshotBroadcastCount = 0;
+	m_SnapshotCaptureWindowMicroseconds = 0;
+	m_SnapshotCaptureWindowSamples = 0;
 	m_InputCommandCount = 0;
 	m_LastTerrainSceneRevision = 0;
 	m_TerrainPatchBroadcastCount = 0;
@@ -201,12 +203,22 @@ void WorldStateServerSession::Update(std::uint32_t simulationTick) {
 	}
 	m_LastBroadcastTick = simulationTick;
 	g_PerformanceMan.StartPerformanceMeasurement(PerformanceMan::WorldStateSnapshot);
+	const auto snapshotCaptureStarted = std::chrono::steady_clock::now();
 	const WorldStateProtocol::Snapshot snapshot = m_SnapshotBuilder.Capture(simulationTick);
+	m_SnapshotCaptureWindowMicroseconds += static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - snapshotCaptureStarted).count());
+	++m_SnapshotCaptureWindowSamples;
 	g_PerformanceMan.StopPerformanceMeasurement(PerformanceMan::WorldStateSnapshot);
 	if (!m_Transport.BroadcastSnapshot(snapshot, ++m_Sequence)) {
 		Log("ERROR: failed to encode or broadcast world snapshot");
 	} else {
 		++m_SnapshotBroadcastCount;
+		if (m_SnapshotBroadcastCount % 100 == 0 && m_SnapshotCaptureWindowSamples > 0) {
+			const double averageCaptureMilliseconds = static_cast<double>(m_SnapshotCaptureWindowMicroseconds) / m_SnapshotCaptureWindowSamples / 1000.0;
+			Log("INFO: snapshot capture average over " + std::to_string(m_SnapshotCaptureWindowSamples) + " snapshots=" +
+			    std::to_string(averageCaptureMilliseconds) + " ms; objects=" + std::to_string(snapshot.Objects.size()));
+			m_SnapshotCaptureWindowMicroseconds = 0;
+			m_SnapshotCaptureWindowSamples = 0;
+		}
 	}
 	if (snapshot.SceneRevision != m_LastTerrainSceneRevision) {
 		m_PendingTerrainPatches.clear();

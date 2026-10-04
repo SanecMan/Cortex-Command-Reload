@@ -42,6 +42,8 @@ namespace RTE {
 		std::uint32_t m_LastBroadcastTick = 0;
 		std::uint32_t m_Sequence = 0;
 	std::uint32_t m_SnapshotBroadcastCount = 0;
+		std::uint64_t m_SnapshotCaptureWindowMicroseconds = 0;
+		std::uint32_t m_SnapshotCaptureWindowSamples = 0;
 		std::uint32_t m_InputCommandCount = 0;
 		std::uint32_t m_LastTerrainSceneRevision = 0;
 		std::uint32_t m_TerrainPatchBroadcastCount = 0;
