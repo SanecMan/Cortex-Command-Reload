@@ -1840,13 +1840,21 @@ void MovableMan::UpdateControllers() {
 
 	g_PerformanceMan.StartPerformanceMeasurement(PerformanceMan::ActorsAI);
 	{
+		m_ActorsToUpdateAI.clear();
+		if (m_ActorsToUpdateAI.capacity() < m_Actors.size()) {
+			m_ActorsToUpdateAI.reserve(m_Actors.size());
+		}
 		for (Actor* actor: m_Actors) {
 			actor->GetController()->Update();
+			if (actor->GetController()->ShouldUpdateAIThisFrame()) {
+				m_ActorsToUpdateAI.push_back(actor);
+			}
 		}
 
-		g_LuaMan.SetThreadLuaStateOverride(&g_LuaMan.GetMasterScriptState());
-		for (Actor* actor: m_Actors) {
-			if (actor->GetLuaState() == &g_LuaMan.GetMasterScriptState() && actor->GetController()->ShouldUpdateAIThisFrame()) {
+		LuaStateWrapper& masterScriptState = g_LuaMan.GetMasterScriptState();
+		g_LuaMan.SetThreadLuaStateOverride(&masterScriptState);
+		for (Actor* actor: m_ActorsToUpdateAI) {
+			if (actor->GetLuaState() == &masterScriptState) {
 				actor->RunScriptedFunctionInAppropriateScripts("ThreadedUpdateAI", false, true, {}, {}, {});
 			}
 		}
@@ -1858,19 +1866,17 @@ void MovableMan::UpdateControllers() {
 			                                                     RTEAssert(start + 1 == end, "Threaded script state being updated across multiple threads!");
 			                                                     LuaStateWrapper& luaState = luaStates[start];
 			                                                     g_LuaMan.SetThreadLuaStateOverride(&luaState);
-			                                                     for (Actor* actor: m_Actors) {
-				                                                     if (actor->GetLuaState() == &luaState && actor->GetController()->ShouldUpdateAIThisFrame()) {
-					                                                     actor->RunScriptedFunctionInAppropriateScripts("ThreadedUpdateAI", false, true, {}, {}, {});
+			                                                     for (Actor* actor: m_ActorsToUpdateAI) {
+				                                                     if (actor->GetLuaState() == &luaState) {
+				                                                         actor->RunScriptedFunctionInAppropriateScripts("ThreadedUpdateAI", false, true, {}, {}, {});
 				                                                     }
 			                                                     }
 			                                                     g_LuaMan.SetThreadLuaStateOverride(nullptr);
 		                                                     })
 		    .wait();
 
-		for (Actor* actor: m_Actors) {
-			if (actor->GetController()->ShouldUpdateAIThisFrame()) {
-				actor->RunScriptedFunctionInAppropriateScripts("UpdateAI", false, true, {}, {}, {});
-			}
+		for (Actor* actor: m_ActorsToUpdateAI) {
+			actor->RunScriptedFunctionInAppropriateScripts("UpdateAI", false, true, {}, {}, {});
 		}
 	}
 	g_PerformanceMan.StopPerformanceMeasurement(PerformanceMan::ActorsAI);

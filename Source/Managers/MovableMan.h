@@ -578,6 +578,8 @@ namespace RTE {
 	protected:
 		// All actors in the scene
 		std::deque<Actor*> m_Actors;
+		// Reused scratch list for actors whose throttled AI callbacks run this update.
+		std::vector<Actor*> m_ActorsToUpdateAI;
 		// A map to give a unique contiguous identifier per-actor. This is re-created per frame.
 		std::unordered_map<const Actor*, int> m_ContiguousActorIDs;
 		// List of items that are pickup-able by actors
