@@ -453,9 +453,32 @@ namespace {
 		std::vector<std::uint8_t> invalidInputPacket;
 		const bool invalidInputRejected = !WorldStateProtocol::EncodeInputCommand(invalidInputCommand, 19, invalidInputPacket) &&
 		                                 !inputPacket.empty() && !WorldStateProtocol::DecodeInputCommand(std::span(inputPacket).first(inputPacket.size() - 1), decodedInputCommand);
+		WorldStateProtocol::TerrainPatch terrainPatch;
+		terrainPatch.SceneRevision = 7;
+		terrainPatch.X = 128;
+		terrainPatch.Y = 64;
+		terrainPatch.Width = 2;
+		terrainPatch.Height = 2;
+		terrainPatch.Layer = WorldStateProtocol::TerrainLayer::Foreground;
+		terrainPatch.Pixels = {3, 17, 128, 255};
+		std::vector<std::uint8_t> terrainPacket;
+		WorldStateProtocol::TerrainPatch decodedTerrainPatch;
+		std::uint32_t terrainSequence = 0;
+		const bool terrainPatchRoundTripPassed = WorldStateProtocol::EncodeTerrainPatch(terrainPatch, 21, terrainPacket) &&
+		                                        WorldStateProtocol::DecodeTerrainPatch(terrainPacket, decodedTerrainPatch, &terrainSequence) &&
+		                                        terrainSequence == 21 && decodedTerrainPatch.SceneRevision == terrainPatch.SceneRevision &&
+		                                        decodedTerrainPatch.X == terrainPatch.X && decodedTerrainPatch.Y == terrainPatch.Y &&
+		                                        decodedTerrainPatch.Width == terrainPatch.Width && decodedTerrainPatch.Height == terrainPatch.Height &&
+		                                        decodedTerrainPatch.Layer == terrainPatch.Layer && decodedTerrainPatch.Pixels == terrainPatch.Pixels;
+		WorldStateProtocol::TerrainPatch invalidTerrainPatch = terrainPatch;
+		invalidTerrainPatch.Pixels.pop_back();
+		const bool invalidTerrainPatchRejected = !WorldStateProtocol::EncodeTerrainPatch(invalidTerrainPatch, 22, terrainPacket) &&
+		                                        !WorldStateProtocol::DecodeTerrainPatch(std::span(terrainPacket).first(terrainPacket.size() - 1), decodedTerrainPatch);
 		state.Log << "world_state_input_codec_smoke=" << (inputCommandRoundTripPassed && invalidInputRejected ? "passed" : "failed") << '\n' << std::flush;
 		state.Log << "world_state_assignment_codec_smoke=" << (assignmentRoundTripPassed ? "passed" : "failed") << '\n' << std::flush;
-		if (!inputCommandRoundTripPassed || !invalidInputRejected || !assignmentRoundTripPassed || WorldStateProtocol::c_InputElementCount != InputElements::INPUT_COUNT) {
+		state.Log << "world_state_terrain_patch_codec_smoke=" << (terrainPatchRoundTripPassed && invalidTerrainPatchRejected ? "passed" : "failed") << '\n' << std::flush;
+		if (!inputCommandRoundTripPassed || !invalidInputRejected || !assignmentRoundTripPassed || !terrainPatchRoundTripPassed || !invalidTerrainPatchRejected ||
+		    WorldStateProtocol::c_InputElementCount != InputElements::INPUT_COUNT) {
 			return false;
 		}
 		if (!VerifyWorldStateTransportLoopback(networkSnapshot, state.Log)) {

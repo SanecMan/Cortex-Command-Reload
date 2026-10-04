@@ -17,7 +17,7 @@
 namespace RTE::WorldStateProtocol {
 
 inline constexpr std::uint32_t c_Magic = 0x31524343; // "CCR1" on the wire.
-inline constexpr std::uint16_t c_Version = 5;
+inline constexpr std::uint16_t c_Version = 6;
 inline constexpr std::size_t c_HeaderSize = 16;
 inline constexpr std::size_t c_MaxPacketSize = 4 * 1024 * 1024;
 inline constexpr std::size_t c_MaxObjects = 65535;
@@ -32,13 +32,22 @@ inline constexpr std::uint32_t c_InputElementCount = 34;
 inline constexpr std::uint8_t c_PlayerSlotCount = 4;
 inline constexpr std::int32_t c_MaxMouseDelta = 8192;
 inline constexpr std::int16_t c_MaxMouseWheelDelta = 16;
+inline constexpr std::size_t c_TerrainPatchHeaderSize = 25;
+inline constexpr std::size_t c_MaxTerrainPatchBytes = c_MaxPacketSize - c_HeaderSize - c_TerrainPatchHeaderSize;
 
 enum class MessageType : std::uint8_t {
 	ClientHello = 1,
 	InputCommand = 2,
 	WorldSnapshot = 3,
 	Disconnect = 4,
-	ClientAssignment = 5
+	ClientAssignment = 5,
+	TerrainPatch = 6
+};
+
+enum class TerrainLayer : std::uint8_t {
+	Material = 0,
+	Foreground = 1,
+	Background = 2
 };
 
 struct ObjectState {
@@ -92,6 +101,16 @@ struct InputCommand {
 
 struct ClientAssignment {
 	std::int8_t PlayerSlot = -1; // -1 means connected as a spectator.
+};
+
+struct TerrainPatch {
+	std::uint32_t SceneRevision = 0;
+	std::uint32_t X = 0;
+	std::uint32_t Y = 0;
+	std::uint32_t Width = 0;
+	std::uint32_t Height = 0;
+	TerrainLayer Layer = TerrainLayer::Material;
+	std::vector<std::uint8_t> Pixels;
 };
 
 namespace Detail {
@@ -155,6 +174,72 @@ namespace Detail {
 		       object.PixelColorIndex <= 255 && std::isfinite(object.PixelMass) && object.PixelMass >= 0.0F && std::isfinite(object.PixelSharpness);
 	}
 } // namespace Detail
+
+inline bool EncodeTerrainPatch(const TerrainPatch& patch, std::uint32_t sequence, std::vector<std::uint8_t>& packet) {
+	if (patch.SceneRevision == 0 || patch.Width == 0 || patch.Height == 0 || patch.Width > c_MaxTerrainPatchBytes / patch.Height ||
+	    patch.Pixels.size() != static_cast<std::size_t>(patch.Width) * patch.Height || patch.Pixels.size() > c_MaxTerrainPatchBytes ||
+	    static_cast<std::uint8_t>(patch.Layer) > static_cast<std::uint8_t>(TerrainLayer::Background)) {
+		return false;
+	}
+	packet.clear();
+	packet.reserve(c_HeaderSize + c_TerrainPatchHeaderSize + patch.Pixels.size());
+	Detail::WriteUnsigned(packet, c_Magic, sizeof(c_Magic));
+	Detail::WriteUnsigned(packet, c_Version, sizeof(c_Version));
+	Detail::WriteUnsigned(packet, static_cast<std::uint8_t>(MessageType::TerrainPatch), sizeof(std::uint8_t));
+	Detail::WriteUnsigned(packet, 0, sizeof(std::uint8_t));
+	Detail::WriteUnsigned(packet, sequence, sizeof(sequence));
+	Detail::WriteUnsigned(packet, c_TerrainPatchHeaderSize + patch.Pixels.size(), sizeof(std::uint32_t));
+	Detail::WriteUnsigned(packet, patch.SceneRevision, sizeof(patch.SceneRevision));
+	Detail::WriteUnsigned(packet, patch.X, sizeof(patch.X));
+	Detail::WriteUnsigned(packet, patch.Y, sizeof(patch.Y));
+	Detail::WriteUnsigned(packet, patch.Width, sizeof(patch.Width));
+	Detail::WriteUnsigned(packet, patch.Height, sizeof(patch.Height));
+	Detail::WriteUnsigned(packet, static_cast<std::uint8_t>(patch.Layer), sizeof(std::uint8_t));
+	Detail::WriteUnsigned(packet, patch.Pixels.size(), sizeof(std::uint32_t));
+	packet.insert(packet.end(), patch.Pixels.begin(), patch.Pixels.end());
+	return packet.size() <= c_MaxPacketSize;
+}
+
+inline bool DecodeTerrainPatch(std::span<const std::uint8_t> packet, TerrainPatch& patch, std::uint32_t* sequence = nullptr) {
+	if (packet.size() < c_HeaderSize + c_TerrainPatchHeaderSize || packet.size() > c_MaxPacketSize) {
+		return false;
+	}
+	std::size_t offset = 0;
+	std::uint64_t magic = 0, version = 0, messageType = 0, reserved = 0, sequenceValue = 0, payloadSize = 0;
+	if (!Detail::ReadUnsigned(packet, offset, sizeof(c_Magic), magic) || magic != c_Magic ||
+	    !Detail::ReadUnsigned(packet, offset, sizeof(c_Version), version) || version != c_Version ||
+	    !Detail::ReadUnsigned(packet, offset, sizeof(std::uint8_t), messageType) || messageType != static_cast<std::uint8_t>(MessageType::TerrainPatch) ||
+	    !Detail::ReadUnsigned(packet, offset, sizeof(std::uint8_t), reserved) || reserved != 0 ||
+	    !Detail::ReadUnsigned(packet, offset, sizeof(std::uint32_t), sequenceValue) ||
+	    !Detail::ReadUnsigned(packet, offset, sizeof(std::uint32_t), payloadSize) || payloadSize != packet.size() - c_HeaderSize) {
+		return false;
+	}
+	TerrainPatch decoded;
+	std::uint64_t value = 0;
+	if (!Detail::ReadUnsigned(packet, offset, sizeof(decoded.SceneRevision), value)) return false;
+	decoded.SceneRevision = static_cast<std::uint32_t>(value);
+	if (!Detail::ReadUnsigned(packet, offset, sizeof(decoded.X), value)) return false;
+	decoded.X = static_cast<std::uint32_t>(value);
+	if (!Detail::ReadUnsigned(packet, offset, sizeof(decoded.Y), value)) return false;
+	decoded.Y = static_cast<std::uint32_t>(value);
+	if (!Detail::ReadUnsigned(packet, offset, sizeof(decoded.Width), value)) return false;
+	decoded.Width = static_cast<std::uint32_t>(value);
+	if (!Detail::ReadUnsigned(packet, offset, sizeof(decoded.Height), value)) return false;
+	decoded.Height = static_cast<std::uint32_t>(value);
+	if (!Detail::ReadUnsigned(packet, offset, sizeof(std::uint8_t), value) || value > static_cast<std::uint8_t>(TerrainLayer::Background)) return false;
+	decoded.Layer = static_cast<TerrainLayer>(value);
+	if (!Detail::ReadUnsigned(packet, offset, sizeof(std::uint32_t), value) || decoded.SceneRevision == 0 || decoded.Width == 0 || decoded.Height == 0 ||
+	    decoded.Width > c_MaxTerrainPatchBytes / decoded.Height || value != static_cast<std::size_t>(decoded.Width) * decoded.Height ||
+	    value > c_MaxTerrainPatchBytes || value != packet.size() - offset) {
+		return false;
+	}
+	decoded.Pixels.assign(packet.begin() + static_cast<std::ptrdiff_t>(offset), packet.end());
+	patch = std::move(decoded);
+	if (sequence) {
+		*sequence = static_cast<std::uint32_t>(sequenceValue);
+	}
+	return true;
+}
 
 inline bool EncodeClientAssignment(const ClientAssignment& assignment, std::uint32_t sequence, std::vector<std::uint8_t>& packet) {
 	if (assignment.PlayerSlot < -1 || assignment.PlayerSlot >= c_PlayerSlotCount) {
