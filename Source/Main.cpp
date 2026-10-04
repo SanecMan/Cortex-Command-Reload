@@ -607,7 +607,7 @@ namespace {
 		std::uint16_t boundPort = 0;
 		{
 			WorldStateTransport serverTransport;
-			std::array<WorldStateTransport, expectedClientCount> clientTransports;
+			std::array<WorldStateClientSession, expectedClientCount> clients;
 			std::array<bool, expectedClientCount> clientReceivedSnapshot{};
 			std::array<bool, expectedClientCount> clientReceivedTerrainPatch{};
 			WorldStateProtocol::TerrainPatch expectedTerrainPatch;
@@ -622,8 +622,8 @@ namespace {
 			if (serverStarted) {
 				boundPort = serverTransport.GetBoundPort();
 				clientsStarted = boundPort != 0;
-				for (WorldStateTransport& clientTransport : clientTransports) {
-					clientsStarted = clientsStarted && clientTransport.StartClient("127.0.0.1", boundPort);
+				for (WorldStateClientSession& client : clients) {
+					clientsStarted = clientsStarted && client.Connect("127.0.0.1", boundPort);
 				}
 				if (clientsStarted) {
 					bool broadcastSent = false;
@@ -647,43 +647,30 @@ namespace {
 							terrainBroadcastSent = serverTransport.BroadcastTerrainPatch(expectedTerrainPatch, expectedSnapshot.Tick + 1);
 							sendCount += terrainBroadcastSent ? expectedClientCount : 0;
 						}
-						for (std::size_t clientIndex = 0; clientIndex < clientTransports.size(); ++clientIndex) {
-							std::vector<WorldStateTransport::ReceivedPacket> clientPackets;
-							clientTransports[clientIndex].Poll(clientPackets);
-							clientPacketCount += clientPackets.size();
-							for (const WorldStateTransport::ReceivedPacket& received : clientPackets) {
-								if (received.Identifier != ID_CCR_WORLD_STATE) {
-									continue;
-								}
-								WorldStateProtocol::TerrainPatch terrainPatch;
-								std::uint32_t terrainSequence = 0;
-								if (WorldStateProtocol::DecodeTerrainPatch(received.Payload, terrainPatch, &terrainSequence)) {
-									clientReceivedTerrainPatch[clientIndex] = terrainSequence == expectedSnapshot.Tick + 1 &&
-									    terrainPatch.SceneRevision == expectedTerrainPatch.SceneRevision && terrainPatch.X == expectedTerrainPatch.X && terrainPatch.Y == expectedTerrainPatch.Y &&
-									    terrainPatch.Width == expectedTerrainPatch.Width && terrainPatch.Height == expectedTerrainPatch.Height && terrainPatch.Layer == expectedTerrainPatch.Layer &&
-									    terrainPatch.Pixels == expectedTerrainPatch.Pixels;
-									if (clientReceivedTerrainPatch[clientIndex]) {
-										++receivedTerrainPatchCount;
-									}
-									continue;
-								}
-								std::vector<std::uint8_t> decompressedPacket;
-								std::span<const std::uint8_t> snapshotPayload;
-								WorldStateProtocol::Snapshot transportedSnapshot;
-								std::uint32_t receivedSequence = 0;
-								clientReceivedSnapshot[clientIndex] = WorldStateCompression::DecodeFromWire(received.Payload, decompressedPacket, snapshotPayload) &&
-							                                         WorldStateProtocol::DecodeSnapshot(snapshotPayload, transportedSnapshot, &receivedSequence) &&
-							                                         receivedSequence == expectedSnapshot.Tick &&
-							                                         transportedSnapshot.Tick == expectedSnapshot.Tick &&
-							                                         transportedSnapshot.ActivityClassName == expectedSnapshot.ActivityClassName &&
-							                                         transportedSnapshot.ActivityPreset == expectedSnapshot.ActivityPreset &&
-							                                         transportedSnapshot.ActivityModuleName == expectedSnapshot.ActivityModuleName &&
-							                                         transportedSnapshot.SceneModuleName == expectedSnapshot.SceneModuleName &&
-							                                         transportedSnapshot.ScenePreset == expectedSnapshot.ScenePreset &&
-							                                         transportedSnapshot.Objects.size() == expectedSnapshot.Objects.size() &&
-							                                         (transportedSnapshot.Objects.empty() || transportedSnapshot.Objects.front().PresetName == expectedSnapshot.Objects.front().PresetName);
+						for (std::size_t clientIndex = 0; clientIndex < clients.size(); ++clientIndex) {
+							WorldStateClientSession& client = clients[clientIndex];
+							client.Update();
+							if (client.HasSnapshot() && !clientReceivedSnapshot[clientIndex]) {
+								const WorldStateProtocol::Snapshot& transportedSnapshot = client.GetLatestSnapshot();
+								clientReceivedSnapshot[clientIndex] = transportedSnapshot.Tick == expectedSnapshot.Tick &&
+								    transportedSnapshot.SceneRevision == expectedSnapshot.SceneRevision &&
+								    transportedSnapshot.ActivityClassName == expectedSnapshot.ActivityClassName && transportedSnapshot.ActivityPreset == expectedSnapshot.ActivityPreset &&
+								    transportedSnapshot.ActivityModuleName == expectedSnapshot.ActivityModuleName && transportedSnapshot.SceneModuleName == expectedSnapshot.SceneModuleName &&
+									    transportedSnapshot.ScenePreset == expectedSnapshot.ScenePreset && transportedSnapshot.Objects.size() == expectedSnapshot.Objects.size() &&
+								    (transportedSnapshot.Objects.empty() || transportedSnapshot.Objects.front().PresetName == expectedSnapshot.Objects.front().PresetName);
 								if (clientReceivedSnapshot[clientIndex]) {
 									++receivedClientCount;
+									++clientPacketCount;
+								}
+							}
+							for (const WorldStateClientSession::ReceivedTerrainPatch& receivedPatch : client.DrainTerrainPatches(expectedTerrainPatch.SceneRevision)) {
+								const WorldStateProtocol::TerrainPatch& terrainPatch = receivedPatch.Patch;
+								clientReceivedTerrainPatch[clientIndex] = receivedPatch.Sequence == expectedSnapshot.Tick + 1 &&
+								    terrainPatch.X == expectedTerrainPatch.X && terrainPatch.Y == expectedTerrainPatch.Y && terrainPatch.Width == expectedTerrainPatch.Width &&
+								    terrainPatch.Height == expectedTerrainPatch.Height && terrainPatch.Layer == expectedTerrainPatch.Layer && terrainPatch.Pixels == expectedTerrainPatch.Pixels;
+								if (clientReceivedTerrainPatch[clientIndex]) {
+									++receivedTerrainPatchCount;
+									++clientPacketCount;
 								}
 							}
 						}
