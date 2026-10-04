@@ -12,6 +12,15 @@ Output is written to `ScreenShots/DebugRuns/`. Starting another debug run clears
 
 The process exits with code 0 only when the smoke run completes successfully. A failed check, missing activity, interrupted run, or output setup error returns a nonzero exit code, so CI and scripts can detect failures without parsing screenshots.
 
+`-debug-run-output <name>` writes a run to `ScreenShots/<name>/`; the name must be one directory component. This allows host and client smoke processes to write separate reports and screenshots. To exercise live host Activity/Scene changes, start these two processes from the game directory in separate terminals:
+
+```powershell
+& '.\Cortex Command.debug.minimal.exe' -debug-run 900 -debug-overlay -debug-run-output HostTransition -debug-run-world-state-transition -world-state-server 18000
+& '.\Cortex Command.debug.minimal.exe' -debug-run 900 -debug-overlay -debug-run-output ClientTransition -debug-run-require-world-state-transition -world-state-client 127.0.0.1 18000
+```
+
+At update 600, the host switches to the built-in `Skirmish Defense` Activity on `Ketanot Hills`. The client run fails unless it receives the new revision and queues that exact Activity/Scene. Check both `ScreenShots/HostTransition/DebugRun.log` and `ScreenShots/ClientTransition/DebugRun.log`; the client's transport log is `WorldStateClient.log` in the game directory. Use distinct output names for concurrent runs.
+
 The resident-memory measurement is the Windows working set or Linux resident pages, in bytes; `0` means that the platform query failed or is not implemented. The network check uses four local client peers and does not connect remote gameplay clients.
 
 On Windows, an unhandled exception also writes `AbortDump.dmp` next to `AbortLog.txt` and `AbortScreen.png`. The dump is overwritten by the next crash and includes thread state plus memory referenced from thread stacks; it can contain game/session data, so review it before sharing it publicly. Windows system error text in the crash dialog is converted to UTF-8 before it is passed to SDL.

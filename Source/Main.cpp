@@ -148,6 +148,14 @@ namespace {
 		bool Passed = false;
 		bool HostSessionTestPassed = true;
 		bool OverlayCaptureEnabled = false;
+		bool RequestHostWorldStateTransition = false;
+		bool RequireWorldStateTransition = false;
+		bool WorldStateTransitionObserved = false;
+		bool HostWorldStateTransitionQueued = false;
+		bool PostTransitionStressBatchSpawned = false;
+		int WorldStateTransitionObservedUpdate = 0;
+		std::string ExpectedTransitionActivity = "Skirmish Defense";
+		std::string ExpectedTransitionScene = "Ketanot Hills";
 		int UpdateLimit = 600;
 		int SimulationUpdates = 0;
 		int RenderedFrames = 0;
@@ -159,6 +167,7 @@ namespace {
 		bool MidpointScreenshotCaptured = false;
 		bool FinalScreenshotCaptured = false;
 		std::filesystem::path OutputDirectory;
+		std::string OutputDirectoryName = "DebugRuns";
 		std::ofstream Log;
 		std::chrono::steady_clock::time_point StartTime;
 		std::chrono::steady_clock::time_point ModuleLoadStartTime;
@@ -193,10 +202,29 @@ namespace {
 
 	bool VerifyWorldStateTransportLoopback(const WorldStateProtocol::Snapshot& expectedSnapshot, std::ofstream& log);
 
+	SDL_AssertState SDLCALL DebugRunSDLAssertionHandler(const SDL_AssertData* assertion, void*) {
+		DebugRunState& state = GetDebugRunState();
+		if (state.Log.is_open()) {
+			state.Log << "sdl_assert=" << (assertion->filename ? assertion->filename : "unknown") << ':' << assertion->linenum
+			          << " function=" << (assertion->function ? assertion->function : "unknown")
+			          << " condition=" << (assertion->condition ? assertion->condition : "unknown") << '\n' << std::flush;
+		}
+		const std::string_view filename = assertion->filename ? assertion->filename : "";
+		const std::string_view function = assertion->function ? assertion->function : "";
+		if (filename.ends_with("SDL_hid.c") && function == "WIN_QuitDeviceNotification") {
+			return SDL_ASSERTION_IGNORE;
+		}
+		return SDL_ASSERTION_ABORT;
+	}
+
 	bool ParseDebugRunArguments(int argc, char** argv) {
 		DebugRunState& state = GetDebugRunState();
 		for (int i = 1; i < argc; ++i) {
-			if (std::string_view(argv[i]) == "-debug-overlay") state.OverlayCaptureEnabled = true;
+			const std::string_view argument(argv[i]);
+			if (argument == "-debug-overlay") state.OverlayCaptureEnabled = true;
+			if (argument == "-debug-run-world-state-transition") state.RequestHostWorldStateTransition = true;
+			if (argument == "-debug-run-require-world-state-transition") state.RequireWorldStateTransition = true;
+			if (argument == "-debug-run-output" && i + 1 < argc) state.OutputDirectoryName = argv[++i];
 		}
 		for (int i = 1; i < argc; ++i) {
 			if (std::string_view(argv[i]) != "-debug-run") {
@@ -223,7 +251,13 @@ namespace {
 			return true;
 		}
 
-		state.OutputDirectory = std::filesystem::path(System::GetWorkingDirectory()) / System::GetScreenshotDirectory() / "DebugRuns";
+		const std::filesystem::path outputName(state.OutputDirectoryName);
+		if (outputName.empty() || outputName.has_parent_path() || outputName.filename() != outputName || outputName == "." || outputName == ".." ||
+		    state.OutputDirectoryName.find_first_of("/\\:") != std::string::npos) {
+			std::cerr << "Debug run output must be a single directory name under the screenshots directory.\n";
+			return false;
+		}
+		state.OutputDirectory = std::filesystem::path(System::GetWorkingDirectory()) / System::GetScreenshotDirectory() / outputName;
 		std::error_code filesystemError;
 		const std::filesystem::file_status existingPathStatus = std::filesystem::symlink_status(state.OutputDirectory, filesystemError);
 		if (!filesystemError && std::filesystem::is_symlink(existingPathStatus)) {
@@ -274,7 +308,7 @@ namespace {
 		if (!utf16BridgePassed) {
 			return false;
 		}
-		const std::string unicodePath = System::GetWorkingDirectory() + System::GetScreenshotDirectory() + "DebugRuns/тест-🙂.tmp";
+		const std::string unicodePath = UTF8::PathToString(state.OutputDirectory / std::filesystem::u8path("тест-🙂.tmp"));
 		constexpr std::string_view fileProbe = "UTF-8 file path round trip";
 		FILE* unicodeFile = UTF8::OpenFile(unicodePath, "wb");
 		bool unicodeFileWritten = unicodeFile && std::fwrite(fileProbe.data(), 1, fileProbe.size(), unicodeFile) == fileProbe.size();
@@ -475,6 +509,25 @@ namespace {
 			state.InitialParticleCount = g_MovableMan.GetParticleCount();
 		}
 		if (state.SimulationUpdates == 1 || state.SimulationUpdates == state.UpdateLimit / 2) {
+			SpawnDebugStressBatch();
+		}
+		if (state.RequestHostWorldStateTransition && worldStateServerRequested && !state.HostWorldStateTransitionQueued && state.SimulationUpdates == 600) {
+			WorldStateProtocol::Snapshot targetActivity;
+			targetActivity.ActivityClassName = "GAScripted";
+			targetActivity.ActivityPreset = "Skirmish Defense";
+			targetActivity.ActivityModuleName = "Base.rte";
+			targetActivity.SceneModuleName = "Base.rte";
+			targetActivity.ScenePreset = "Ketanot Hills";
+			std::string failureReason;
+			state.HostWorldStateTransitionQueued = QueueWorldStateActivity(targetActivity, failureReason);
+			state.Log << "debug_host_activity_transition=" << (state.HostWorldStateTransitionQueued ? "queued" : "failed")
+			          << (failureReason.empty() ? "" : " reason=" + failureReason) << '\n' << std::flush;
+		}
+		const bool hostTransitionRestarted = state.RequestHostWorldStateTransition && state.HostWorldStateTransitionQueued && state.SimulationUpdates > 600;
+		const bool clientTransitionRestarted = state.RequireWorldStateTransition && state.WorldStateTransitionObserved &&
+		                                      state.SimulationUpdates > state.WorldStateTransitionObservedUpdate;
+		if (!state.PostTransitionStressBatchSpawned && (hostTransitionRestarted || clientTransitionRestarted)) {
+			state.PostTransitionStressBatchSpawned = true;
 			SpawnDebugStressBatch();
 		}
 		if (state.SimulationUpdates % 60 == 0) {
@@ -776,6 +829,9 @@ namespace {
 		          << " result=" << (worldSnapshotPassed ? "passed" : "failed") << '\n' << std::flush;
 		state.Log << "live_world_state_transport=" << (liveSnapshotTransportPassed ? "passed" : "failed") << '\n' << std::flush;
 		const bool utf8GlyphRenderPassed = g_FrameMan.DidDebugUTF8GlyphProbePass();
+		const bool worldStateTransitionPassed = !state.RequireWorldStateTransition || state.WorldStateTransitionObserved;
+		state.Log << "world_state_activity_transition=" << (worldStateTransitionPassed ? "passed" : "failed")
+		          << " observed=" << state.WorldStateTransitionObserved << " host_queued=" << state.HostWorldStateTransitionQueued << '\n' << std::flush;
 		state.Log << "utf8_unicode_font_loaded=" << (g_FrameMan.DidDebugUTF8GlyphFontLoad() ? "yes" : "no") << '\n' << std::flush;
 		const std::string unicodeFontPath = g_PresetMan.GetFullModulePath("Base.rte/GUIs/Fonts/Roboto-Medium.ttf");
 		std::filesystem::path unicodeFontFilePath = std::filesystem::u8path(unicodeFontPath);
@@ -799,7 +855,7 @@ namespace {
 		          << ",screen_fx:" << g_SettingsMan.GetScreenEffectsLevel() << ",gore:" << g_SettingsMan.GetGoreDensityPercent()
 		          << ",vsync:" << g_WindowMan.GetVSyncEnabled() << '\n' << std::flush;
 		success = success && performanceCountersPassed;
-		success = success && utf8GlyphRenderPassed && state.HostSessionTestPassed && worldIdentityStable && replicaSmokePassed && transientPixelReplicaPassed &&
+		success = success && utf8GlyphRenderPassed && worldStateTransitionPassed && state.HostSessionTestPassed && worldIdentityStable && replicaSmokePassed && transientPixelReplicaPassed &&
 		          networkInputApplicationPassed && worldSnapshotPassed && snapshotCompressionPassed && liveSnapshotTransportPassed;
 		const double elapsedSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - state.StartTime).count();
 		const double simulationSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - state.SimulationStartTime).count();
@@ -841,7 +897,7 @@ namespace {
 		}
 		++state.RenderedFrames;
 		const auto capture = [&](const char* label) {
-			const std::string imageName = "DebugRuns/debug-run-" + std::string(label) + ".png";
+			const std::string imageName = state.OutputDirectory.filename().string() + "/debug-run-" + std::string(label) + ".png";
 			const int screenshotResult = g_FrameMan.SaveScreenToPNGBlocking(imageName);
 			state.Log << "screenshot=" << imageName << " result=" << screenshotResult << '\n' << std::flush;
 		};
@@ -858,7 +914,7 @@ namespace {
 			capture("final");
 		}
 		if (state.SimulationUpdates >= state.UpdateLimit) {
-			FinishDebugRun(state.StressStarted);
+			FinishDebugRun(state.StressStarted && (!state.RequestHostWorldStateTransition || state.HostWorldStateTransitionQueued));
 		}
 	}
 }
@@ -1186,6 +1242,12 @@ void RunGameLoop() {
 						worldStateClientAppliedSceneRevision = snapshot.SceneRevision;
 						worldStateClientReplica.Forget();
 						worldStateSceneTransitionQueued = true;
+						DebugRunState& debugRunState = GetDebugRunState();
+						debugRunState.WorldStateTransitionObserved = !debugRunState.RequireWorldStateTransition ||
+						    (snapshot.ActivityPreset == debugRunState.ExpectedTransitionActivity && snapshot.ScenePreset == debugRunState.ExpectedTransitionScene);
+						if (debugRunState.RequireWorldStateTransition && debugRunState.WorldStateTransitionObserved) {
+							debugRunState.WorldStateTransitionObservedUpdate = debugRunState.SimulationUpdates + 1;
+						}
 						if (worldStateClientLog.is_open()) {
 							worldStateClientLog << "activity_transition_queued=true revision=" << snapshot.SceneRevision << " activity=" << snapshot.ActivityModuleName << '/'
 							                    << snapshot.ActivityClassName << '/' << snapshot.ActivityPreset << " scene=" << snapshot.SceneModuleName << '/' << snapshot.ScenePreset << '\n'
@@ -1360,16 +1422,6 @@ int main(int argc, char** argv) {
 	install_allegro(SYSTEM_NONE, &errno, std::atexit);
 	loadpng_init();
 
-	SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_GAMEPAD );
-
-	SDL_SetHint(SDL_HINT_MOUSE_AUTO_CAPTURE, "0");
-	SDL_SetHint("SDL_ALLOW_TOPMOST", "0");
-	SDL_HideCursor();
-
-	if (std::filesystem::exists("Base.rte/gamecontrollerdb.txt")) {
-		SDL_AddGamepadMappingsFromFile("Base.rte/gamecontrollerdb.txt");
-	}
-
 #ifdef WIN32
 	// Stops framespiking from our child threads being sat on for too long
 	// TODO: use a better thread system that'll do what we want ASAP instead of letting the OS schedule all over us
@@ -1383,13 +1435,35 @@ int main(int argc, char** argv) {
 	System::Initialize(argv[0]);
 	SeedRNG();
 
-	InitializeManagers();
 	if (!StartDebugRun()) {
-		DestroyManagers();
 		allegro_exit();
-		SDL_Quit();
 		return EXIT_FAILURE;
 	}
+	if (debugRun) {
+		SDL_SetAssertionHandler(DebugRunSDLAssertionHandler, nullptr);
+	}
+
+	const SDL_InitFlags sdlInitFlags = SDL_INIT_VIDEO | SDL_INIT_EVENTS | (debugRun ? 0 : SDL_INIT_GAMEPAD);
+	const bool sdlInitialized = SDL_Init(sdlInitFlags);
+	if (debugRun) {
+		GetDebugRunState().Log << "stage=sdl_initialized result=" << sdlInitialized << " error=" << SDL_GetError() << '\n' << std::flush;
+	}
+	if (!sdlInitialized) {
+		std::cerr << "SDL initialization failed: " << SDL_GetError() << '\n';
+		if (debugRun) {
+			GetDebugRunState().Log << "result=failed reason=sdl_initialization\n" << std::flush;
+		}
+		allegro_exit();
+		return EXIT_FAILURE;
+	}
+	SDL_SetHint(SDL_HINT_MOUSE_AUTO_CAPTURE, "0");
+	SDL_SetHint("SDL_ALLOW_TOPMOST", "0");
+	SDL_HideCursor();
+	if (!debugRun && std::filesystem::exists("Base.rte/gamecontrollerdb.txt")) {
+		SDL_AddGamepadMappingsFromFile("Base.rte/gamecontrollerdb.txt");
+	}
+
+	InitializeManagers();
 	if (debugRun && GetDebugRunState().OverlayCaptureEnabled) {
 		g_PerformanceMan.SetOverlayLevel(2);
 	}
@@ -1458,7 +1532,7 @@ int main(int argc, char** argv) {
 		std::cout << "[NETWORK] Loaded server Activity '" << snapshot.ActivityPreset << "' and Scene '" << snapshot.ScenePreset << "' from module '"
 		          << snapshot.SceneModuleName << "'\n";
 	}
-	if (debugRun) {
+	if (debugRun && worldStateClientAddress.empty()) {
 		g_ActivityMan.SetStartTutorialActivity();
 		g_ActivityMan.SetRestartActivity();
 	} else if (worldStateServerRequested) {
