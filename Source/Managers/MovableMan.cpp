@@ -1309,6 +1309,56 @@ void MovableMan::ReloadLuaScripts() {
 	}
 }
 
+void MovableMan::CommitPendingAdditions() {
+	// AddMO() stages objects so normal simulation can defer updating them until the next tick.
+	// Snapshot replicas do not run that tick, so publish those objects directly to the lists
+	// traversed by rendering. The validity sets and team rosters were already updated by AddMO().
+	{
+		std::lock_guard<std::mutex> lock(m_AddedActorsMutex);
+		for (Actor* actor : m_AddedActors) {
+			if (!actor->IsSetToDelete()) {
+				m_Actors.push_back(actor);
+			} else {
+				if (actor->GetTeam() >= 0) {
+					RemoveActorFromTeamRoster(actor);
+				}
+				actor->DestroyScriptState();
+				m_ValidActors.erase(actor);
+				delete actor;
+			}
+		}
+		m_AddedActors.clear();
+	}
+
+	{
+		std::lock_guard<std::mutex> lock(m_AddedItemsMutex);
+		for (MovableObject* item : m_AddedItems) {
+			if (!item->IsSetToDelete()) {
+				m_Items.push_back(item);
+			} else {
+				item->DestroyScriptState();
+				m_ValidItems.erase(item);
+				delete item;
+			}
+		}
+		m_AddedItems.clear();
+	}
+
+	{
+		std::lock_guard<std::mutex> lock(m_AddedParticlesMutex);
+		for (MovableObject* particle : m_AddedParticles) {
+			if (!particle->IsSetToDelete()) {
+				m_Particles.push_back(particle);
+			} else {
+				particle->DestroyScriptState();
+				m_ValidParticles.erase(particle);
+				delete particle;
+			}
+		}
+		m_AddedParticles.clear();
+	}
+}
+
 void MovableMan::Update() {
 	ZoneScoped;
 
@@ -1556,53 +1606,7 @@ void MovableMan::Update() {
 	{
 		ZoneScopedN("MO Transfer and Deletion");
 
-		{
-			// Actors
-			for (aIt = m_AddedActors.begin(); aIt != m_AddedActors.end(); ++aIt) {
-				// Delete instead if it's marked for it
-				if (!(*aIt)->IsSetToDelete())
-					m_Actors.push_back(*aIt);
-				else {
-					// Also remove actor from the roster
-					if ((*aIt)->GetTeam() >= 0) {
-						// m_ActorRoster[(*aIt)->GetTeam()].remove(*aIt);
-						RemoveActorFromTeamRoster(*aIt);
-					}
-
-					(*aIt)->DestroyScriptState();
-					delete (*aIt);
-
-					m_ValidActors.erase(*aIt);
-				}
-			}
-			m_AddedActors.clear();
-
-			// Items
-			for (iIt = m_AddedItems.begin(); iIt != m_AddedItems.end(); ++iIt) {
-				// Delete instead if it's marked for it
-				if (!(*iIt)->IsSetToDelete()) {
-					m_Items.push_back(*iIt);
-				} else {
-					(*iIt)->DestroyScriptState();
-					delete (*iIt);
-					m_ValidItems.erase(*iIt);
-				}
-			}
-			m_AddedItems.clear();
-
-			// Particles
-			for (parIt = m_AddedParticles.begin(); parIt != m_AddedParticles.end(); ++parIt) {
-				// Delete instead if it's marked for it
-				if (!(*parIt)->IsSetToDelete()) {
-					m_Particles.push_back(*parIt);
-				} else {
-					(*parIt)->DestroyScriptState();
-					delete (*parIt);
-					m_ValidParticles.erase(*parIt);
-				}
-			}
-			m_AddedParticles.clear();
-		}
+		CommitPendingAdditions();
 
 		////////////////////////////////////////////////////////////////////////////
 		// Copy (Settle) Pass

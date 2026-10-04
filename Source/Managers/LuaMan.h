@@ -430,6 +430,9 @@ namespace RTE {
 		/// Updates the state of this LuaMan.
 		void Update();
 
+		/// Runs thread cleanup without advancing simulation or script callbacks for a remote-world client.
+		void UpdateWithoutScripts();
+
 		/// Asynchronously enforces a GC run to occur.
 		void StartAsyncGarbageCollection();
 #pragma endregion

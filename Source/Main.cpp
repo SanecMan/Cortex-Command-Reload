@@ -118,6 +118,8 @@ namespace {
 	std::uint32_t worldStateClientLastLoggedSnapshotCount = 0;
 	std::uint32_t worldStateClientAppliedSceneRevision = 0;
 	std::uint32_t worldStateClientRejectedSceneRevision = 0;
+	std::uint64_t worldStateClientReplicaSimulationTicks = 0;
+	std::uint64_t worldStateClientLocalSimulationTicks = 0;
 
 	bool QueueWorldStateActivity(const WorldStateProtocol::Snapshot& snapshot, std::string& failureReason) {
 		if (snapshot.ActivityClassName.empty() || snapshot.ActivityPreset.empty() || snapshot.ScenePreset.empty()) {
@@ -575,6 +577,14 @@ namespace {
 
 	void SpawnDebugStressBatch() {
 		DebugRunState& state = GetDebugRunState();
+		if (worldStateClient) {
+			const MovableMan::SceneStats stats = g_MovableMan.CollectSceneStats();
+			state.StressStarted = worldStateClient->IsConnected() && worldStateClient->HasSnapshot() && stats.Actors > 0 &&
+			                      g_MovableMan.GetMovableObjectCount() > 0;
+			state.Log << "replica_stress_probe actors=" << stats.Actors << " objects=" << g_MovableMan.GetMovableObjectCount()
+			          << " result=" << (state.StressStarted ? "passed" : "waiting") << '\n' << std::flush;
+			return;
+		}
 		std::ostringstream script;
 		script << "for i = 1, 16 do "
 		          "local actor = CreateAHuman('Fat Culled Clone', 'Base.rte'); "
@@ -1425,12 +1435,22 @@ void RunGameLoop() {
 					}
 				}
 			}
+			const bool worldStateReplicaClient = worldStateClient && worldStateClient->HasSnapshot();
+			if (worldStateReplicaClient) {
+				++worldStateClientReplicaSimulationTicks;
+			} else if (worldStateClient && worldStateClient->IsConnected()) {
+				++worldStateClientLocalSimulationTicks;
+			}
 
 			g_PerformanceMan.StartPerformanceMeasurement(PerformanceMan::SimTotal);
 			g_LuaMan.ClearScriptTimings();
 
 			g_PerformanceMan.StartPerformanceMeasurement(PerformanceMan::LuaManagerUpdate);
-			g_LuaMan.Update();
+			if (worldStateReplicaClient) {
+				g_LuaMan.UpdateWithoutScripts();
+			} else {
+				g_LuaMan.Update();
+			}
 			g_PerformanceMan.StopPerformanceMeasurement(PerformanceMan::LuaManagerUpdate);
 
 			g_PerformanceMan.StartPerformanceMeasurement(PerformanceMan::InputUpdate);
@@ -1478,6 +1498,8 @@ void RunGameLoop() {
 				const std::uint32_t snapshotCount = worldStateClient->GetReceivedSnapshotCount();
 				if (snapshotCount != worldStateClientLastObservedSnapshotCount) {
 					const WorldStateClientReplica::ApplyResult applied = worldStateClientReplica.Apply(worldStateClient->GetLatestSnapshot());
+					g_MovableMan.CommitPendingAdditions();
+					g_MovableMan.UpdateDrawMOIDs();
 					worldStateClientLastObservedSnapshotCount = snapshotCount;
 					if (worldStateClientLog.is_open() &&
 					    (worldStateClientLastLoggedSnapshotCount == 0 || snapshotCount - worldStateClientLastLoggedSnapshotCount >= 20)) {
@@ -1496,9 +1518,11 @@ void RunGameLoop() {
 			}
 
 			g_ConsoleMan.Update();
-			g_ActivityMan.Update();
+			if (!worldStateReplicaClient) {
+				g_ActivityMan.Update();
+			}
 
-			if (g_SceneMan.GetScene()) {
+			if (!worldStateReplicaClient && g_SceneMan.GetScene()) {
 				g_SceneMan.GetScene()->Update();
 			}
 			if (worldStateClient && worldStateClient->IsConnected() && worldStateClient->HasSnapshot() && !worldStateSceneTransitionQueued) {
@@ -1559,12 +1583,16 @@ void RunGameLoop() {
 				}
 			}
 
-			g_MovableMan.Update();
+			if (!worldStateReplicaClient) {
+				g_MovableMan.Update();
+			}
 
 			g_AudioMan.Update();
 			g_MusicMan.Update();
 
-			g_ActivityMan.LateUpdateGlobalScripts();
+			if (!worldStateReplicaClient) {
+				g_ActivityMan.LateUpdateGlobalScripts();
+			}
 			if (g_PerformanceMan.GetOverlayLevel() == 2) g_PerformanceMan.UpdateSortedScriptTimings(g_LuaMan.GetScriptTimings());
 			AdvanceDebugRunSimulation();
 
@@ -1836,6 +1864,9 @@ int main(int argc, char** argv) {
 		if (worldStateClient) {
 			worldStateClientLog << "snapshots_received_total=" << worldStateClient->GetReceivedSnapshotCount() << '\n';
 		}
+		worldStateClientLog << "simulation_authority=server_snapshot_replica\n"
+		                    << "remote_replica_ticks=" << worldStateClientReplicaSimulationTicks << '\n'
+		                    << "client_local_simulation_ticks=" << worldStateClientLocalSimulationTicks << '\n';
 		worldStateClientLog.close();
 	}
 	if (worldStateClient) {

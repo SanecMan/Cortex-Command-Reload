@@ -465,6 +465,10 @@ namespace RTE {
 		/// Updates the state of this MovableMan. Supposed to be done every frame.
 		void Update();
 
+		/// Moves newly-added objects into active lists without advancing simulation.
+		/// Snapshot-driven clients use this to publish server-owned objects for rendering.
+		void CommitPendingAdditions();
+
 		/// Draws this MovableMan's all MO's current material representations to a BITMAP of choice.
 		/// @param pTargetBitmap A pointer to a BITMAP to draw on.
 		/// @param targetPos The absolute position of the target bitmap's upper left corner in the scene.
