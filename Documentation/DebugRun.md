@@ -25,7 +25,7 @@ Use `-debug-run-preflight-only` to run the UTF-8, file-path and local world-stat
 & '.\Cortex Command.debug.minimal.exe' -debug-run 900 -debug-overlay -debug-run-output ClientTransition -debug-run-require-world-state-transition -world-state-client 127.0.0.1 18000
 ```
 
-At update 600, the host switches to the built-in `Skirmish Defense` Activity on `Ketanot Hills`. The client run fails unless it receives the new revision and queues that exact Activity/Scene. Check both `ScreenShots/HostTransition/DebugRun.log` and `ScreenShots/ClientTransition/DebugRun.log`; the client's transport log is `WorldStateClient.log` in the game directory. Use distinct output names for concurrent runs.
+At update 600, the host switches to the built-in `Skirmish Defense` Activity on `Ketanot Hills`. The client run fails unless it receives the new revision and queues that exact Activity/Scene. Check both `ScreenShots/HostTransition/DebugRun.log` and `ScreenShots/ClientTransition/DebugRun.log`; each debug client's transport log is `WorldStateClient.log` in its own output directory. Non-debug clients still write `WorldStateClient.log` in the game directory. Use distinct output names for concurrent runs.
 
 To verify a real host-side terrain edit reaches a separate client, run a longer host session and read the ephemeral port from its `WorldStateServer.log`:
 

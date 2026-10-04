@@ -93,6 +93,10 @@ void WorldStateServerSession::Update(std::uint32_t simulationTick) {
 		if (packet.Identifier == ID_NEW_INCOMING_CONNECTION) {
 			++m_ConnectedClients;
 			if (g_SceneMan.GetScene() && g_SceneMan.GetScene()->GetTerrain()) {
+				// A queued patch may have been captured before this peer connected or before
+				// another terrain edit. Rebuild the pending batch from the current terrain;
+				// existing peers receive the same fresh baseline as the new peer.
+				m_PendingTerrainPatches.clear();
 				g_SceneMan.RegisterTerrainChange(0, 0, g_SceneMan.GetSceneWidth(), g_SceneMan.GetSceneHeight());
 			}
 			const std::string clientAddress(packet.Sender.ToString(true));
@@ -309,10 +313,10 @@ void WorldStateServerSession::SendPendingTerrainPatches() {
 			return;
 		}
 		if (probeMutationPatch) {
-			m_DebugTerrainMutationPatchSent = true;
+			m_DebugTerrainMutationPatchSent = probeMutationMaterial == g_MaterialAir;
 			Log("INFO: debug terrain mutation patch sent sequence=" + std::to_string(sequence) + " x=" +
 			    std::to_string(m_DebugTerrainMutationPixelX) + " y=" + std::to_string(m_DebugTerrainMutationPixelY) +
-			    " material=" + std::to_string(probeMutationMaterial));
+			    " material=" + std::to_string(probeMutationMaterial) + " current=" + (m_DebugTerrainMutationPatchSent ? "yes" : "no"));
 		}
 		if (probeBaselinePatch) {
 			m_DebugTerrainMutationBaselineSent = true;

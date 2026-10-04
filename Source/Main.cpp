@@ -1687,7 +1687,8 @@ int main(int argc, char** argv) {
 		GetDebugRunState().Log << "stage=modules_loaded\n" << std::flush;
 	}
 	if (!worldStateClientAddress.empty()) {
-		worldStateClientLog.open("WorldStateClient.log", std::ios::out | std::ios::trunc);
+		const std::filesystem::path clientLogPath = debugRun ? (GetDebugRunState().OutputDirectory / "WorldStateClient.log") : std::filesystem::path("WorldStateClient.log");
+		worldStateClientLog.open(clientLogPath, std::ios::out | std::ios::trunc);
 		worldStateClient = std::make_unique<WorldStateClientSession>();
 		if (!worldStateClient->Connect(worldStateClientAddress.c_str(), worldStateClientPort)) {
 			std::cerr << "[NETWORK] Failed to start client transport\n";
