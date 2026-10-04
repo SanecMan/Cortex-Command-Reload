@@ -49,7 +49,7 @@ if host_machine.system() == 'darwin'
     lj_defines += '-DLUAJIT_UNWIND_EXTERNAL'
 elif host_machine.system() != 'windows'
     if 'NO_UNWIND' not in dasm_args
-        test_unwind = run_command('test-unwind.sh', ' '.join(cc.cmd_array()), check : false)
+        test_unwind = run_command('sh', 'test-unwind.sh', ' '.join(cc.cmd_array()), check : false)
         if test_unwind.stdout().strip() == 'E'
             lj_defines += '-DLUAJIT_UNWIND_EXTERNAL'
         endif

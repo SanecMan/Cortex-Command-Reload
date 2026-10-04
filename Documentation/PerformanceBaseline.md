@@ -132,4 +132,8 @@ At the time of these runs, the repository was on `H:`, reported by Windows as a 
 
 A paired Ubuntu 24.04 x86_64 offscreen run on the configured Linux machine measured 3.16 s with the existing Reader and 2.96 s with the buffered Reader (about 6%). Both passed the same 60-update UTF-8 and world-state smoke. Its absolute times differ from Windows because this machine, filesystem cache and build setup differ; only the within-machine pair is relevant.
 
+## Fresh Linux build and startup sample: 2026-10-04
+
+A fresh source staging on Ubuntu 24.04 x86_64 configured with Meson 1.12.1 and built with GCC 13.3.0/Ninja. The offscreen `-debug-run 60 -debug-overlay` passed with 60 updates, 8.85 s module loading, 11.82 s total elapsed time, 20.15 simulation updates/s and 633,425,920 resident bytes. `ldd` reported no unresolved shared dependencies. This is a single Linux smoke sample, not a before/after optimization comparison; its startup time is not comparable to Windows runs or earlier Linux builds with different caches and source staging.
+
 Another Windows `Debug Minimal|x64` automated run on 2026-10-04 completed all 60 updates and the four-client assignment/input smoke. It loaded modules in 51.32 s: `Base.rte` took 16.40 s and `Missions.rte` 23.39 s. This is consistent with the previously observed high debug-run variance and does not indicate a regression or speedup relative to the optimized warm Release measurements. The full run reported 62.49 ms average simulation update and 13.00 ms actor AI; it generated 49 actors and 317 particles in the stress scenario.
