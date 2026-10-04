@@ -16,4 +16,8 @@ The resident-memory measurement is the Windows working set or Linux resident pag
 
 On Windows, an unhandled exception also writes `AbortDump.dmp` next to `AbortLog.txt` and `AbortScreen.png`. The dump is overwritten by the next crash and includes thread state plus memory referenced from thread stacks; it can contain game/session data, so review it before sharing it publicly. Windows system error text in the crash dialog is converted to UTF-8 before it is passed to SDL.
 
+## Latest crash follow-up
+
+The 2026-10-04 crash log identified a null dereference in `GibEditor::Update`: the first `EditorDone` action tried to destroy a previous test copy before one existed. The editor now checks the owned test-copy pointer before destroying it. Windows `Debug Minimal|x64` rebuilt successfully, and a fresh hidden `-debug-run 60 -debug-overlay` exited with code 0 and `result=passed` (49 actors, 291 particles). That gameplay smoke does not drive the Gib Editor UI, so it verifies the build and surrounding runtime but is not a direct interactive regression test of the editor action.
+
 This is a repeatable smoke and stress run, not a headless server or a multi-scene benchmark yet. It uses real game content and the existing Lua object creation API.

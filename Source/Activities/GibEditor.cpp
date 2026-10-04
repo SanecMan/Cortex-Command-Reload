@@ -293,8 +293,13 @@ void GibEditor::Update() {
 	// Test the object by allowing the player to gib temporary test copy instances of the edited object
 	else if (m_pEditorGUI->GetActivatedPieSlice() == PieSliceType::EditorDone) {
 		// Make the copy of the current edited object
-		m_pTestingObject->DestroyScriptState();
-		delete m_pTestingObject;
+		// There is no previous test copy the first time this action is used.
+		// DestroyScriptState must run before deletion so Lua callbacks are detached safely.
+		if (m_pTestingObject) {
+			m_pTestingObject->DestroyScriptState();
+			delete m_pTestingObject;
+			m_pTestingObject = nullptr;
+		}
 		m_pTestingObject = dynamic_cast<MOSRotating*>(m_pEditedObject->Clone());
 
 		// Put the proxy gibs into the test object
