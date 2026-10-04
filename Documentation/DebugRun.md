@@ -27,6 +27,20 @@ Use `-debug-run-preflight-only` to run the UTF-8, file-path and local world-stat
 
 At update 600, the host switches to the built-in `Skirmish Defense` Activity on `Ketanot Hills`. The client run fails unless it receives the new revision and queues that exact Activity/Scene. Check both `ScreenShots/HostTransition/DebugRun.log` and `ScreenShots/ClientTransition/DebugRun.log`; the client's transport log is `WorldStateClient.log` in the game directory. Use distinct output names for concurrent runs.
 
+To verify a real host-side terrain edit reaches a separate client, run a longer host session and read the ephemeral port from its `WorldStateServer.log`:
+
+```powershell
+& '.\Cortex Command.debug.minimal.exe' -debug-run 3600 -world-state-server -debug-run-world-state-terrain-mutation -debug-run-output TerrainMutationHost
+```
+
+After the log says `world-state host listening`, start a second process and replace `<port>` with the logged port:
+
+```powershell
+& '.\Cortex Command.debug.minimal.exe' -debug-run 180 -debug-run-require-world-state-terrain-mutation -debug-run-output TerrainMutationClient -world-state-client 127.0.0.1 <port>
+```
+
+The host waits until it has sent the client's baseline material patch for a deterministic probe pixel, then removes that pixel through the normal terrain-penetration API and replicates the resulting patch. The client fails unless it receives the material change and reads `Air` back from its loaded terrain. A passing host report also requires that it mutated the pixel and sent its incremental patch. Both processes still create a hidden OpenGL context; this is not a headless-server test.
+
 The resident-memory measurement is the Windows working set or Linux resident pages, in bytes; `0` means that the platform query failed or is not implemented. The network check uses four local client peers and does not connect remote gameplay clients.
 
 On Windows, an unhandled exception also writes `AbortDump.dmp` next to `AbortLog.txt` and `AbortScreen.png`. The dump is overwritten by the next crash and includes thread state plus memory referenced from thread stacks; it can contain game/session data, so review it before sharing it publicly. Windows system error text in the crash dialog is converted to UTF-8 before it is passed to SDL.

@@ -6,6 +6,7 @@
 #include "SceneMan.h"
 #include "SLTerrain.h"
 #include "UInputMan.h"
+#include "System/WorldStateTerrainTest.h"
 
 #include <algorithm>
 #include <utility>
@@ -40,6 +41,12 @@ bool WorldStateServerSession::Start(const std::string& bindAddress, unsigned sho
 	// input independent from network peers; use PlayerTwo through PlayerFour remotely.
 	m_InputSlotsInUse[Players::PlayerOne] = true;
 	m_ConnectedClients = 0;
+	m_DebugTerrainMutationSmokeEnabled = false;
+	m_DebugTerrainMutationSmokeAttempted = false;
+	m_DebugTerrainMutationProbeLocated = false;
+	m_DebugTerrainMutationBaselineSent = false;
+	m_DebugTerrainMutationSmokePassed = false;
+	m_DebugTerrainMutationPatchSent = false;
 	Log("INFO: world-state host listening on " + bindAddress + ":" + std::to_string(m_Transport.GetBoundPort()) +
 	    " (max clients " + std::to_string(maxPlayers) + ")");
 	return true;
@@ -67,6 +74,10 @@ void WorldStateServerSession::Stop() {
 		m_Log.close();
 	}
 	m_ConnectedClients = 0;
+}
+
+void WorldStateServerSession::EnableDebugTerrainMutationSmoke() {
+	m_DebugTerrainMutationSmokeEnabled = true;
 }
 
 void WorldStateServerSession::Update(std::uint32_t simulationTick) {
@@ -160,6 +171,20 @@ void WorldStateServerSession::Update(std::uint32_t simulationTick) {
 		}
 	}
 	ProcessActivityVotes();
+	if (m_DebugTerrainMutationSmokeEnabled && !m_DebugTerrainMutationProbeLocated && !m_DebugTerrainMutationSmokeAttempted && m_ConnectedClients > 0) {
+		SLTerrain* terrain = g_SceneMan.GetScene() ? g_SceneMan.GetScene()->GetTerrain() : nullptr;
+		if (terrain) {
+			m_DebugTerrainMutationProbeLocated = FindWorldStateTerrainTestPixel(*terrain, m_DebugTerrainMutationPixelX, m_DebugTerrainMutationPixelY);
+			if (m_DebugTerrainMutationProbeLocated) {
+				Log("INFO: debug terrain mutation probe x=" + std::to_string(m_DebugTerrainMutationPixelX) + " y=" +
+				    std::to_string(m_DebugTerrainMutationPixelY) + " material=" +
+				    std::to_string(terrain->GetMaterialPixel(m_DebugTerrainMutationPixelX, m_DebugTerrainMutationPixelY)));
+			} else {
+				m_DebugTerrainMutationSmokeAttempted = true;
+				Log("ERROR: debug terrain mutation smoke could not locate solid probe pixel");
+			}
+		}
+	}
 
 	// The simulation timer currently runs at 60 updates per second. Send 20 full snapshots/sec.
 	// Avoid walking every movable object and encoding a full snapshot while nobody is connected.
@@ -182,6 +207,28 @@ void WorldStateServerSession::Update(std::uint32_t simulationTick) {
 	}
 	QueueTerrainChanges(snapshot.SceneRevision);
 	SendPendingTerrainPatches();
+	if (m_DebugTerrainMutationSmokeEnabled && !m_DebugTerrainMutationSmokeAttempted && m_ConnectedClients > 0 && m_DebugTerrainMutationProbeLocated &&
+	    m_DebugTerrainMutationBaselineSent) {
+		m_DebugTerrainMutationSmokeAttempted = true;
+		SLTerrain* terrain = g_SceneMan.GetScene() ? g_SceneMan.GetScene()->GetTerrain() : nullptr;
+		int pixelX = 0;
+		int pixelY = 0;
+		bool mutated = false;
+		int originalMaterial = g_MaterialAir;
+		if (terrain && m_DebugTerrainMutationProbeLocated && m_DebugTerrainMutationBaselineSent) {
+			pixelX = m_DebugTerrainMutationPixelX;
+			pixelY = m_DebugTerrainMutationPixelY;
+			originalMaterial = terrain->GetMaterialPixel(pixelX, pixelY);
+			float retardation = 0.0F;
+			const bool penetrated = g_SceneMan.TryPenetrate(pixelX, pixelY, Vector(1000000.0F, 0.0F), Vector(30.0F, 0.0F), retardation, 1.0F, 0, 0, 0, 0.0F);
+			mutated = penetrated && terrain->GetMaterialPixel(pixelX, pixelY) == g_MaterialAir;
+		}
+		m_DebugTerrainMutationSmokePassed = mutated;
+		Log(std::string("INFO: debug terrain mutation smoke=") + (mutated ? "passed" : "failed") +
+		    " x=" + std::to_string(pixelX) + " y=" + std::to_string(pixelY) +
+		    " original_material=" + std::to_string(originalMaterial) + " material_after=" +
+		    std::to_string(terrain && pixelX < terrain->GetWidth() && pixelY < terrain->GetHeight() ? terrain->GetMaterialPixel(pixelX, pixelY) : -1));
+	}
 }
 
 void WorldStateServerSession::QueueTerrainChanges(std::uint32_t sceneRevision) {
@@ -230,9 +277,47 @@ void WorldStateServerSession::SendPendingTerrainPatches() {
 	constexpr std::size_t c_MaxPatchesPerUpdate = 16;
 	std::size_t sentThisUpdate = 0;
 	while (!m_PendingTerrainPatches.empty() && sentThisUpdate < c_MaxPatchesPerUpdate) {
-		if (!m_Transport.BroadcastTerrainPatch(m_PendingTerrainPatches.front(), ++m_Sequence)) {
+		const WorldStateProtocol::TerrainPatch& patch = m_PendingTerrainPatches.front();
+		bool probeBaselinePatch = false;
+		std::uint8_t probeBaselineMaterial = 0;
+		bool probeMutationPatch = false;
+		std::uint8_t probeMutationMaterial = 0;
+		if (m_DebugTerrainMutationSmokeEnabled && m_DebugTerrainMutationProbeLocated && !m_DebugTerrainMutationBaselineSent &&
+		    patch.Layer == WorldStateProtocol::TerrainLayer::Material &&
+		    m_DebugTerrainMutationPixelX >= static_cast<int>(patch.X) && m_DebugTerrainMutationPixelY >= static_cast<int>(patch.Y) &&
+		    m_DebugTerrainMutationPixelX < static_cast<int>(patch.X + patch.Width) && m_DebugTerrainMutationPixelY < static_cast<int>(patch.Y + patch.Height)) {
+			const std::size_t pixelIndex = static_cast<std::size_t>(m_DebugTerrainMutationPixelY - static_cast<int>(patch.Y)) * patch.Width +
+			                               static_cast<std::size_t>(m_DebugTerrainMutationPixelX - static_cast<int>(patch.X));
+			if (pixelIndex < patch.Pixels.size() && patch.Pixels[pixelIndex] > g_MaterialCavity) {
+				probeBaselinePatch = true;
+				probeBaselineMaterial = patch.Pixels[pixelIndex];
+			}
+		}
+		if (m_DebugTerrainMutationSmokePassed && !m_DebugTerrainMutationPatchSent && patch.Layer == WorldStateProtocol::TerrainLayer::Material &&
+		    m_DebugTerrainMutationPixelX >= static_cast<int>(patch.X) && m_DebugTerrainMutationPixelY >= static_cast<int>(patch.Y) &&
+		    m_DebugTerrainMutationPixelX < static_cast<int>(patch.X + patch.Width) && m_DebugTerrainMutationPixelY < static_cast<int>(patch.Y + patch.Height)) {
+			const std::size_t pixelIndex = static_cast<std::size_t>(m_DebugTerrainMutationPixelY - static_cast<int>(patch.Y)) * patch.Width +
+			                               static_cast<std::size_t>(m_DebugTerrainMutationPixelX - static_cast<int>(patch.X));
+			if (pixelIndex < patch.Pixels.size()) {
+				probeMutationPatch = true;
+				probeMutationMaterial = patch.Pixels[pixelIndex];
+			}
+		}
+		const std::uint32_t sequence = ++m_Sequence;
+		if (!m_Transport.BroadcastTerrainPatch(patch, sequence)) {
 			Log("ERROR: failed to encode or broadcast terrain patch");
 			return;
+		}
+		if (probeMutationPatch) {
+			m_DebugTerrainMutationPatchSent = true;
+			Log("INFO: debug terrain mutation patch sent sequence=" + std::to_string(sequence) + " x=" +
+			    std::to_string(m_DebugTerrainMutationPixelX) + " y=" + std::to_string(m_DebugTerrainMutationPixelY) +
+			    " material=" + std::to_string(probeMutationMaterial));
+		}
+		if (probeBaselinePatch) {
+			m_DebugTerrainMutationBaselineSent = true;
+			Log("INFO: debug terrain mutation baseline pixel sent x=" + std::to_string(m_DebugTerrainMutationPixelX) + " y=" +
+			    std::to_string(m_DebugTerrainMutationPixelY) + " material=" + std::to_string(probeBaselineMaterial));
 		}
 		m_PendingTerrainPatches.pop_front();
 		++sentThisUpdate;

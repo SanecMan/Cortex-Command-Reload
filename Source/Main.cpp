@@ -58,6 +58,7 @@
 #include "System.h"
 #include "System/UTF8.h"
 #include "System/WorldStateProtocol.h"
+#include "System/WorldStateTerrainTest.h"
 #include "WorldStateCompression.h"
 #include "WorldStateTransport.h"
 #include "WorldStateSnapshotBuilder.h"
@@ -153,6 +154,12 @@ namespace {
 		bool PreflightOnly = false;
 		bool RequestHostWorldStateTransition = false;
 		bool RequireWorldStateTransition = false;
+		bool RequestHostTerrainMutationSmoke = false;
+		bool RequireRemoteTerrainMutationSmoke = false;
+		bool RemoteTerrainMutationObserved = false;
+		bool TerrainMutationProbeLocated = false;
+		int TerrainMutationProbeX = 0;
+		int TerrainMutationProbeY = 0;
 		bool WorldStateTransitionObserved = false;
 		bool HostWorldStateTransitionQueued = false;
 		bool PostTransitionStressBatchSpawned = false;
@@ -228,6 +235,8 @@ namespace {
 			if (argument == "-debug-run-preflight-only") state.PreflightOnly = true;
 			if (argument == "-debug-run-world-state-transition") state.RequestHostWorldStateTransition = true;
 			if (argument == "-debug-run-require-world-state-transition") state.RequireWorldStateTransition = true;
+			if (argument == "-debug-run-world-state-terrain-mutation") state.RequestHostTerrainMutationSmoke = true;
+			if (argument == "-debug-run-require-world-state-terrain-mutation") state.RequireRemoteTerrainMutationSmoke = true;
 			if (argument == "-debug-run-output" && i + 1 < argc) state.OutputDirectoryName = argv[++i];
 		}
 		for (int i = 1; i < argc; ++i) {
@@ -944,6 +953,15 @@ namespace {
 		const bool worldStateTransitionPassed = !state.RequireWorldStateTransition || state.WorldStateTransitionObserved;
 		state.Log << "world_state_activity_transition=" << (worldStateTransitionPassed ? "passed" : "failed")
 		          << " observed=" << state.WorldStateTransitionObserved << " host_queued=" << state.HostWorldStateTransitionQueued << '\n' << std::flush;
+		const bool remoteTerrainMutationPassed = !state.RequireRemoteTerrainMutationSmoke || state.RemoteTerrainMutationObserved;
+		if (state.RequireRemoteTerrainMutationSmoke) {
+			state.Log << "world_state_remote_terrain_mutation=" << (remoteTerrainMutationPassed ? "passed" : "failed")
+			          << " observed=" << state.RemoteTerrainMutationObserved << " x=" << state.TerrainMutationProbeX << " y=" << state.TerrainMutationProbeY << '\n' << std::flush;
+		}
+		const bool hostTerrainMutationPassed = !state.RequestHostTerrainMutationSmoke || (worldStateServer && worldStateServer->DidDebugTerrainMutationSmokePass());
+		if (state.RequestHostTerrainMutationSmoke) {
+			state.Log << "world_state_host_terrain_mutation=" << (hostTerrainMutationPassed ? "passed" : "failed") << '\n' << std::flush;
+		}
 		state.Log << "utf8_unicode_font_loaded=" << (g_FrameMan.DidDebugUTF8GlyphFontLoad() ? "yes" : "no") << '\n' << std::flush;
 		const std::string unicodeFontPath = g_PresetMan.GetFullModulePath("Base.rte/GUIs/Fonts/Roboto-Medium.ttf");
 		std::filesystem::path unicodeFontFilePath = std::filesystem::u8path(unicodeFontPath);
@@ -967,7 +985,7 @@ namespace {
 		          << ",screen_fx:" << g_SettingsMan.GetScreenEffectsLevel() << ",gore:" << g_SettingsMan.GetGoreDensityPercent()
 		          << ",vsync:" << g_WindowMan.GetVSyncEnabled() << '\n' << std::flush;
 		success = success && performanceCountersPassed;
-		success = success && utf8GlyphRenderPassed && worldStateTransitionPassed && state.HostSessionTestPassed && worldIdentityStable && replicaSmokePassed && transientPixelReplicaPassed && terrainPatchApplyPassed &&
+		success = success && utf8GlyphRenderPassed && worldStateTransitionPassed && remoteTerrainMutationPassed && hostTerrainMutationPassed && state.HostSessionTestPassed && worldIdentityStable && replicaSmokePassed && transientPixelReplicaPassed && terrainPatchApplyPassed &&
 		          networkInputApplicationPassed && worldSnapshotPassed && snapshotCompressionPassed && liveSnapshotTransportPassed;
 		const double elapsedSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - state.StartTime).count();
 		const double simulationSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - state.SimulationStartTime).count();
@@ -1431,13 +1449,52 @@ void RunGameLoop() {
 			}
 			if (worldStateClient && worldStateClient->IsConnected() && worldStateClient->HasSnapshot() && !worldStateSceneTransitionQueued) {
 				const WorldStateProtocol::Snapshot& snapshot = worldStateClient->GetLatestSnapshot();
-				const Scene* localScene = g_SceneMan.GetScene();
+				Scene* localScene = g_SceneMan.GetScene();
+				DebugRunState& debugRunState = GetDebugRunState();
 				if (localScene && localScene->GetPresetName() == snapshot.ScenePreset && localScene->GetModuleName() == snapshot.SceneModuleName) {
+					SLTerrain* localTerrain = localScene->GetTerrain();
+					if (debugRunState.RequireRemoteTerrainMutationSmoke && !debugRunState.TerrainMutationProbeLocated && localTerrain) {
+						debugRunState.TerrainMutationProbeLocated = FindWorldStateTerrainTestPixel(*localTerrain, debugRunState.TerrainMutationProbeX,
+						                                                                    debugRunState.TerrainMutationProbeY);
+						if (debugRunState.TerrainMutationProbeLocated) {
+							debugRunState.Log << "world_state_terrain_mutation_probe=x:" << debugRunState.TerrainMutationProbeX
+							                  << ",y:" << debugRunState.TerrainMutationProbeY << ",material:"
+							                  << localTerrain->GetMaterialPixel(debugRunState.TerrainMutationProbeX, debugRunState.TerrainMutationProbeY) << '\n' << std::flush;
+						}
+					}
 					const std::vector<WorldStateClientSession::ReceivedTerrainPatch> terrainPatches = worldStateClient->DrainTerrainPatches(snapshot.SceneRevision);
 					std::uint32_t appliedTerrainPatches = 0;
 					for (const WorldStateClientSession::ReceivedTerrainPatch& receivedPatch : terrainPatches) {
-						if (worldStateClientReplica.ApplyTerrainPatch(receivedPatch.Patch)) {
+						const WorldStateProtocol::TerrainPatch& patch = receivedPatch.Patch;
+						bool targetBecameAir = false;
+						if (debugRunState.RequireRemoteTerrainMutationSmoke && debugRunState.TerrainMutationProbeLocated && localTerrain &&
+						    patch.Layer == WorldStateProtocol::TerrainLayer::Material && debugRunState.TerrainMutationProbeX >= static_cast<int>(patch.X) &&
+						    debugRunState.TerrainMutationProbeY >= static_cast<int>(patch.Y) && debugRunState.TerrainMutationProbeX < static_cast<int>(patch.X + patch.Width) &&
+						    debugRunState.TerrainMutationProbeY < static_cast<int>(patch.Y + patch.Height)) {
+							const std::size_t patchIndex = static_cast<std::size_t>(debugRunState.TerrainMutationProbeY - static_cast<int>(patch.Y)) * patch.Width +
+							                               static_cast<std::size_t>(debugRunState.TerrainMutationProbeX - static_cast<int>(patch.X));
+							const int localMaterialBefore = localTerrain->GetMaterialPixel(debugRunState.TerrainMutationProbeX, debugRunState.TerrainMutationProbeY);
+							targetBecameAir = localMaterialBefore > g_MaterialCavity && patchIndex < patch.Pixels.size() && patch.Pixels[patchIndex] == g_MaterialAir;
+							if (worldStateClientLog.is_open()) {
+								worldStateClientLog << "terrain_probe_patch_received sequence=" << receivedPatch.Sequence << " before=" << localMaterialBefore
+								                    << " patch=" << (patchIndex < patch.Pixels.size() ? static_cast<int>(patch.Pixels[patchIndex]) : -1)
+								                    << "\n";
+							}
+						}
+						if (worldStateClientReplica.ApplyTerrainPatch(patch)) {
 							++appliedTerrainPatches;
+							if (targetBecameAir && localTerrain->GetMaterialPixel(debugRunState.TerrainMutationProbeX, debugRunState.TerrainMutationProbeY) == g_MaterialAir) {
+								debugRunState.RemoteTerrainMutationObserved = true;
+								debugRunState.Log << "world_state_remote_terrain_mutation_observed=passed sequence=" << receivedPatch.Sequence
+								                  << " x=" << debugRunState.TerrainMutationProbeX << " y=" << debugRunState.TerrainMutationProbeY << '\n' << std::flush;
+							}
+							if (debugRunState.RequireRemoteTerrainMutationSmoke && patch.Layer == WorldStateProtocol::TerrainLayer::Material &&
+							    debugRunState.TerrainMutationProbeLocated && debugRunState.TerrainMutationProbeX >= static_cast<int>(patch.X) &&
+							    debugRunState.TerrainMutationProbeY >= static_cast<int>(patch.Y) && debugRunState.TerrainMutationProbeX < static_cast<int>(patch.X + patch.Width) &&
+							    debugRunState.TerrainMutationProbeY < static_cast<int>(patch.Y + patch.Height) && worldStateClientLog.is_open()) {
+								worldStateClientLog << "terrain_probe_patch_applied sequence=" << receivedPatch.Sequence << " after="
+								                    << localTerrain->GetMaterialPixel(debugRunState.TerrainMutationProbeX, debugRunState.TerrainMutationProbeY) << '\n' << std::flush;
+							}
 						} else if (worldStateClientLog.is_open()) {
 							worldStateClientLog << "WARNING: rejected terrain patch sequence=" << receivedPatch.Sequence << " revision=" << receivedPatch.Patch.SceneRevision << '\n';
 						}
@@ -1721,6 +1778,9 @@ int main(int argc, char** argv) {
 			}
 			if (debugRun && !VerifyWorldStateHostSessionLoopback(*worldStateServer, GetDebugRunState().Log)) {
 				GetDebugRunState().HostSessionTestPassed = false;
+			}
+			if (debugRun && GetDebugRunState().RequestHostTerrainMutationSmoke) {
+				worldStateServer->EnableDebugTerrainMutationSmoke();
 			}
 		}
 

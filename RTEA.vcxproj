@@ -1377,6 +1377,7 @@
     <ClInclude Include="Source\Managers\WorldStateClientSession.h" />
     <ClInclude Include="Source\Managers\WorldStateClientReplica.h" />
     <ClInclude Include="Source\Managers\WorldStateServerSession.h" />
+    <ClInclude Include="Source\System\WorldStateTerrainTest.h" />
     <ClCompile Include="Source\Managers\AchievementMan.cpp" />
     <ClCompile Include="Source\Managers\ActivityMan.cpp" />
     <ClCompile Include="Source\Managers\AudioMan.cpp" />

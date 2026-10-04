@@ -22,11 +22,13 @@ namespace RTE {
 		bool Start(const std::string& bindAddress, unsigned short port, unsigned short maxPlayers, const std::string& logPath, bool truncateLog = false);
 		void Stop();
 		void Update(std::uint32_t simulationTick);
+		void EnableDebugTerrainMutationSmoke();
+		bool DidDebugTerrainMutationSmokePass() const { return m_DebugTerrainMutationSmokePassed && m_DebugTerrainMutationPatchSent; }
 		bool IsStarted() const { return m_Transport.IsStarted(); }
 		unsigned short GetBoundPort() const { return m_Transport.GetBoundPort(); }
 		unsigned short GetConnectedClientCount() const { return m_ConnectedClients; }
-	std::uint32_t GetSnapshotBroadcastCount() const { return m_SnapshotBroadcastCount; }
-	std::uint32_t GetInputCommandCount() const { return m_InputCommandCount; }
+		std::uint32_t GetSnapshotBroadcastCount() const { return m_SnapshotBroadcastCount; }
+		std::uint32_t GetInputCommandCount() const { return m_InputCommandCount; }
 
 	private:
 		void Log(const std::string& message);
@@ -44,15 +46,23 @@ namespace RTE {
 		std::uint32_t m_LastTerrainSceneRevision = 0;
 		std::uint32_t m_TerrainPatchBroadcastCount = 0;
 		std::deque<WorldStateProtocol::TerrainPatch> m_PendingTerrainPatches;
-	unsigned short m_ConnectedClients = 0;
-	std::unordered_map<std::string, std::uint32_t> m_LastInputSequenceByClient;
-	std::unordered_map<std::string, int> m_PlayerSlotByClient;
-	std::unordered_map<std::string, bool> m_ResetVotesByClient;
-	std::unordered_map<std::string, bool> m_RestartVotesByClient;
-	std::unordered_map<std::string, bool> m_PreviousResetInputByClient;
-	std::unordered_map<std::string, bool> m_PreviousRestartInputByClient;
-	std::chrono::steady_clock::time_point m_LastActivityVoteAction{};
-	std::array<bool, Players::MaxPlayerCount> m_InputSlotsInUse{};
+		unsigned short m_ConnectedClients = 0;
+		std::unordered_map<std::string, std::uint32_t> m_LastInputSequenceByClient;
+		std::unordered_map<std::string, int> m_PlayerSlotByClient;
+		std::unordered_map<std::string, bool> m_ResetVotesByClient;
+		std::unordered_map<std::string, bool> m_RestartVotesByClient;
+		std::unordered_map<std::string, bool> m_PreviousResetInputByClient;
+		std::unordered_map<std::string, bool> m_PreviousRestartInputByClient;
+		std::chrono::steady_clock::time_point m_LastActivityVoteAction{};
+		std::array<bool, Players::MaxPlayerCount> m_InputSlotsInUse{};
+		bool m_DebugTerrainMutationSmokeEnabled = false;
+		bool m_DebugTerrainMutationSmokeAttempted = false;
+		bool m_DebugTerrainMutationProbeLocated = false;
+		bool m_DebugTerrainMutationBaselineSent = false;
+		bool m_DebugTerrainMutationSmokePassed = false;
+		bool m_DebugTerrainMutationPatchSent = false;
+		int m_DebugTerrainMutationPixelX = 0;
+		int m_DebugTerrainMutationPixelY = 0;
 	};
 
 } // namespace RTE
