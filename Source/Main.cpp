@@ -56,6 +56,7 @@
 #include "LuaMan.h"
 #include "MusicMan.h"
 #include "System.h"
+#include "System/Reader.h"
 #include "System/UTF8.h"
 #include "System/WorldStateProtocol.h"
 #include "System/WorldStateTerrainTest.h"
@@ -322,7 +323,7 @@ namespace {
 		if (!utf16BridgePassed) {
 			return false;
 		}
-		const std::string unicodePath = UTF8::PathToString(state.OutputDirectory / std::filesystem::u8path("тест-🙂.tmp"));
+		const std::string unicodePath = UTF8::PathToString(state.OutputDirectory / std::filesystem::u8path("тест-путь.tmp"));
 		constexpr std::string_view fileProbe = "UTF-8 file path round trip";
 		FILE* unicodeFile = UTF8::OpenFile(unicodePath, "wb");
 		bool unicodeFileWritten = unicodeFile && std::fwrite(fileProbe.data(), 1, fileProbe.size(), unicodeFile) == fileProbe.size();
@@ -337,10 +338,18 @@ namespace {
 			std::fclose(unicodeFile);
 		}
 		const bool unicodePathResolved = unicodeFileWritten && System::PathExistsCaseSensitive(unicodePath);
+		bool unicodeReaderOpened = false;
+		{
+			Reader unicodePathReader(unicodePath, false, nullptr, true, true);
+			unicodeReaderOpened = unicodePathReader.ReaderOK();
+		}
 		std::error_code unicodeFileCleanupError;
-		std::filesystem::remove(UTF8::PathFromString(unicodePath), unicodeFileCleanupError);
-		const bool unicodeFilePathPassed = unicodeFileWritten && unicodeFileRead && unicodePathResolved && !unicodeFileCleanupError;
-		state.Log << "utf8_file_path_smoke=" << (unicodeFilePathPassed ? "passed" : "failed") << '\n' << std::flush;
+		const bool unicodeFileRemoved = std::filesystem::remove(UTF8::PathFromString(unicodePath), unicodeFileCleanupError);
+		const bool unicodeFilePathPassed = unicodeFileWritten && unicodeFileRead && unicodePathResolved && unicodeReaderOpened && unicodeFileRemoved && !unicodeFileCleanupError;
+		state.Log << "utf8_file_path_smoke=" << (unicodeFilePathPassed ? "passed" : "failed")
+		          << " written=" << unicodeFileWritten << " read=" << unicodeFileRead << " resolved=" << unicodePathResolved
+		          << " reader_opened=" << unicodeReaderOpened << " removed=" << unicodeFileRemoved
+		          << " cleanup_error=" << unicodeFileCleanupError.value() << '\n' << std::flush;
 		if (!unicodeFilePathPassed) {
 			return false;
 		}

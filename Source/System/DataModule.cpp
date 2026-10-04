@@ -6,6 +6,7 @@
 #include "System.h"
 #include "ConsoleMan.h"
 #include "SettingsMan.h"
+#include "UTF8.h"
 
 #include <System/Semver200/semver200.h>
 
@@ -52,7 +53,7 @@ void DataModule::Clear() {
 }
 
 int DataModule::Create(const std::string& moduleName, const ProgressCallback& progressCallback) {
-	m_FileName = std::filesystem::path(moduleName).generic_string();
+	m_FileName = UTF8::PathToString(UTF8::PathFromString(moduleName));
 	m_ModuleID = g_PresetMan.GetModuleID(moduleName);
 	m_CrabToHumanSpawnRatio = 0;
 

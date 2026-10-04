@@ -65,7 +65,7 @@ int Reader::Create(const std::string& fileName, bool overwrites, const ProgressC
 	}
 	
 	if (m_NonModulePath) {
-		m_FilePath = std::filesystem::path(fileName).generic_string();
+		m_FilePath = UTF8::PathToString(UTF8::PathFromString(fileName));
 		// Associate non-module paths with Base to prevent implosions when dealing with creating Entities.
 		m_DataModuleName = "Base.rte";
 		m_DataModuleID = 0;
@@ -78,7 +78,7 @@ int Reader::Create(const std::string& fileName, bool overwrites, const ProgressC
 		m_DataModuleID = g_PresetMan.GetModuleID(m_DataModuleName);
 	}
 	
-	return Create(std::make_unique<std::ifstream>(std::filesystem::u8path(m_FilePath)), fileName, overwrites, progressCallback, failOK);
+	return Create(std::make_unique<std::ifstream>(UTF8::PathFromString(m_FilePath)), fileName, overwrites, progressCallback, failOK);
 }
 
 int Reader::Create(std::unique_ptr<std::istream>&& stream, const std::string& fileName, bool overwrites, const ProgressCallback& progressCallback, bool failOK) {
@@ -88,7 +88,7 @@ int Reader::Create(std::unique_ptr<std::istream>&& stream, const std::string& fi
 	}
 
 	if (m_NonModulePath) {
-		m_FilePath = std::filesystem::path(fileName).generic_string();
+		m_FilePath = UTF8::PathToString(UTF8::PathFromString(fileName));
 		// Associate non-module paths with Base to prevent implosions when dealing with creating Entities.
 		m_DataModuleName = "Base.rte";
 		m_DataModuleID = 0;
