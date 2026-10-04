@@ -79,6 +79,12 @@ static LONG WINAPI RTEWindowsExceptionHandler([[maybe_unused]] EXCEPTION_POINTER
 		}
 		const std::string message = UTF8::EncodeUTF16(utf16Message);
 		LocalFree(messageBuffer);
+		// Some Windows error tables can contain replacement characters instead
+		// of a usable localized message. Keep the crash report readable and
+		// retain the numeric code in that case.
+		if (message.find("\xEF\xBF\xBD") != std::string::npos) {
+			return "Windows error " + std::to_string(errorMessageID);
+		}
 		return message;
 	};
 
