@@ -16,6 +16,7 @@
 
 #include <array>
 #include <algorithm>
+#include <cmath>
 #include <deque>
 #include <list>
 #include <string>
@@ -207,11 +208,20 @@ WorldStateClientReplica::ApplyResult WorldStateClientReplica::Apply(const WorldS
 			++result.Spawned;
 			activeObjects.insert(object);
 		} else {
+			const double dx = static_cast<double>(object->GetPos().GetX()) - state.PositionX;
+			const double dy = static_cast<double>(object->GetPos().GetY()) - state.PositionY;
+			const double positionError = std::sqrt(dx * dx + dy * dy);
+			result.TotalPositionErrorBeforeCorrection += positionError;
+			result.MaxPositionErrorBeforeCorrection = std::max(result.MaxPositionErrorBeforeCorrection, positionError);
+			++result.PositionErrorsMeasured;
 			ApplyFields(*object, state);
 			++result.Updated;
 		}
 		mappedObjects.insert(object);
 		m_Objects[state.NetworkId] = {object, clientOwned};
+	}
+	if (result.PositionErrorsMeasured > 0) {
+		result.MeanPositionErrorBeforeCorrection = result.TotalPositionErrorBeforeCorrection / result.PositionErrorsMeasured;
 	}
 	return result;
 }

@@ -112,6 +112,7 @@ namespace {
 	std::unique_ptr<WorldStateClientSession> worldStateClient;
 	WorldStateClientReplica worldStateClientReplica;
 	std::ofstream worldStateClientLog;
+	std::uint32_t worldStateClientLastObservedSnapshotCount = 0;
 	std::uint32_t worldStateClientLastLoggedSnapshotCount = 0;
 	std::uint32_t worldStateClientAppliedSceneRevision = 0;
 	std::uint32_t worldStateClientRejectedSceneRevision = 0;
@@ -1440,6 +1441,28 @@ void RunGameLoop() {
 			g_FrameMan.Update();
 
 			g_MovableMan.CompleteQueuedMOIDDrawings();
+			// Applying a snapshot can insert, remove, and mutate objects; wait until the
+			// asynchronous MOID pass from the previous update has stopped using them.
+			if (worldStateClient && worldStateClient->HasSnapshot() && !worldStateSceneTransitionQueued) {
+				const std::uint32_t snapshotCount = worldStateClient->GetReceivedSnapshotCount();
+				if (snapshotCount != worldStateClientLastObservedSnapshotCount) {
+					const WorldStateClientReplica::ApplyResult applied = worldStateClientReplica.Apply(worldStateClient->GetLatestSnapshot());
+					worldStateClientLastObservedSnapshotCount = snapshotCount;
+					if (worldStateClientLog.is_open() &&
+					    (worldStateClientLastLoggedSnapshotCount == 0 || snapshotCount - worldStateClientLastLoggedSnapshotCount >= 20)) {
+						worldStateClientLog << "snapshot=" << snapshotCount << " updated=" << applied.Updated << " spawned=" << applied.Spawned << " removed=" << applied.Removed
+						                    << " missing_presets=" << applied.MissingPresets << " position_error_samples=" << applied.PositionErrorsMeasured
+						                    << " mean_position_error_before_correction_px=" << applied.MeanPositionErrorBeforeCorrection
+						                    << " max_position_error_before_correction_px=" << applied.MaxPositionErrorBeforeCorrection << '\n'
+						                    << std::flush;
+						for (const std::string& detail : applied.MissingPresetDetails) {
+							worldStateClientLog << "missing=" << detail << '\n';
+						}
+						worldStateClientLog.flush();
+						worldStateClientLastLoggedSnapshotCount = snapshotCount;
+					}
+				}
+			}
 
 			g_ConsoleMan.Update();
 			g_ActivityMan.Update();
@@ -1512,22 +1535,6 @@ void RunGameLoop() {
 
 			g_ActivityMan.LateUpdateGlobalScripts();
 			if (g_PerformanceMan.GetOverlayLevel() == 2) g_PerformanceMan.UpdateSortedScriptTimings(g_LuaMan.GetScriptTimings());
-			if (worldStateClient && worldStateClient->HasSnapshot() && !worldStateSceneTransitionQueued) {
-				const std::uint32_t snapshotCount = worldStateClient->GetReceivedSnapshotCount();
-				if (snapshotCount != worldStateClientLastLoggedSnapshotCount) {
-					const WorldStateClientReplica::ApplyResult applied = worldStateClientReplica.Apply(worldStateClient->GetLatestSnapshot());
-					worldStateClientLastLoggedSnapshotCount = snapshotCount;
-					if (worldStateClientLog.is_open() && (snapshotCount == 1 || snapshotCount % 100 == 0)) {
-						worldStateClientLog << "snapshot=" << snapshotCount << " updated=" << applied.Updated << " spawned=" << applied.Spawned << " removed=" << applied.Removed
-						                    << " missing_presets=" << applied.MissingPresets << '\n'
-						                    << std::flush;
-						for (const std::string& detail : applied.MissingPresetDetails) {
-							worldStateClientLog << "missing=" << detail << '\n';
-						}
-						worldStateClientLog.flush();
-					}
-				}
-			}
 			AdvanceDebugRunSimulation();
 
 			// This is to support hot reloading entities in SceneEditorGUI. It's a bit hacky to put it in Main like this, but PresetMan has no update in which to clear the value, and I didn't want to set up a listener for the job.
@@ -1796,7 +1803,7 @@ int main(int argc, char** argv) {
 	}
 	if (worldStateClientLog.is_open()) {
 		if (worldStateClient) {
-			worldStateClientLog << "snapshots_applied_total=" << worldStateClientLastLoggedSnapshotCount << '\n';
+			worldStateClientLog << "snapshots_received_total=" << worldStateClient->GetReceivedSnapshotCount() << '\n';
 		}
 		worldStateClientLog.close();
 	}

@@ -18,6 +18,10 @@ namespace RTE {
 			std::uint32_t Spawned = 0;
 			std::uint32_t Removed = 0;
 			std::uint32_t MissingPresets = 0;
+			std::uint32_t PositionErrorsMeasured = 0;
+			double TotalPositionErrorBeforeCorrection = 0.0;
+			double MeanPositionErrorBeforeCorrection = 0.0;
+			double MaxPositionErrorBeforeCorrection = 0.0;
 			std::vector<std::string> MissingPresetDetails;
 		};
 
