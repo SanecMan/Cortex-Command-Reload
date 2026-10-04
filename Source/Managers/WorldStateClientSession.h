@@ -4,14 +4,20 @@
 #include "WorldStateTransport.h"
 
 #include <cstdint>
+#include <deque>
+#include <vector>
 
 namespace RTE {
 
 	/// Receives state snapshots and forwards sampled local input commands to the host.
 	/// The main simulation loop applies replica snapshots; host-side input injection is
 	/// still separate from transport validation.
-	class WorldStateClientSession {
-	public:
+class WorldStateClientSession {
+public:
+	struct ReceivedTerrainPatch {
+		WorldStateProtocol::TerrainPatch Patch;
+		std::uint32_t Sequence = 0;
+	};
 		bool Connect(const char* address, unsigned short port);
 		void Disconnect();
 	void Update();
@@ -21,12 +27,15 @@ namespace RTE {
 		bool IsConnected() const { return m_Connected; }
 		bool HasSnapshot() const { return m_HasSnapshot; }
 		std::uint32_t GetReceivedSnapshotCount() const { return m_ReceivedSnapshotCount; }
-		const WorldStateProtocol::Snapshot& GetLatestSnapshot() const { return m_LatestSnapshot; }
+	const WorldStateProtocol::Snapshot& GetLatestSnapshot() const { return m_LatestSnapshot; }
+	std::vector<ReceivedTerrainPatch> DrainTerrainPatches(std::uint32_t sceneRevision);
 
 	private:
 		WorldStateTransport m_Transport;
-		WorldStateProtocol::Snapshot m_LatestSnapshot;
-		std::uint32_t m_LastSequence = 0;
+	WorldStateProtocol::Snapshot m_LatestSnapshot;
+	std::deque<ReceivedTerrainPatch> m_TerrainPatches;
+	std::uint32_t m_LastSequence = 0;
+	std::uint32_t m_LastTerrainSequence = 0;
 	std::uint32_t m_ReceivedSnapshotCount = 0;
 	std::uint32_t m_InputCommandSequence = 0;
 	int m_AssignedPlayerSlot = -1;

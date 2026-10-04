@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <array>
 #include <chrono>
+#include <deque>
 #include <fstream>
 #include <string>
 #include <unordered_map>
@@ -30,6 +31,8 @@ namespace RTE {
 	private:
 		void Log(const std::string& message);
 		void ProcessActivityVotes();
+		void QueueTerrainChanges(std::uint32_t sceneRevision);
+		void SendPendingTerrainPatches();
 
 		WorldStateTransport m_Transport;
 		WorldStateSnapshotBuilder m_SnapshotBuilder;
@@ -37,7 +40,10 @@ namespace RTE {
 		std::uint32_t m_LastBroadcastTick = 0;
 		std::uint32_t m_Sequence = 0;
 	std::uint32_t m_SnapshotBroadcastCount = 0;
-	std::uint32_t m_InputCommandCount = 0;
+		std::uint32_t m_InputCommandCount = 0;
+		std::uint32_t m_LastTerrainSceneRevision = 0;
+		std::uint32_t m_TerrainPatchBroadcastCount = 0;
+		std::deque<WorldStateProtocol::TerrainPatch> m_PendingTerrainPatches;
 	unsigned short m_ConnectedClients = 0;
 	std::unordered_map<std::string, std::uint32_t> m_LastInputSequenceByClient;
 	std::unordered_map<std::string, int> m_PlayerSlotByClient;

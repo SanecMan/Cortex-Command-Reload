@@ -4,9 +4,11 @@
 #include "ActivityMan.h"
 #include "NetworkMessages.h"
 #include "SceneMan.h"
+#include "SLTerrain.h"
 #include "UInputMan.h"
 
 #include <algorithm>
+#include <utility>
 
 using namespace RTE;
 
@@ -23,6 +25,9 @@ bool WorldStateServerSession::Start(const std::string& bindAddress, unsigned sho
 	m_Sequence = 0;
 	m_SnapshotBroadcastCount = 0;
 	m_InputCommandCount = 0;
+	m_LastTerrainSceneRevision = 0;
+	m_TerrainPatchBroadcastCount = 0;
+	m_PendingTerrainPatches.clear();
 	m_LastInputSequenceByClient.clear();
 	m_PlayerSlotByClient.clear();
 	m_ResetVotesByClient.clear();
@@ -42,6 +47,8 @@ bool WorldStateServerSession::Start(const std::string& bindAddress, unsigned sho
 
 void WorldStateServerSession::Stop() {
 	g_SceneMan.SetWorldStateTerrainTrackingEnabled(false);
+	m_PendingTerrainPatches.clear();
+	m_LastTerrainSceneRevision = 0;
 	for (const auto& [clientAddress, player] : m_PlayerSlotByClient) {
 		g_UInputMan.ClearNetworkInputState(player);
 	}
@@ -74,6 +81,9 @@ void WorldStateServerSession::Update(std::uint32_t simulationTick) {
 	for (const WorldStateTransport::ReceivedPacket& packet : packets) {
 		if (packet.Identifier == ID_NEW_INCOMING_CONNECTION) {
 			++m_ConnectedClients;
+			if (g_SceneMan.GetScene() && g_SceneMan.GetScene()->GetTerrain()) {
+				g_SceneMan.RegisterTerrainChange(0, 0, g_SceneMan.GetSceneWidth(), g_SceneMan.GetSceneHeight());
+			}
 			const std::string clientAddress(packet.Sender.ToString(true));
 			m_LastInputSequenceByClient.erase(clientAddress);
 			m_ResetVotesByClient.erase(clientAddress);
@@ -165,6 +175,68 @@ void WorldStateServerSession::Update(std::uint32_t simulationTick) {
 		Log("ERROR: failed to encode or broadcast world snapshot");
 	} else {
 		++m_SnapshotBroadcastCount;
+	}
+	if (snapshot.SceneRevision != m_LastTerrainSceneRevision) {
+		m_PendingTerrainPatches.clear();
+		m_LastTerrainSceneRevision = snapshot.SceneRevision;
+	}
+	QueueTerrainChanges(snapshot.SceneRevision);
+	SendPendingTerrainPatches();
+}
+
+void WorldStateServerSession::QueueTerrainChanges(std::uint32_t sceneRevision) {
+	if (sceneRevision == 0 || !g_SceneMan.GetScene() || !g_SceneMan.GetScene()->GetTerrain()) {
+		return;
+	}
+	SLTerrain* terrain = g_SceneMan.GetScene()->GetTerrain();
+	for (const TerrainDirtyGrid::Rectangle& region : g_SceneMan.DrainWorldStateTerrainChanges()) {
+		const int regionRight = region.X + region.Width;
+		const int regionBottom = region.Y + region.Height;
+		for (int y = region.Y; y < regionBottom; y += 64) {
+			for (int x = region.X; x < regionRight; x += 64) {
+				WorldStateProtocol::TerrainPatch patch;
+				patch.SceneRevision = sceneRevision;
+				patch.X = static_cast<std::uint32_t>(x);
+				patch.Y = static_cast<std::uint32_t>(y);
+				patch.Width = static_cast<std::uint32_t>(std::min(64, regionRight - x));
+				patch.Height = static_cast<std::uint32_t>(std::min(64, regionBottom - y));
+				const std::size_t pixelCount = static_cast<std::size_t>(patch.Width) * patch.Height;
+				for (WorldStateProtocol::TerrainLayer layer : {WorldStateProtocol::TerrainLayer::Material,
+				                                               WorldStateProtocol::TerrainLayer::Foreground,
+				                                               WorldStateProtocol::TerrainLayer::Background}) {
+					patch.Layer = layer;
+					patch.Pixels.resize(pixelCount);
+					for (std::uint32_t row = 0; row < patch.Height; ++row) {
+						for (std::uint32_t column = 0; column < patch.Width; ++column) {
+							const int pixelX = x + static_cast<int>(column);
+							const int pixelY = y + static_cast<int>(row);
+							int value = 0;
+							switch (layer) {
+							case WorldStateProtocol::TerrainLayer::Material: value = terrain->GetMaterialPixel(pixelX, pixelY); break;
+							case WorldStateProtocol::TerrainLayer::Foreground: value = terrain->GetFGColorPixel(pixelX, pixelY); break;
+							case WorldStateProtocol::TerrainLayer::Background: value = terrain->GetBGColorPixel(pixelX, pixelY); break;
+							}
+							patch.Pixels[static_cast<std::size_t>(row) * patch.Width + column] = static_cast<std::uint8_t>(value);
+						}
+					}
+					m_PendingTerrainPatches.emplace_back(std::move(patch));
+				}
+			}
+		}
+	}
+}
+
+void WorldStateServerSession::SendPendingTerrainPatches() {
+	constexpr std::size_t c_MaxPatchesPerUpdate = 16;
+	std::size_t sentThisUpdate = 0;
+	while (!m_PendingTerrainPatches.empty() && sentThisUpdate < c_MaxPatchesPerUpdate) {
+		if (!m_Transport.BroadcastTerrainPatch(m_PendingTerrainPatches.front(), ++m_Sequence)) {
+			Log("ERROR: failed to encode or broadcast terrain patch");
+			return;
+		}
+		m_PendingTerrainPatches.pop_front();
+		++sentThisUpdate;
+		++m_TerrainPatchBroadcastCount;
 	}
 }
 

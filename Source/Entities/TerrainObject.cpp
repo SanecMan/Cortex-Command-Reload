@@ -299,4 +299,11 @@ void TerrainObject::DrawToTerrain(SLTerrain* terrain) {
 	if (HasFGColorBitmap()) {
 		draw_sprite(terrainFGBitmap, m_FGColorBitmap, posOnScene.GetFloorIntX(), posOnScene.GetFloorIntY());
 	}
+	if (HasMaterialBitmap() || HasBGColorBitmap() || HasFGColorBitmap()) {
+		if (terrain->WrapsY()) {
+			g_SceneMan.RegisterTerrainChange(0, 0, terrainMatBitmap->w, terrainMatBitmap->h);
+		} else {
+			g_SceneMan.RegisterTerrainChange(posOnScene.GetFloorIntX(), posOnScene.GetFloorIntY(), GetBitmapWidth(), GetBitmapHeight());
+		}
+	}
 }

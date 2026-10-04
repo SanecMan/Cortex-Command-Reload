@@ -86,6 +86,11 @@ bool WorldStateTransport::BroadcastSnapshot(const WorldStateProtocol::Snapshot& 
 	       Send(RakNet::UNASSIGNED_SYSTEM_ADDRESS, wirePacket, true, UNRELIABLE_SEQUENCED);
 }
 
+bool WorldStateTransport::BroadcastTerrainPatch(const WorldStateProtocol::TerrainPatch& patch, std::uint32_t sequence) {
+	std::vector<std::uint8_t> packet;
+	return WorldStateProtocol::EncodeTerrainPatch(patch, sequence, packet) && Send(RakNet::UNASSIGNED_SYSTEM_ADDRESS, packet, true, RELIABLE_ORDERED);
+}
+
 bool WorldStateTransport::SendInputCommand(const WorldStateProtocol::InputCommand& command, std::uint32_t sequence) {
 	if (!m_Peer || m_Peer->NumberOfConnections() == 0) {
 		return false;

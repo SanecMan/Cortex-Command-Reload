@@ -22,6 +22,7 @@ namespace RTE {
 		};
 
 		ApplyResult Apply(const WorldStateProtocol::Snapshot& snapshot);
+		bool ApplyTerrainPatch(const WorldStateProtocol::TerrainPatch& patch);
 		void Forget() { m_Objects.clear(); }
 
 	private:

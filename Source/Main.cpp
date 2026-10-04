@@ -42,6 +42,7 @@
 #include "FrameMan.h"
 #include "PostProcessMan.h"
 #include "SceneMan.h"
+#include "Scene.h"
 #include "MetaMan.h"
 #include "WindowMan.h"
 #include "GLResourceMan.h"
@@ -602,11 +603,21 @@ namespace {
 		std::size_t clientPacketCount = 0;
 		std::size_t acceptedClientCount = 0;
 		std::size_t receivedClientCount = 0;
+		std::size_t receivedTerrainPatchCount = 0;
 		std::uint16_t boundPort = 0;
 		{
 			WorldStateTransport serverTransport;
 			std::array<WorldStateTransport, expectedClientCount> clientTransports;
 			std::array<bool, expectedClientCount> clientReceivedSnapshot{};
+			std::array<bool, expectedClientCount> clientReceivedTerrainPatch{};
+			WorldStateProtocol::TerrainPatch expectedTerrainPatch;
+			expectedTerrainPatch.SceneRevision = expectedSnapshot.SceneRevision;
+			expectedTerrainPatch.X = 4;
+			expectedTerrainPatch.Y = 5;
+			expectedTerrainPatch.Width = 2;
+			expectedTerrainPatch.Height = 2;
+			expectedTerrainPatch.Layer = WorldStateProtocol::TerrainLayer::Foreground;
+			expectedTerrainPatch.Pixels = {3, 5, 7, 9};
 			serverStarted = serverTransport.StartServer(0, static_cast<unsigned short>(expectedClientCount), "127.0.0.1");
 			if (serverStarted) {
 				boundPort = serverTransport.GetBoundPort();
@@ -616,8 +627,10 @@ namespace {
 				}
 				if (clientsStarted) {
 					bool broadcastSent = false;
+					bool terrainBroadcastSent = false;
 					const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-					while (std::chrono::steady_clock::now() < deadline && receivedClientCount < expectedClientCount) {
+					while (std::chrono::steady_clock::now() < deadline &&
+					       (receivedClientCount < expectedClientCount || receivedTerrainPatchCount < expectedClientCount)) {
 						std::vector<WorldStateTransport::ReceivedPacket> serverPackets;
 						serverTransport.Poll(serverPackets);
 						serverPacketCount += serverPackets.size();
@@ -630,19 +643,35 @@ namespace {
 							broadcastSent = serverTransport.BroadcastSnapshot(expectedSnapshot, expectedSnapshot.Tick);
 							sendCount += broadcastSent ? expectedClientCount : 0;
 						}
-					for (std::size_t clientIndex = 0; clientIndex < clientTransports.size(); ++clientIndex) {
-						std::vector<WorldStateTransport::ReceivedPacket> clientPackets;
-						clientTransports[clientIndex].Poll(clientPackets);
-						clientPacketCount += clientPackets.size();
-						for (const WorldStateTransport::ReceivedPacket& received : clientPackets) {
-							if (received.Identifier != ID_CCR_WORLD_STATE) {
-								continue;
-							}
-							std::vector<std::uint8_t> decompressedPacket;
-							std::span<const std::uint8_t> snapshotPayload;
-							WorldStateProtocol::Snapshot transportedSnapshot;
-							std::uint32_t receivedSequence = 0;
-							clientReceivedSnapshot[clientIndex] = WorldStateCompression::DecodeFromWire(received.Payload, decompressedPacket, snapshotPayload) &&
+						if (broadcastSent && !terrainBroadcastSent) {
+							terrainBroadcastSent = serverTransport.BroadcastTerrainPatch(expectedTerrainPatch, expectedSnapshot.Tick + 1);
+							sendCount += terrainBroadcastSent ? expectedClientCount : 0;
+						}
+						for (std::size_t clientIndex = 0; clientIndex < clientTransports.size(); ++clientIndex) {
+							std::vector<WorldStateTransport::ReceivedPacket> clientPackets;
+							clientTransports[clientIndex].Poll(clientPackets);
+							clientPacketCount += clientPackets.size();
+							for (const WorldStateTransport::ReceivedPacket& received : clientPackets) {
+								if (received.Identifier != ID_CCR_WORLD_STATE) {
+									continue;
+								}
+								WorldStateProtocol::TerrainPatch terrainPatch;
+								std::uint32_t terrainSequence = 0;
+								if (WorldStateProtocol::DecodeTerrainPatch(received.Payload, terrainPatch, &terrainSequence)) {
+									clientReceivedTerrainPatch[clientIndex] = terrainSequence == expectedSnapshot.Tick + 1 &&
+									    terrainPatch.SceneRevision == expectedTerrainPatch.SceneRevision && terrainPatch.X == expectedTerrainPatch.X && terrainPatch.Y == expectedTerrainPatch.Y &&
+									    terrainPatch.Width == expectedTerrainPatch.Width && terrainPatch.Height == expectedTerrainPatch.Height && terrainPatch.Layer == expectedTerrainPatch.Layer &&
+									    terrainPatch.Pixels == expectedTerrainPatch.Pixels;
+									if (clientReceivedTerrainPatch[clientIndex]) {
+										++receivedTerrainPatchCount;
+									}
+									continue;
+								}
+								std::vector<std::uint8_t> decompressedPacket;
+								std::span<const std::uint8_t> snapshotPayload;
+								WorldStateProtocol::Snapshot transportedSnapshot;
+								std::uint32_t receivedSequence = 0;
+								clientReceivedSnapshot[clientIndex] = WorldStateCompression::DecodeFromWire(received.Payload, decompressedPacket, snapshotPayload) &&
 							                                         WorldStateProtocol::DecodeSnapshot(snapshotPayload, transportedSnapshot, &receivedSequence) &&
 							                                         receivedSequence == expectedSnapshot.Tick &&
 							                                         transportedSnapshot.Tick == expectedSnapshot.Tick &&
@@ -653,20 +682,20 @@ namespace {
 							                                         transportedSnapshot.ScenePreset == expectedSnapshot.ScenePreset &&
 							                                         transportedSnapshot.Objects.size() == expectedSnapshot.Objects.size() &&
 							                                         (transportedSnapshot.Objects.empty() || transportedSnapshot.Objects.front().PresetName == expectedSnapshot.Objects.front().PresetName);
-							if (clientReceivedSnapshot[clientIndex]) {
-								++receivedClientCount;
+								if (clientReceivedSnapshot[clientIndex]) {
+									++receivedClientCount;
+								}
 							}
-						}
 						}
 						std::this_thread::sleep_for(std::chrono::milliseconds(1));
 					}
-					loopbackPassed = broadcastSent && receivedClientCount == expectedClientCount;
+					loopbackPassed = broadcastSent && terrainBroadcastSent && receivedClientCount == expectedClientCount && receivedTerrainPatchCount == expectedClientCount;
 				}
 			}
 		}
 		log << "world_state_transport_setup=server:" << serverStarted << ",port:" << boundPort
 		    << ",clients_started:" << clientsStarted << ",clients_accepted:" << acceptedClientCount << ",clients_received:" << receivedClientCount << ",server_packets:" << serverPacketCount
-		    << ",client_packets:" << clientPacketCount << ",sends:" << sendCount
+		    << ",client_packets:" << clientPacketCount << ",terrain_received:" << receivedTerrainPatchCount << ",sends:" << sendCount
 		    << ",loopback:" << (loopbackPassed ? "passed" : "failed") << '\n' << std::flush;
 		return loopbackPassed;
 	}
@@ -1367,6 +1396,24 @@ void RunGameLoop() {
 
 			if (g_SceneMan.GetScene()) {
 				g_SceneMan.GetScene()->Update();
+			}
+			if (worldStateClient && worldStateClient->IsConnected() && worldStateClient->HasSnapshot() && !worldStateSceneTransitionQueued) {
+				const WorldStateProtocol::Snapshot& snapshot = worldStateClient->GetLatestSnapshot();
+				const Scene* localScene = g_SceneMan.GetScene();
+				if (localScene && localScene->GetPresetName() == snapshot.ScenePreset && localScene->GetModuleName() == snapshot.SceneModuleName) {
+					const std::vector<WorldStateClientSession::ReceivedTerrainPatch> terrainPatches = worldStateClient->DrainTerrainPatches(snapshot.SceneRevision);
+					std::uint32_t appliedTerrainPatches = 0;
+					for (const WorldStateClientSession::ReceivedTerrainPatch& receivedPatch : terrainPatches) {
+						if (worldStateClientReplica.ApplyTerrainPatch(receivedPatch.Patch)) {
+							++appliedTerrainPatches;
+						} else if (worldStateClientLog.is_open()) {
+							worldStateClientLog << "WARNING: rejected terrain patch sequence=" << receivedPatch.Sequence << " revision=" << receivedPatch.Patch.SceneRevision << '\n';
+						}
+					}
+					if (appliedTerrainPatches && worldStateClientLog.is_open()) {
+						worldStateClientLog << "terrain_patches_applied=" << appliedTerrainPatches << " revision=" << snapshot.SceneRevision << '\n' << std::flush;
+					}
+				}
 			}
 
 			g_MovableMan.Update();

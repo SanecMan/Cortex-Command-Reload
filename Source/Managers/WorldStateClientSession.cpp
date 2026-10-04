@@ -18,6 +18,8 @@ void WorldStateClientSession::Disconnect() {
 	m_Connected = false;
 	m_HasSnapshot = false;
 	m_LastSequence = 0;
+	m_LastTerrainSequence = 0;
+	m_TerrainPatches.clear();
 	m_ReceivedSnapshotCount = 0;
 	m_InputCommandSequence = 0;
 	m_AssignedPlayerSlot = -1;
@@ -27,6 +29,22 @@ void WorldStateClientSession::Disconnect() {
 
 bool WorldStateClientSession::SendInputCommand(const WorldStateProtocol::InputCommand& command) {
 	return m_Connected && m_Transport.SendInputCommand(command, ++m_InputCommandSequence);
+}
+
+std::vector<WorldStateClientSession::ReceivedTerrainPatch> WorldStateClientSession::DrainTerrainPatches(std::uint32_t sceneRevision) {
+	std::vector<ReceivedTerrainPatch> patches;
+	patches.reserve(m_TerrainPatches.size());
+	const std::size_t queuedCount = m_TerrainPatches.size();
+	for (std::size_t index = 0; index < queuedCount; ++index) {
+		ReceivedTerrainPatch patch = std::move(m_TerrainPatches.front());
+		m_TerrainPatches.pop_front();
+		if (patch.Patch.SceneRevision == sceneRevision) {
+			patches.emplace_back(std::move(patch));
+		} else if (static_cast<std::int32_t>(sceneRevision - patch.Patch.SceneRevision) < 0) {
+			m_TerrainPatches.emplace_back(std::move(patch));
+		}
+	}
+	return patches;
 }
 
 void WorldStateClientSession::Update() {
@@ -46,6 +64,15 @@ void WorldStateClientSession::Update() {
 			continue;
 		}
 		if (packet.Identifier != ID_CCR_WORLD_STATE) {
+			continue;
+		}
+		WorldStateProtocol::TerrainPatch terrainPatch;
+		std::uint32_t terrainSequence = 0;
+		if (WorldStateProtocol::DecodeTerrainPatch(packet.Payload, terrainPatch, &terrainSequence)) {
+			if (m_LastTerrainSequence == 0 || static_cast<std::int32_t>(terrainSequence - m_LastTerrainSequence) > 0) {
+				m_LastTerrainSequence = terrainSequence;
+				m_TerrainPatches.push_back({std::move(terrainPatch), terrainSequence});
+			}
 			continue;
 		}
 		WorldStateProtocol::ClientAssignment assignment;

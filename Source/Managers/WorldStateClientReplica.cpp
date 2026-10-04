@@ -9,7 +9,9 @@
 #include "MOSprite.h"
 #include "PresetMan.h"
 #include "SceneObject.h"
+#include "Scene.h"
 #include "SceneMan.h"
+#include "SLTerrain.h"
 #include "Vector.h"
 
 #include <array>
@@ -212,4 +214,33 @@ WorldStateClientReplica::ApplyResult WorldStateClientReplica::Apply(const WorldS
 		m_Objects[state.NetworkId] = {object, clientOwned};
 	}
 	return result;
+}
+
+bool WorldStateClientReplica::ApplyTerrainPatch(const WorldStateProtocol::TerrainPatch& patch) {
+	Scene* scene = g_SceneMan.GetScene();
+	if (!scene || !scene->GetTerrain() || patch.SceneRevision == 0 || patch.Width == 0 || patch.Height == 0 ||
+	    patch.Width > WorldStateProtocol::c_MaxTerrainPatchBytes / patch.Height ||
+	    patch.Pixels.size() != static_cast<std::size_t>(patch.Width) * patch.Height ||
+	    static_cast<std::uint64_t>(patch.X) + patch.Width > static_cast<std::uint64_t>(g_SceneMan.GetSceneWidth()) ||
+	    static_cast<std::uint64_t>(patch.Y) + patch.Height > static_cast<std::uint64_t>(g_SceneMan.GetSceneHeight())) {
+		return false;
+	}
+	SLTerrain* terrain = scene->GetTerrain();
+	for (std::uint32_t row = 0; row < patch.Height; ++row) {
+		for (std::uint32_t column = 0; column < patch.Width; ++column) {
+			const int x = static_cast<int>(patch.X + column);
+			const int y = static_cast<int>(patch.Y + row);
+			const int value = patch.Pixels[static_cast<std::size_t>(row) * patch.Width + column];
+			switch (patch.Layer) {
+			case WorldStateProtocol::TerrainLayer::Material: terrain->SetMaterialPixel(x, y, value); break;
+			case WorldStateProtocol::TerrainLayer::Foreground: terrain->SetFGColorPixel(x, y, value); break;
+			case WorldStateProtocol::TerrainLayer::Background: terrain->SetBGColorPixel(x, y, value); break;
+			default: return false;
+			}
+		}
+	}
+	if (patch.Layer == WorldStateProtocol::TerrainLayer::Material) {
+		terrain->AddUpdatedMaterialArea(Box(Vector(static_cast<float>(patch.X), static_cast<float>(patch.Y)), static_cast<float>(patch.Width), static_cast<float>(patch.Height)));
+	}
+	return true;
 }
