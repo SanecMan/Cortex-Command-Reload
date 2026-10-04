@@ -28,6 +28,7 @@ bool WorldStateServerSession::Start(const std::string& bindAddress, unsigned sho
 	m_SnapshotBroadcastCount = 0;
 	m_SnapshotCaptureWindowMicroseconds = 0;
 	m_SnapshotCaptureWindowSamples = 0;
+	m_LastSnapshotObjectCount = 0;
 	m_InputCommandCount = 0;
 	m_LastTerrainSceneRevision = 0;
 	m_TerrainPatchBroadcastCount = 0;
@@ -69,6 +70,13 @@ void WorldStateServerSession::Stop() {
 	m_PreviousResetInputByClient.clear();
 	m_PreviousRestartInputByClient.clear();
 	m_InputSlotsInUse.fill(false);
+	if (m_SnapshotCaptureWindowSamples > 0) {
+		const double averageCaptureMilliseconds = static_cast<double>(m_SnapshotCaptureWindowMicroseconds) / m_SnapshotCaptureWindowSamples / 1000.0;
+		Log("INFO: final snapshot capture average over " + std::to_string(m_SnapshotCaptureWindowSamples) + " snapshots=" +
+		    std::to_string(averageCaptureMilliseconds) + " ms; objects=" + std::to_string(m_LastSnapshotObjectCount));
+		m_SnapshotCaptureWindowMicroseconds = 0;
+		m_SnapshotCaptureWindowSamples = 0;
+	}
 	if (m_Transport.IsStarted()) {
 		m_Transport.Stop();
 		Log("INFO: world-state host stopped");
@@ -207,6 +215,7 @@ void WorldStateServerSession::Update(std::uint32_t simulationTick) {
 	const WorldStateProtocol::Snapshot snapshot = m_SnapshotBuilder.Capture(simulationTick);
 	m_SnapshotCaptureWindowMicroseconds += static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - snapshotCaptureStarted).count());
 	++m_SnapshotCaptureWindowSamples;
+	m_LastSnapshotObjectCount = snapshot.Objects.size();
 	g_PerformanceMan.StopPerformanceMeasurement(PerformanceMan::WorldStateSnapshot);
 	if (!m_Transport.BroadcastSnapshot(snapshot, ++m_Sequence)) {
 		Log("ERROR: failed to encode or broadcast world snapshot");
