@@ -3,6 +3,7 @@
 #include "MessageIdentifiers.h"
 #include "ActivityMan.h"
 #include "NetworkMessages.h"
+#include "SceneMan.h"
 #include "UInputMan.h"
 
 #include <algorithm>
@@ -17,6 +18,7 @@ bool WorldStateServerSession::Start(const std::string& bindAddress, unsigned sho
 		Stop();
 		return false;
 	}
+	g_SceneMan.SetWorldStateTerrainTrackingEnabled(true);
 	m_LastBroadcastTick = 0;
 	m_Sequence = 0;
 	m_SnapshotBroadcastCount = 0;
@@ -39,6 +41,7 @@ bool WorldStateServerSession::Start(const std::string& bindAddress, unsigned sho
 }
 
 void WorldStateServerSession::Stop() {
+	g_SceneMan.SetWorldStateTerrainTrackingEnabled(false);
 	for (const auto& [clientAddress, player] : m_PlayerSlotByClient) {
 		g_UInputMan.ClearNetworkInputState(player);
 	}

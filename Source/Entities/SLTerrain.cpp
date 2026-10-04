@@ -8,6 +8,7 @@
 #include "Atom.h"
 #include "DataModule.h"
 #include "PresetMan.h"
+#include "SceneMan.h"
 
 #include <array>
 #include <execution>
@@ -474,6 +475,11 @@ std::deque<MOPixel*> SLTerrain::EraseSilhouette(BITMAP* sprite, const Vector& po
 				}
 			}
 		}
+	}
+	if (m_WrapY) {
+		g_SceneMan.RegisterTerrainChange(0, 0, m_Width, m_Height);
+	} else {
+		g_SceneMan.RegisterTerrainChange(pos.GetFloorIntX() - (tempBitmap->w / 2), pos.GetFloorIntY() - (tempBitmap->h / 2), tempBitmap->w, tempBitmap->h);
 	}
 	// TODO: improve fit/tightness of box here.
 	m_UpdatedMaterialAreas.emplace_back(Box(pos - pivot, static_cast<float>(maxWidth), static_cast<float>(maxHeight)));

@@ -69,6 +69,22 @@ void SceneMan::Clear() {
 	m_pOrphanSearchBitmap = create_bitmap_ex(8, MAXORPHANRADIUS, MAXORPHANRADIUS);
 
 	m_ScrapCompactingHeight = 25;
+	m_WorldStateTerrainTrackingEnabled = false;
+	m_TerrainDirtyGrid.Clear();
+}
+
+void SceneMan::SetWorldStateTerrainTrackingEnabled(bool enabled) {
+	m_WorldStateTerrainTrackingEnabled = enabled;
+	m_TerrainDirtyGrid.Clear();
+	if (enabled && m_pCurrentScene && m_pCurrentScene->GetTerrain()) {
+		m_TerrainDirtyGrid.Configure(GetSceneWidth(), GetSceneHeight(), 64, SceneWrapsX());
+	}
+}
+
+void SceneMan::RegisterTerrainChange(int x, int y, int width, int height) {
+	if (m_WorldStateTerrainTrackingEnabled) {
+		m_TerrainDirtyGrid.Mark(x, y, width, height);
+	}
 }
 
 void SceneMan::Initialize() const {
@@ -122,6 +138,9 @@ int SceneMan::LoadScene(Scene* pNewScene, bool placeObjects, bool placeUnits) {
 	if (m_pCurrentScene->LoadData(placeObjects, true, placeUnits) < 0) {
 		g_ConsoleMan.PrintString("ERROR: Loading scene \'" + m_pCurrentScene->GetPresetName() + "\' failed! Has it been properly defined?");
 		return -1;
+	}
+	if (m_WorldStateTerrainTrackingEnabled) {
+		m_TerrainDirtyGrid.Configure(GetSceneWidth(), GetSceneHeight(), 64, SceneWrapsX());
 	}
 
 	// Report successful load to the console
@@ -538,6 +557,7 @@ int SceneMan::RemoveOrphans(int posX, int posY,
 		}
 		m_pCurrentScene->GetTerrain()->SetFGColorPixel(posX, posY, g_MaskColor);
 		m_pCurrentScene->GetTerrain()->SetMaterialPixel(posX, posY, g_MaterialAir);
+		RegisterTerrainChange(posX, posY, 1, 1);
 	}
 
 	int xoff[8] = {-1, 0, 1, -1, 1, -1, 0, 1};
@@ -624,11 +644,13 @@ bool SceneMan::TryPenetrate(int posX,
 			}
 			m_pCurrentScene->GetTerrain()->SetFGColorPixel(posX, posY, g_MaskColor);
 			m_pCurrentScene->GetTerrain()->SetMaterialPixel(posX, posY, g_MaterialAir);
+			RegisterTerrainChange(posX, posY, 1, 1);
 		}
 		// TODO: Improve / tweak randomized pushing away of terrain")
 		else if (RandomNum() <= airRatio) {
 			m_pCurrentScene->GetTerrain()->SetFGColorPixel(posX, posY, g_MaskColor);
 			m_pCurrentScene->GetTerrain()->SetMaterialPixel(posX, posY, g_MaterialAir);
+			RegisterTerrainChange(posX, posY, 1, 1);
 		}
 
 		// Save the impulse force effects of the penetrating particle.
@@ -676,6 +698,7 @@ bool SceneMan::TryPenetrate(int posX,
 						}
 						_putpixel(pFGColor, posX, testY, g_MaskColor);
 						_putpixel(pMaterial, posX, testY, g_MaterialAir);
+						RegisterTerrainChange(posX, testY, 1, 1);
 					} else {
 						break;
 					}
@@ -722,6 +745,7 @@ MOPixel* SceneMan::DislodgePixel(int posX, int posY) {
 
 	m_pCurrentScene->GetTerrain()->SetFGColorPixel(posX, posY, ColorKeys::g_MaskColor);
 	m_pCurrentScene->GetTerrain()->SetMaterialPixel(posX, posY, MaterialColorKeys::g_MaterialAir);
+	RegisterTerrainChange(posX, posY, 1, 1);
 
 	return pixelMO;
 }
@@ -2696,6 +2720,7 @@ void SceneMan::ClearSeenPixels() {
 
 void SceneMan::ClearCurrentScene() {
 	m_pCurrentScene = nullptr;
+	m_TerrainDirtyGrid.Clear();
 }
 
 BITMAP* SceneMan::GetIntermediateBitmapForSettlingIntoTerrain(int moDiameter) const {

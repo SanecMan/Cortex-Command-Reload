@@ -477,7 +477,32 @@ namespace {
 		state.Log << "world_state_input_codec_smoke=" << (inputCommandRoundTripPassed && invalidInputRejected ? "passed" : "failed") << '\n' << std::flush;
 		state.Log << "world_state_assignment_codec_smoke=" << (assignmentRoundTripPassed ? "passed" : "failed") << '\n' << std::flush;
 		state.Log << "world_state_terrain_patch_codec_smoke=" << (terrainPatchRoundTripPassed && invalidTerrainPatchRejected ? "passed" : "failed") << '\n' << std::flush;
+		TerrainDirtyGrid dirtyGrid;
+		const bool dirtyGridConfigured = dirtyGrid.Configure(130, 130, 64, false);
+		dirtyGrid.Mark(4, 5, 2, 2);
+		dirtyGrid.Mark(60, 60, 20, 20);
+		const std::vector<TerrainDirtyGrid::Rectangle> coalescedTerrainChanges = dirtyGrid.Drain();
+		const bool dirtyGridCoalescingPassed = dirtyGridConfigured && coalescedTerrainChanges.size() == 1 &&
+		                                      coalescedTerrainChanges.front().X == 0 && coalescedTerrainChanges.front().Y == 0 &&
+		                                      coalescedTerrainChanges.front().Width == 128 && coalescedTerrainChanges.front().Height == 128 &&
+		                                      dirtyGrid.Drain().empty();
+		TerrainDirtyGrid wrappingDirtyGrid;
+		const bool wrappingDirtyGridConfigured = wrappingDirtyGrid.Configure(192, 130, 64, true);
+		wrappingDirtyGrid.Mark(-4, 4, 8, 8);
+		wrappingDirtyGrid.Mark(4, 128, 8, 8);
+		const std::vector<TerrainDirtyGrid::Rectangle> wrappedTerrainChanges = wrappingDirtyGrid.Drain();
+		const bool dirtyGridWrappingPassed = wrappingDirtyGridConfigured && wrappedTerrainChanges.size() == 3 &&
+		                                    wrappedTerrainChanges[0].X == 0 && wrappedTerrainChanges[0].Y == 0 && wrappedTerrainChanges[0].Width == 64 && wrappedTerrainChanges[0].Height == 64 &&
+		                                    wrappedTerrainChanges[1].X == 128 && wrappedTerrainChanges[1].Y == 0 && wrappedTerrainChanges[1].Width == 64 && wrappedTerrainChanges[1].Height == 64 &&
+		                                    wrappedTerrainChanges[2].X == 0 && wrappedTerrainChanges[2].Y == 128 && wrappedTerrainChanges[2].Width == 64 && wrappedTerrainChanges[2].Height == 2;
+		state.Log << "world_state_terrain_dirty_grid_smoke=" << (dirtyGridCoalescingPassed && dirtyGridWrappingPassed ? "passed" : "failed")
+		          << " coalesced=" << coalescedTerrainChanges.size() << " wrapped=" << wrappedTerrainChanges.size();
+		for (const TerrainDirtyGrid::Rectangle& rectangle : wrappedTerrainChanges) {
+			state.Log << " [" << rectangle.X << ',' << rectangle.Y << ',' << rectangle.Width << ',' << rectangle.Height << ']';
+		}
+		state.Log << '\n' << std::flush;
 		if (!inputCommandRoundTripPassed || !invalidInputRejected || !assignmentRoundTripPassed || !terrainPatchRoundTripPassed || !invalidTerrainPatchRejected ||
+		    !dirtyGridCoalescingPassed || !dirtyGridWrappingPassed ||
 		    WorldStateProtocol::c_InputElementCount != InputElements::INPUT_COUNT) {
 			return false;
 		}

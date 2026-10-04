@@ -10,6 +10,7 @@
 #include "Box.h"
 #include "Singleton.h"
 #include "SpatialPartitionGrid.h"
+#include "TerrainDirtyGrid.h"
 
 #include "ActivityMan.h"
 
@@ -953,6 +954,13 @@ namespace RTE {
 		/// @return Pointer to stored material.
 		Material* AddMaterialCopy(Material* mat);
 
+		/// Enables collection of bounded terrain-dirty regions for world-state replication.
+		void SetWorldStateTerrainTrackingEnabled(bool enabled);
+		/// Marks a changed terrain rectangle; out-of-bounds X coordinates wrap only on wrapping scenes.
+		void RegisterTerrainChange(int x, int y, int width, int height);
+		/// Returns and clears coalesced terrain-dirty rectangles.
+		std::vector<TerrainDirtyGrid::Rectangle> DrainWorldStateTerrainChanges() { return m_TerrainDirtyGrid.Drain(); }
+
 		/// Gets an intermediate bitmap that is used for drawing a settled MovableObject into the terrain.
 		/// @param moDiameter The diameter of the MovableObject to calculate the required bitmap size.
 		/// @return Pointer to the temp BITMAP of the appropriate size. Ownership is NOT transferred!
@@ -1028,6 +1036,8 @@ namespace RTE {
 		BITMAP* m_pOrphanSearchBitmap;
 
 		int m_ScrapCompactingHeight; //!< The maximum height of a column of scrap terrain to collapse, when the bottom pixel is knocked loose.
+		bool m_WorldStateTerrainTrackingEnabled = false;
+		TerrainDirtyGrid m_TerrainDirtyGrid;
 
 		/// Private member variable and method declarations
 	private:
