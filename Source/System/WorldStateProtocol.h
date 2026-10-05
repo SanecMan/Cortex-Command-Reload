@@ -370,55 +370,59 @@ inline bool EncodeSnapshot(const Snapshot& snapshot, std::uint32_t sequence, std
 
 	std::unordered_set<std::uint64_t> networkIds;
 	networkIds.reserve(snapshot.Objects.size());
-	std::vector<std::uint8_t> payload;
-	payload.reserve(32 + snapshot.Objects.size() * 64);
-	Detail::WriteUnsigned(payload, snapshot.Tick, sizeof(snapshot.Tick));
-	Detail::WriteUnsigned(payload, snapshot.SceneRevision, sizeof(snapshot.SceneRevision));
-	if (!Detail::WriteString(payload, snapshot.ActivityClassName) || !Detail::WriteString(payload, snapshot.ActivityPreset) ||
-	    !Detail::WriteString(payload, snapshot.ActivityModuleName) || !Detail::WriteString(payload, snapshot.SceneModuleName) ||
-	    !Detail::WriteString(payload, snapshot.ScenePreset)) {
+	packet.reserve(c_HeaderSize + 32 + snapshot.Objects.size() * 64);
+	packet.resize(c_HeaderSize, 0);
+	Detail::WriteUnsigned(packet, snapshot.Tick, sizeof(snapshot.Tick));
+	Detail::WriteUnsigned(packet, snapshot.SceneRevision, sizeof(snapshot.SceneRevision));
+	if (!Detail::WriteString(packet, snapshot.ActivityClassName) || !Detail::WriteString(packet, snapshot.ActivityPreset) ||
+	    !Detail::WriteString(packet, snapshot.ActivityModuleName) || !Detail::WriteString(packet, snapshot.SceneModuleName) ||
+	    !Detail::WriteString(packet, snapshot.ScenePreset)) {
 		return false;
 	}
-	Detail::WriteUnsigned(payload, snapshot.Objects.size(), sizeof(std::uint32_t));
+	Detail::WriteUnsigned(packet, snapshot.Objects.size(), sizeof(std::uint32_t));
 	for (const ObjectState& object : snapshot.Objects) {
 		if (!Detail::ValidObject(object) || !networkIds.insert(object.NetworkId).second) {
 			return false;
 		}
-		Detail::WriteUnsigned(payload, object.NetworkId, sizeof(object.NetworkId));
-		if (!Detail::WriteString(payload, object.ClassName) || !Detail::WriteString(payload, object.ModuleName) || !Detail::WriteString(payload, object.PresetName)) {
+		Detail::WriteUnsigned(packet, object.NetworkId, sizeof(object.NetworkId));
+		if (!Detail::WriteString(packet, object.ClassName) || !Detail::WriteString(packet, object.ModuleName) || !Detail::WriteString(packet, object.PresetName)) {
 			return false;
 		}
-		Detail::WriteFloat(payload, object.PositionX);
-		Detail::WriteFloat(payload, object.PositionY);
-		Detail::WriteFloat(payload, object.VelocityX);
-		Detail::WriteFloat(payload, object.VelocityY);
-		Detail::WriteFloat(payload, object.Rotation);
-		Detail::WriteFloat(payload, object.AngularVelocity);
-		Detail::WriteFloat(payload, object.Health);
-		Detail::WriteUnsigned(payload, object.SpriteFrame, sizeof(object.SpriteFrame));
-		Detail::WriteUnsigned(payload, static_cast<std::uint16_t>(object.Team), sizeof(object.Team));
-		Detail::WriteUnsigned(payload, object.Flags, sizeof(object.Flags));
-		Detail::WriteUnsigned(payload, object.HFlipped ? 1 : 0, sizeof(std::uint8_t));
+		Detail::WriteFloat(packet, object.PositionX);
+		Detail::WriteFloat(packet, object.PositionY);
+		Detail::WriteFloat(packet, object.VelocityX);
+		Detail::WriteFloat(packet, object.VelocityY);
+		Detail::WriteFloat(packet, object.Rotation);
+		Detail::WriteFloat(packet, object.AngularVelocity);
+		Detail::WriteFloat(packet, object.Health);
+		Detail::WriteUnsigned(packet, object.SpriteFrame, sizeof(object.SpriteFrame));
+		Detail::WriteUnsigned(packet, static_cast<std::uint16_t>(object.Team), sizeof(object.Team));
+		Detail::WriteUnsigned(packet, object.Flags, sizeof(object.Flags));
+		Detail::WriteUnsigned(packet, object.HFlipped ? 1 : 0, sizeof(std::uint8_t));
 		if (object.Flags == c_ObjectFlagTransientPixel) {
-			Detail::WriteUnsigned(payload, object.PixelMaterialId, sizeof(object.PixelMaterialId));
-			Detail::WriteUnsigned(payload, object.PixelColorIndex, sizeof(object.PixelColorIndex));
-			Detail::WriteFloat(payload, object.PixelMass);
-			Detail::WriteUnsigned(payload, object.PixelLifetime, sizeof(object.PixelLifetime));
-			Detail::WriteFloat(payload, object.PixelSharpness);
+			Detail::WriteUnsigned(packet, object.PixelMaterialId, sizeof(object.PixelMaterialId));
+			Detail::WriteUnsigned(packet, object.PixelColorIndex, sizeof(object.PixelColorIndex));
+			Detail::WriteFloat(packet, object.PixelMass);
+			Detail::WriteUnsigned(packet, object.PixelLifetime, sizeof(object.PixelLifetime));
+			Detail::WriteFloat(packet, object.PixelSharpness);
 		}
-		if (payload.size() + c_HeaderSize > c_MaxPacketSize) {
+		if (packet.size() > c_MaxPacketSize) {
 			return false;
 		}
 	}
 
-	packet.reserve(c_HeaderSize + payload.size());
-	Detail::WriteUnsigned(packet, c_Magic, sizeof(c_Magic));
-	Detail::WriteUnsigned(packet, c_Version, sizeof(c_Version));
-	Detail::WriteUnsigned(packet, static_cast<std::uint8_t>(MessageType::WorldSnapshot), sizeof(std::uint8_t));
-	Detail::WriteUnsigned(packet, 0, sizeof(std::uint8_t));
-	Detail::WriteUnsigned(packet, sequence, sizeof(sequence));
-	Detail::WriteUnsigned(packet, payload.size(), sizeof(std::uint32_t));
-	packet.insert(packet.end(), payload.begin(), payload.end());
+	std::size_t headerOffset = 0;
+	auto WriteHeaderUnsigned = [&](std::uint64_t value, std::size_t byteCount) {
+		for (std::size_t byte = 0; byte < byteCount; ++byte) {
+			packet[headerOffset++] = static_cast<std::uint8_t>((value >> (byte * 8)) & 0xFF);
+		}
+	};
+	WriteHeaderUnsigned(c_Magic, sizeof(c_Magic));
+	WriteHeaderUnsigned(c_Version, sizeof(c_Version));
+	WriteHeaderUnsigned(static_cast<std::uint8_t>(MessageType::WorldSnapshot), sizeof(std::uint8_t));
+	WriteHeaderUnsigned(0, sizeof(std::uint8_t));
+	WriteHeaderUnsigned(sequence, sizeof(sequence));
+	WriteHeaderUnsigned(packet.size() - c_HeaderSize, sizeof(std::uint32_t));
 	return true;
 }
 

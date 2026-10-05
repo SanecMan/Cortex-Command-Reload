@@ -7,6 +7,8 @@
 #include "MessageIdentifiers.h"
 #include "PacketPriority.h"
 
+#include <chrono>
+
 using namespace RTE;
 
 WorldStateTransport::~WorldStateTransport() {
@@ -78,17 +80,29 @@ bool WorldStateTransport::SendSnapshot(const RakNet::AddressOrGUID& target, cons
 	       Send(target, wirePacket, false, UNRELIABLE_SEQUENCED);
 }
 
-bool WorldStateTransport::BroadcastSnapshot(const WorldStateProtocol::Snapshot& snapshot, std::uint32_t sequence, std::size_t* payloadSize) {
+bool WorldStateTransport::BroadcastSnapshot(const WorldStateProtocol::Snapshot& snapshot, std::uint32_t sequence, SnapshotTransmissionMetrics* metrics) {
+	SnapshotTransmissionMetrics measured;
+	auto stageStarted = std::chrono::steady_clock::now();
 	std::vector<std::uint8_t> packet;
 	std::vector<std::uint8_t> wirePacket;
 	bool compressed = false;
-	if (!WorldStateProtocol::EncodeSnapshot(snapshot, sequence, packet) || !WorldStateCompression::EncodeForWire(packet, wirePacket, compressed) ||
-	    !Send(RakNet::UNASSIGNED_SYSTEM_ADDRESS, wirePacket, true, UNRELIABLE_SEQUENCED)) {
+	if (!WorldStateProtocol::EncodeSnapshot(snapshot, sequence, packet)) {
 		return false;
 	}
-	if (payloadSize) {
-		*payloadSize = wirePacket.size();
+	const auto encodedAt = std::chrono::steady_clock::now();
+	measured.EncodeMicroseconds = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(encodedAt - stageStarted).count());
+	if (!WorldStateCompression::EncodeForWire(packet, wirePacket, compressed)) {
+		return false;
 	}
+	const auto compressedAt = std::chrono::steady_clock::now();
+	measured.CompressMicroseconds = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(compressedAt - encodedAt).count());
+	if (!Send(RakNet::UNASSIGNED_SYSTEM_ADDRESS, wirePacket, true, UNRELIABLE_SEQUENCED)) {
+		return false;
+	}
+	const auto queuedAt = std::chrono::steady_clock::now();
+	measured.QueueMicroseconds = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(queuedAt - compressedAt).count());
+	measured.PayloadBytes = wirePacket.size();
+	if (metrics) *metrics = measured;
 	return true;
 }
 
