@@ -26,16 +26,24 @@ namespace RTE {
 		};
 
 		ApplyResult Apply(const WorldStateProtocol::Snapshot& snapshot);
+		std::uint32_t AdvanceInterpolation();
 		bool ApplyTerrainPatch(const WorldStateProtocol::TerrainPatch& patch);
-		void Forget() { m_Objects.clear(); }
+		void Forget() { m_Objects.clear(); m_LastSnapshotTick = 0; }
 
 	private:
 		struct Replica {
 			class MovableObject* Object = nullptr;
 			bool ClientOwned = false;
+			float InterpolationStartX = 0.0F;
+			float InterpolationStartY = 0.0F;
+			float InterpolationDeltaX = 0.0F;
+			float InterpolationDeltaY = 0.0F;
+			std::uint32_t InterpolationElapsedTicks = 0;
+			std::uint32_t InterpolationDurationTicks = 0;
 		};
 
 		std::unordered_map<std::uint64_t, Replica> m_Objects;
+		std::uint32_t m_LastSnapshotTick = 0;
 	};
 
 } // namespace RTE

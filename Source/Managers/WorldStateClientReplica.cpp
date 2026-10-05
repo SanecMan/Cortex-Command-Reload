@@ -114,6 +114,13 @@ namespace {
 
 WorldStateClientReplica::ApplyResult WorldStateClientReplica::Apply(const WorldStateProtocol::Snapshot& snapshot) {
 	ApplyResult result;
+	std::uint32_t interpolationDurationTicks = 3;
+	if (m_LastSnapshotTick != 0) {
+		const std::uint32_t elapsedServerTicks = snapshot.Tick - m_LastSnapshotTick;
+		if (elapsedServerTicks > 0) {
+			interpolationDurationTicks = std::clamp(elapsedServerTicks, 1U, 12U);
+		}
+	}
 
 	std::vector<MovableObject*> localObjects;
 	CollectLocalObjects(localObjects);
@@ -165,9 +172,11 @@ WorldStateClientReplica::ApplyResult WorldStateClientReplica::Apply(const WorldS
 	for (const WorldStateProtocol::ObjectState& state : snapshot.Objects) {
 		MovableObject* object = nullptr;
 		bool clientOwned = false;
+		bool wasTrackedReplica = false;
 		if (auto existing = m_Objects.find(state.NetworkId); existing != m_Objects.end() && existing->second.Object && activeObjects.contains(existing->second.Object)) {
 			object = existing->second.Object;
 			clientOwned = existing->second.ClientOwned;
+			wasTrackedReplica = true;
 		}
 		if (!object) {
 			buildCandidates();
@@ -208,6 +217,7 @@ WorldStateClientReplica::ApplyResult WorldStateClientReplica::Apply(const WorldS
 			++result.Spawned;
 			activeObjects.insert(object);
 		} else {
+			const Vector interpolationStartPosition = object->GetPos();
 			const double dx = static_cast<double>(object->GetPos().GetX()) - state.PositionX;
 			const double dy = static_cast<double>(object->GetPos().GetY()) - state.PositionY;
 			const double positionError = std::sqrt(dx * dx + dy * dy);
@@ -215,15 +225,57 @@ WorldStateClientReplica::ApplyResult WorldStateClientReplica::Apply(const WorldS
 			result.MaxPositionErrorBeforeCorrection = std::max(result.MaxPositionErrorBeforeCorrection, positionError);
 			++result.PositionErrorsMeasured;
 			ApplyFields(*object, state);
+			if (wasTrackedReplica) {
+				object->SetPos(interpolationStartPosition);
+				object->SetPrevPos(interpolationStartPosition);
+			}
 			++result.Updated;
 		}
 		mappedObjects.insert(object);
-		m_Objects[state.NetworkId] = {object, clientOwned};
+		Replica& replica = m_Objects[state.NetworkId];
+		replica.Object = object;
+		replica.ClientOwned = clientOwned;
+		if (wasTrackedReplica) {
+			replica.InterpolationStartX = object->GetPos().GetX();
+			replica.InterpolationStartY = object->GetPos().GetY();
+			const Vector interpolationDelta = g_SceneMan.ShortestDistance(object->GetPos(), Vector(state.PositionX, state.PositionY));
+			replica.InterpolationDeltaX = interpolationDelta.GetX();
+			replica.InterpolationDeltaY = interpolationDelta.GetY();
+			replica.InterpolationElapsedTicks = 0;
+			replica.InterpolationDurationTicks = interpolationDurationTicks;
+		} else {
+			replica.InterpolationElapsedTicks = 0;
+			replica.InterpolationDurationTicks = 0;
+		}
 	}
+	m_LastSnapshotTick = snapshot.Tick;
 	if (result.PositionErrorsMeasured > 0) {
 		result.MeanPositionErrorBeforeCorrection = result.TotalPositionErrorBeforeCorrection / result.PositionErrorsMeasured;
 	}
 	return result;
+}
+
+std::uint32_t WorldStateClientReplica::AdvanceInterpolation() {
+	std::uint32_t advancedObjects = 0;
+	for (auto& [networkId, replica] : m_Objects) {
+		(void)networkId;
+		if (!replica.Object || replica.InterpolationDurationTicks == 0) {
+			continue;
+		}
+		replica.InterpolationElapsedTicks = std::min(replica.InterpolationElapsedTicks + 1, replica.InterpolationDurationTicks);
+		const float progress = static_cast<float>(replica.InterpolationElapsedTicks) / static_cast<float>(replica.InterpolationDurationTicks);
+		const Vector currentPosition = replica.Object->GetPos();
+		replica.Object->SetPrevPos(currentPosition);
+		Vector interpolatedPosition(replica.InterpolationStartX + replica.InterpolationDeltaX * progress,
+		                            replica.InterpolationStartY + replica.InterpolationDeltaY * progress);
+		g_SceneMan.WrapPosition(interpolatedPosition);
+		replica.Object->SetPos(interpolatedPosition);
+		++advancedObjects;
+		if (replica.InterpolationElapsedTicks == replica.InterpolationDurationTicks) {
+			replica.InterpolationDurationTicks = 0;
+		}
+	}
+	return advancedObjects;
 }
 
 bool WorldStateClientReplica::ApplyTerrainPatch(const WorldStateProtocol::TerrainPatch& patch) {

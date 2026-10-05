@@ -907,13 +907,23 @@ namespace {
 		const WorldStateClientReplica::ApplyResult removalApply = replicaSmoke.Apply(emptyReplicaSnapshot);
 		const WorldStateClientReplica::ApplyResult restoredApply = replicaSmoke.Apply(worldSnapshot);
 		const WorldStateClientReplica::ApplyResult repeatedApply = replicaSmoke.Apply(worldSnapshot);
+		WorldStateProtocol::Snapshot interpolationTarget = worldSnapshot;
+		interpolationTarget.Tick += 3;
+		if (!interpolationTarget.Objects.empty()) {
+			interpolationTarget.Objects.front().PositionX += 30.0F;
+		}
+		const WorldStateClientReplica::ApplyResult interpolationApply = replicaSmoke.Apply(interpolationTarget);
+		const std::uint32_t interpolatedObjectCount = replicaSmoke.AdvanceInterpolation();
+		const bool interpolationSmokePassed = !interpolationTarget.Objects.empty() && interpolationApply.MissingPresets == 0 &&
+		                                     interpolatedObjectCount == interpolationTarget.Objects.size();
 		const bool replicaSmokePassed = firstApply.Updated + firstApply.Spawned == worldSnapshot.Objects.size() && firstApply.MissingPresets == 0 &&
 		                               removalApply.Removed == firstApply.Spawned && removalApply.Updated == 0 && removalApply.Spawned == 0 &&
 		                               restoredApply.Updated + restoredApply.Spawned == worldSnapshot.Objects.size() && restoredApply.MissingPresets == 0 &&
-		                               repeatedApply.Updated == worldSnapshot.Objects.size() && repeatedApply.Spawned == 0 && repeatedApply.Removed == 0 && repeatedApply.MissingPresets == 0;
+		                               repeatedApply.Updated == worldSnapshot.Objects.size() && repeatedApply.Spawned == 0 && repeatedApply.Removed == 0 && repeatedApply.MissingPresets == 0 &&
+		                               interpolationApply.Updated == worldSnapshot.Objects.size() && interpolationSmokePassed;
 		state.Log << "world_state_replica_smoke=" << (replicaSmokePassed ? "passed" : "failed") << " objects=" << worldSnapshot.Objects.size()
 		          << " first_updated=" << firstApply.Updated << " first_spawned=" << firstApply.Spawned << " removed=" << removalApply.Removed
-		          << " repeat_updated=" << repeatedApply.Updated << '\n' << std::flush;
+		          << " repeat_updated=" << repeatedApply.Updated << " interpolated=" << interpolatedObjectCount << '\n' << std::flush;
 		WorldStateProtocol::Snapshot transientPixelSnapshot = worldSnapshot;
 		transientPixelSnapshot.Objects.clear();
 		WorldStateProtocol::ObjectState transientPixel;
@@ -1515,6 +1525,9 @@ void RunGameLoop() {
 						worldStateClientLastLoggedSnapshotCount = snapshotCount;
 					}
 				}
+			}
+			if (worldStateReplicaClient && !worldStateSceneTransitionQueued) {
+				worldStateClientReplica.AdvanceInterpolation();
 			}
 
 			g_ConsoleMan.Update();
