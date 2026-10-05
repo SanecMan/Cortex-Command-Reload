@@ -656,6 +656,7 @@ namespace {
 		std::size_t acceptedClientCount = 0;
 		std::size_t receivedClientCount = 0;
 		std::size_t receivedTerrainPatchCount = 0;
+		std::size_t snapshotWireBytes = 0;
 		std::uint16_t boundPort = 0;
 		{
 			WorldStateTransport serverTransport;
@@ -692,7 +693,7 @@ namespace {
 							}
 						}
 						if (!broadcastSent && acceptedClientCount == expectedClientCount) {
-							broadcastSent = serverTransport.BroadcastSnapshot(expectedSnapshot, expectedSnapshot.Tick);
+							broadcastSent = serverTransport.BroadcastSnapshot(expectedSnapshot, expectedSnapshot.Tick, &snapshotWireBytes);
 							sendCount += broadcastSent ? expectedClientCount : 0;
 						}
 						if (broadcastSent && !terrainBroadcastSent) {
@@ -735,6 +736,7 @@ namespace {
 		log << "world_state_transport_setup=server:" << serverStarted << ",port:" << boundPort
 		    << ",clients_started:" << clientsStarted << ",clients_accepted:" << acceptedClientCount << ",clients_received:" << receivedClientCount << ",server_packets:" << serverPacketCount
 		    << ",client_packets:" << clientPacketCount << ",terrain_received:" << receivedTerrainPatchCount << ",sends:" << sendCount
+			    << ",compressed_snapshot_payload_bytes:" << snapshotWireBytes << ",estimated_snapshot_payload_bandwidth_kbit_s_per_client:" << (snapshotWireBytes * 20.0 * 8.0 / 1000.0)
 		    << ",loopback:" << (loopbackPassed ? "passed" : "failed") << '\n' << std::flush;
 		return loopbackPassed;
 	}

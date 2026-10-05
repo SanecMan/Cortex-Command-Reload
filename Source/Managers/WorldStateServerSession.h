@@ -42,10 +42,13 @@ namespace RTE {
 		std::ofstream m_Log;
 		std::uint32_t m_LastBroadcastTick = 0;
 		std::uint32_t m_Sequence = 0;
-	std::uint32_t m_SnapshotBroadcastCount = 0;
+		std::uint32_t m_SnapshotBroadcastCount = 0;
 		std::uint64_t m_SnapshotCaptureWindowMicroseconds = 0;
+		std::uint64_t m_SnapshotPayloadWindowBytes = 0;
 		std::uint32_t m_SnapshotCaptureWindowSamples = 0;
+		std::uint32_t m_SnapshotPayloadWindowSamples = 0;
 		std::size_t m_LastSnapshotObjectCount = 0;
+		std::size_t m_MaxSnapshotPayloadBytes = 0;
 		std::uint32_t m_InputCommandCount = 0;
 		std::uint32_t m_LastTerrainSceneRevision = 0;
 		std::uint32_t m_TerrainPatchBroadcastCount = 0;

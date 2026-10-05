@@ -9,6 +9,7 @@
 #include "RakNetTypes.h"
 #include "WorldStateProtocol.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <span>
 #include <vector>
@@ -39,11 +40,11 @@ namespace RTE {
 
 		bool SendWorldState(const RakNet::AddressOrGUID& target, std::span<const std::uint8_t> packet);
 		bool BroadcastWorldState(std::span<const std::uint8_t> packet);
-	bool SendSnapshot(const RakNet::AddressOrGUID& target, const WorldStateProtocol::Snapshot& snapshot, std::uint32_t sequence);
-	bool BroadcastSnapshot(const WorldStateProtocol::Snapshot& snapshot, std::uint32_t sequence);
-	bool BroadcastTerrainPatch(const WorldStateProtocol::TerrainPatch& patch, std::uint32_t sequence);
-	bool SendInputCommand(const WorldStateProtocol::InputCommand& command, std::uint32_t sequence);
-	bool SendClientAssignment(const RakNet::AddressOrGUID& target, const WorldStateProtocol::ClientAssignment& assignment, std::uint32_t sequence);
+		bool SendSnapshot(const RakNet::AddressOrGUID& target, const WorldStateProtocol::Snapshot& snapshot, std::uint32_t sequence);
+		bool BroadcastSnapshot(const WorldStateProtocol::Snapshot& snapshot, std::uint32_t sequence, std::size_t* payloadSize = nullptr);
+		bool BroadcastTerrainPatch(const WorldStateProtocol::TerrainPatch& patch, std::uint32_t sequence);
+		bool SendInputCommand(const WorldStateProtocol::InputCommand& command, std::uint32_t sequence);
+		bool SendClientAssignment(const RakNet::AddressOrGUID& target, const WorldStateProtocol::ClientAssignment& assignment, std::uint32_t sequence);
 		void Poll(std::vector<ReceivedPacket>& packets);
 
 	private:

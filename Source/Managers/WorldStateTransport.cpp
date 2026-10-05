@@ -78,12 +78,18 @@ bool WorldStateTransport::SendSnapshot(const RakNet::AddressOrGUID& target, cons
 	       Send(target, wirePacket, false, UNRELIABLE_SEQUENCED);
 }
 
-bool WorldStateTransport::BroadcastSnapshot(const WorldStateProtocol::Snapshot& snapshot, std::uint32_t sequence) {
+bool WorldStateTransport::BroadcastSnapshot(const WorldStateProtocol::Snapshot& snapshot, std::uint32_t sequence, std::size_t* payloadSize) {
 	std::vector<std::uint8_t> packet;
 	std::vector<std::uint8_t> wirePacket;
 	bool compressed = false;
-	return WorldStateProtocol::EncodeSnapshot(snapshot, sequence, packet) && WorldStateCompression::EncodeForWire(packet, wirePacket, compressed) &&
-	       Send(RakNet::UNASSIGNED_SYSTEM_ADDRESS, wirePacket, true, UNRELIABLE_SEQUENCED);
+	if (!WorldStateProtocol::EncodeSnapshot(snapshot, sequence, packet) || !WorldStateCompression::EncodeForWire(packet, wirePacket, compressed) ||
+	    !Send(RakNet::UNASSIGNED_SYSTEM_ADDRESS, wirePacket, true, UNRELIABLE_SEQUENCED)) {
+		return false;
+	}
+	if (payloadSize) {
+		*payloadSize = wirePacket.size();
+	}
+	return true;
 }
 
 bool WorldStateTransport::BroadcastTerrainPatch(const WorldStateProtocol::TerrainPatch& patch, std::uint32_t sequence) {

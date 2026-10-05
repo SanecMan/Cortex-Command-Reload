@@ -27,8 +27,11 @@ bool WorldStateServerSession::Start(const std::string& bindAddress, unsigned sho
 	m_Sequence = 0;
 	m_SnapshotBroadcastCount = 0;
 	m_SnapshotCaptureWindowMicroseconds = 0;
+	m_SnapshotPayloadWindowBytes = 0;
 	m_SnapshotCaptureWindowSamples = 0;
+	m_SnapshotPayloadWindowSamples = 0;
 	m_LastSnapshotObjectCount = 0;
+	m_MaxSnapshotPayloadBytes = 0;
 	m_InputCommandCount = 0;
 	m_LastTerrainSceneRevision = 0;
 	m_TerrainPatchBroadcastCount = 0;
@@ -70,12 +73,22 @@ void WorldStateServerSession::Stop() {
 	m_PreviousResetInputByClient.clear();
 	m_PreviousRestartInputByClient.clear();
 	m_InputSlotsInUse.fill(false);
-	if (m_SnapshotCaptureWindowSamples > 0) {
-		const double averageCaptureMilliseconds = static_cast<double>(m_SnapshotCaptureWindowMicroseconds) / m_SnapshotCaptureWindowSamples / 1000.0;
-		Log("INFO: final snapshot capture average over " + std::to_string(m_SnapshotCaptureWindowSamples) + " snapshots=" +
-		    std::to_string(averageCaptureMilliseconds) + " ms; objects=" + std::to_string(m_LastSnapshotObjectCount));
+	if (m_SnapshotCaptureWindowSamples > 0 || m_SnapshotPayloadWindowSamples > 0) {
+		const double averageCaptureMilliseconds = m_SnapshotCaptureWindowSamples > 0
+		                                             ? static_cast<double>(m_SnapshotCaptureWindowMicroseconds) / m_SnapshotCaptureWindowSamples / 1000.0
+		                                             : 0.0;
+		const double averagePayloadBytes = m_SnapshotPayloadWindowSamples > 0 ? static_cast<double>(m_SnapshotPayloadWindowBytes) / m_SnapshotPayloadWindowSamples : 0.0;
+		Log("INFO: final snapshot capture average over " + std::to_string(m_SnapshotCaptureWindowSamples) + " samples=" +
+		    std::to_string(averageCaptureMilliseconds) + " ms; objects=" + std::to_string(m_LastSnapshotObjectCount) +
+		    "; average compressed payload bytes over " + std::to_string(m_SnapshotPayloadWindowSamples) + " broadcasts=" + std::to_string(averagePayloadBytes) +
+		    "; peak compressed payload bytes=" +
+		    std::to_string(m_MaxSnapshotPayloadBytes) + "; estimated snapshot payload bandwidth/client=" +
+		    std::to_string(averagePayloadBytes * 20.0 * 8.0 / 1000.0) + " kbit/s at 20 Hz (excluding RakNet/IP/UDP overhead)");
 		m_SnapshotCaptureWindowMicroseconds = 0;
+		m_SnapshotPayloadWindowBytes = 0;
 		m_SnapshotCaptureWindowSamples = 0;
+		m_SnapshotPayloadWindowSamples = 0;
+		m_MaxSnapshotPayloadBytes = 0;
 	}
 	if (m_Transport.IsStarted()) {
 		m_Transport.Stop();
@@ -217,16 +230,28 @@ void WorldStateServerSession::Update(std::uint32_t simulationTick) {
 	++m_SnapshotCaptureWindowSamples;
 	m_LastSnapshotObjectCount = snapshot.Objects.size();
 	g_PerformanceMan.StopPerformanceMeasurement(PerformanceMan::WorldStateSnapshot);
-	if (!m_Transport.BroadcastSnapshot(snapshot, ++m_Sequence)) {
+	std::size_t payloadSize = 0;
+	if (!m_Transport.BroadcastSnapshot(snapshot, ++m_Sequence, &payloadSize)) {
 		Log("ERROR: failed to encode or broadcast world snapshot");
 	} else {
 		++m_SnapshotBroadcastCount;
-		if (m_SnapshotBroadcastCount % 100 == 0 && m_SnapshotCaptureWindowSamples > 0) {
+		m_SnapshotPayloadWindowBytes += payloadSize;
+		++m_SnapshotPayloadWindowSamples;
+		m_MaxSnapshotPayloadBytes = std::max(m_MaxSnapshotPayloadBytes, payloadSize);
+		if (m_SnapshotBroadcastCount % 100 == 0 && m_SnapshotCaptureWindowSamples > 0 && m_SnapshotPayloadWindowSamples > 0) {
 			const double averageCaptureMilliseconds = static_cast<double>(m_SnapshotCaptureWindowMicroseconds) / m_SnapshotCaptureWindowSamples / 1000.0;
-			Log("INFO: snapshot capture average over " + std::to_string(m_SnapshotCaptureWindowSamples) + " snapshots=" +
-			    std::to_string(averageCaptureMilliseconds) + " ms; objects=" + std::to_string(snapshot.Objects.size()));
+			const double averagePayloadBytes = static_cast<double>(m_SnapshotPayloadWindowBytes) / m_SnapshotPayloadWindowSamples;
+			Log("INFO: snapshot capture average over " + std::to_string(m_SnapshotCaptureWindowSamples) + " samples=" +
+			    std::to_string(averageCaptureMilliseconds) + " ms; objects=" + std::to_string(snapshot.Objects.size()) +
+			    "; average compressed payload bytes over " + std::to_string(m_SnapshotPayloadWindowSamples) + " broadcasts=" + std::to_string(averagePayloadBytes) +
+			    "; peak compressed payload bytes=" +
+			    std::to_string(m_MaxSnapshotPayloadBytes) + "; estimated snapshot payload bandwidth/client=" +
+			    std::to_string(averagePayloadBytes * 20.0 * 8.0 / 1000.0) + " kbit/s at 20 Hz (excluding RakNet/IP/UDP overhead)");
 			m_SnapshotCaptureWindowMicroseconds = 0;
+			m_SnapshotPayloadWindowBytes = 0;
 			m_SnapshotCaptureWindowSamples = 0;
+			m_SnapshotPayloadWindowSamples = 0;
+			m_MaxSnapshotPayloadBytes = 0;
 		}
 	}
 	if (snapshot.SceneRevision != m_LastTerrainSceneRevision) {
