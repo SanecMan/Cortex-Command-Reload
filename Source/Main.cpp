@@ -1934,26 +1934,36 @@ int main(int argc, char** argv) {
 		                                            UTF8::PathFromString(System::GetModDirectory()) /
 		                                            UTF8::PathFromString(probeDirectoryName);
 		const std::filesystem::path probeScriptPath = probeDirectory / std::filesystem::u8path("проверка.lua");
+		const std::filesystem::path probeTargetPath = probeDirectory / std::filesystem::u8path("цель.lua");
+		const std::filesystem::path probePackagePath = probeDirectory / std::filesystem::u8path("UTF8_Пакет.lua");
 		const std::string probeModulePath = UTF8::PathToString(UTF8::PathFromString(System::GetModDirectory()) /
-		                                                       UTF8::PathFromString(probeDirectoryName) /
-		                                                       std::filesystem::u8path("проверка.lua"));
+	                                                       UTF8::PathFromString(probeDirectoryName) /
+	                                                       std::filesystem::u8path("проверка.lua"));
+		const std::string probeTargetModulePath = UTF8::PathToString(UTF8::PathFromString(System::GetModDirectory()) /
+	                                                              UTF8::PathFromString(probeDirectoryName) /
+	                                                              std::filesystem::u8path("цель.lua"));
+		const std::string probePackageTemplate = UTF8::PathToString(UTF8::PathFromString(System::GetModDirectory()) /
+	                                                             UTF8::PathFromString(probeDirectoryName) / std::filesystem::u8path("?.lua"));
 		std::error_code probeError;
 		const bool probeDirectoryAlreadyExists = std::filesystem::exists(probeDirectory, probeError);
 		bool probeDirectoryCreated = false;
 		if (!probeDirectoryAlreadyExists && !probeError) {
 			probeDirectoryCreated = std::filesystem::create_directory(probeDirectory, probeError);
 		}
-		auto runLuaSourceProbe = [&](std::string_view source, std::string_view expectedError) {
-			if (!probeDirectoryCreated) {
-				return false;
-			}
-			std::ofstream sourceFile(UTF8::PathFromString(UTF8::PathToString(probeScriptPath)), std::ios::binary | std::ios::trunc);
+		auto writeLuaProbeFile = [](const std::filesystem::path& path, std::string_view source) {
+			std::ofstream sourceFile(UTF8::PathFromString(UTF8::PathToString(path)), std::ios::binary | std::ios::trunc);
 			if (!sourceFile) {
 				return false;
 			}
 			sourceFile.write(source.data(), static_cast<std::streamsize>(source.size()));
 			sourceFile.close();
-			if (!sourceFile) {
+			return static_cast<bool>(sourceFile);
+		};
+		auto runLuaSourceProbe = [&](std::string_view source, std::string_view expectedError) {
+			if (!probeDirectoryCreated) {
+				return false;
+			}
+			if (!writeLuaProbeFile(probeScriptPath, source)) {
 				return false;
 			}
 			LuaStateWrapper& luaState = g_LuaMan.GetMasterScriptState();
@@ -1968,15 +1978,39 @@ int main(int argc, char** argv) {
 		const bool luaBOMPassed = runLuaSourceProbe(bomLuaSource, "UTF8_LUA_BOM_PROBE: Привет");
 		const std::string legacyLuaSource = std::string("error(\"CP1251_LUA_PROBE: ") + "\xCF\xF0\xE8\xE2\xE5\xF2" + "\")";
 		const bool legacyLuaSourcePassed = runLuaSourceProbe(legacyLuaSource, "CP1251_LUA_PROBE: Привет");
+		const std::string loadTargetSource = "return { text = \"Lua-файл загружен\" }";
+		const std::string packageTargetSource = "return { text = \"Lua-пакет загружен\" }";
+		const bool probeTargetsWritten = writeLuaProbeFile(probeTargetPath, loadTargetSource) && writeLuaProbeFile(probePackagePath, packageTargetSource);
+		const std::string loadfileRunner = "local chunk, err = loadfile(\"" + probeTargetModulePath + "\"); "
+		                                   "assert(chunk, err); local value = chunk(); assert(value.text == \"Lua-файл загружен\"); "
+		                                   "error(\"UTF8_LUA_LOADFILE_PROBE: Привет\")";
+		const std::string dofileRunner = "local value = dofile(\"" + probeTargetModulePath + "\"); "
+		                                 "assert(value.text == \"Lua-файл загружен\"); error(\"UTF8_LUA_DOFILE_PROBE: Привет\")";
+		const std::string requireRunner = "local key = \"UTF8_Пакет\"; local oldPath = package.path; local oldValue = package.loaded[key]; "
+		                                  "package.path = \"" + probePackageTemplate + "\"; package.loaded[key] = nil; "
+		                                  "local ok, value = pcall(require, key); package.path = oldPath; package.loaded[key] = oldValue; "
+		                                  "if not ok then error(value); end; assert(value.text == \"Lua-пакет загружен\"); "
+		                                  "error(\"UTF8_LUA_REQUIRE_PROBE: Привет\")";
+		const bool luaLoadfilePassed = probeTargetsWritten && runLuaSourceProbe(loadfileRunner, "UTF8_LUA_LOADFILE_PROBE: Привет");
+		const bool luaDofilePassed = probeTargetsWritten && runLuaSourceProbe(dofileRunner, "UTF8_LUA_DOFILE_PROBE: Привет");
+		const bool luaRequirePassed = probeTargetsWritten && runLuaSourceProbe(requireRunner, "UTF8_LUA_REQUIRE_PROBE: Привет");
 		if (probeDirectoryCreated) {
 			probeError.clear();
 			std::filesystem::remove(probeScriptPath, probeError);
-			const bool probeFileRemoved = !probeError;
+			bool probeFilesRemoved = !probeError;
+			for (const std::filesystem::path& probeFilePath : {probeTargetPath, probePackagePath}) {
+				probeError.clear();
+				std::filesystem::remove(probeFilePath, probeError);
+				probeFilesRemoved = probeFilesRemoved && !probeError;
+			}
 			probeError.clear();
 			std::filesystem::remove(probeDirectory, probeError);
-			state.Log << "lua_utf8_source_path_probe=" << (utf8LuaPathPassed && probeFileRemoved ? "passed" : "failed") << '\n'
-			          << "lua_utf8_bom_probe=" << (luaBOMPassed && probeFileRemoved ? "passed" : "failed") << '\n'
-			          << "lua_legacy_windows1251_source_probe=" << (legacyLuaSourcePassed && probeFileRemoved ? "passed" : "failed") << '\n'
+			state.Log << "lua_utf8_source_path_probe=" << (utf8LuaPathPassed && probeFilesRemoved ? "passed" : "failed") << '\n'
+			          << "lua_utf8_bom_probe=" << (luaBOMPassed && probeFilesRemoved ? "passed" : "failed") << '\n'
+			          << "lua_legacy_windows1251_source_probe=" << (legacyLuaSourcePassed && probeFilesRemoved ? "passed" : "failed") << '\n'
+			          << "lua_loadfile_utf8_probe=" << (luaLoadfilePassed ? "passed" : "failed") << '\n'
+			          << "lua_dofile_utf8_probe=" << (luaDofilePassed ? "passed" : "failed") << '\n'
+			          << "lua_require_utf8_probe=" << (luaRequirePassed ? "passed" : "failed") << '\n'
 			          << "lua_probe_cleanup=" << (!probeError ? "passed" : "failed") << '\n' << std::flush;
 		} else {
 			state.Log << "lua_utf8_source_path_probe=failed reason="

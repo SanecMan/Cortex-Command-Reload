@@ -14,6 +14,63 @@
 
 using namespace RTE;
 
+namespace {
+	// Load Lua source from UTF-8 paths while retaining LuaJIT bytecode, UTF-8 BOM,
+	// shebang and legacy Windows-1251 source compatibility.
+	int LoadLuaChunkFromFile(lua_State* luaState, const std::string& filePath) {
+		std::ifstream scriptStream(UTF8::PathFromString(filePath), std::ios::binary);
+		if (!scriptStream) {
+			lua_pushfstring(luaState, "cannot open %s", filePath.c_str());
+			return LUA_ERRFILE;
+		}
+
+		std::string scriptSource = std::string(std::istreambuf_iterator<char>(scriptStream), std::istreambuf_iterator<char>());
+		if (scriptStream.bad()) {
+			lua_pushfstring(luaState, "error reading %s", filePath.c_str());
+			return LUA_ERRFILE;
+		}
+
+		const bool isBytecode = scriptSource.size() >= 3 && scriptSource[0] == '\x1B' && scriptSource[1] == 'L' && (scriptSource[2] == 'u' || scriptSource[2] == 'J');
+		if (!isBytecode) {
+			const bool hasUtf8BOM = scriptSource.size() >= 3 && static_cast<unsigned char>(scriptSource[0]) == 0xEF &&
+			                        static_cast<unsigned char>(scriptSource[1]) == 0xBB && static_cast<unsigned char>(scriptSource[2]) == 0xBF;
+			if (hasUtf8BOM) {
+				scriptSource.erase(0, 3);
+			}
+			if (scriptSource.size() >= 2 && scriptSource[0] == '#' && scriptSource[1] == '!') {
+				const std::size_t lineEnd = scriptSource.find_first_of("\r\n");
+				if (lineEnd == std::string::npos) {
+					scriptSource.clear();
+				} else {
+					scriptSource.replace(0, lineEnd, "--");
+				}
+			}
+			scriptSource = UTF8::PreserveLegacyWindows1251(scriptSource);
+		}
+
+		const std::string chunkName = "@" + filePath;
+		return luaL_loadbuffer(luaState, scriptSource.data(), scriptSource.size(), chunkName.c_str());
+	}
+
+	int LoadLuaFileUTF8(lua_State* luaState) {
+		size_t pathLength = 0;
+		const char* filePath = luaL_optlstring(luaState, 1, nullptr, &pathLength);
+		if (!filePath) {
+			lua_pushnil(luaState);
+			lua_pushstring(luaState, "file path is required");
+			return 2;
+		}
+
+		const int loadStatus = LoadLuaChunkFromFile(luaState, std::string(filePath, pathLength));
+		if (loadStatus == 0) {
+			return 1;
+		}
+		lua_pushnil(luaState);
+		lua_insert(luaState, -2);
+		return 2;
+	}
+} // namespace
+
 const std::unordered_set<std::string> LuaMan::c_FileAccessModes = {"r", "r+", "w", "w+", "a", "a+", "rt", "wt"};
 
 LuaStateWrapper::LuaStateWrapper() {
@@ -69,6 +126,7 @@ void LuaStateWrapper::Initialize() {
 		lua_pushstring(m_State, lib->name);
 		lua_call(m_State, 1, 0);
 	}
+	lua_register(m_State, "__RTE_LoadUTF8LuaFile", &LoadLuaFileUTF8);
 
 	// LuaJIT should start automatically after we load the library (if we loaded it) but we're making sure it did anyway.
 	if (!g_SettingsMan.DisableLuaJIT() && !luaJIT_setmode(m_State, 0, LUAJIT_MODE_ENGINE | LUAJIT_MODE_ON)) {
@@ -264,9 +322,17 @@ void LuaStateWrapper::Initialize() {
 	              "NormalRand = function() return LuaMan:NormalRand(); end;\n"
 	              // Override "math.random" in the lua state to use RTETools MT19937 implementation. Preserve return types of original to not break all the things.
 	              "math.random = function(lower, upper) if lower ~= nil and upper ~= nil then return LuaMan:SelectRand(lower, upper); elseif lower ~= nil then return LuaMan:SelectRand(1, lower); else return LuaMan:PosRand(); end end\n"
-	              // Override "dofile"/"loadfile" to be able to account for Data/ or Mods/ directory.
-	              "do local OriginalDoFile = dofile; dofile = function(filePath) filePath = PresetMan:GetFullModulePath(filePath); if filePath ~= '' then return OriginalDoFile(filePath); end end; end\n"
-	              "do local OriginalLoadFile = loadfile; loadfile = function(filePath) filePath = PresetMan:GetFullModulePath(filePath); if filePath ~= '' then return OriginalLoadFile(filePath); end end; end\n"
+	              // Override "dofile"/"loadfile" to resolve Data/ or Mods/ paths and read them as UTF-8.
+	              "do local LoadUTF8File = __RTE_LoadUTF8LuaFile; loadfile = function(filePath) filePath = PresetMan:GetFullModulePath(filePath); if filePath ~= '' then return LoadUTF8File(filePath); end end; "
+	              "dofile = function(filePath) filePath = PresetMan:GetFullModulePath(filePath); if filePath ~= '' then local chunk, err = LoadUTF8File(filePath); if not chunk then error(err, 2); end; return chunk(); end end; end\n"
+	              // Keep package.path and LuaJIT's native/C searchers intact, but try Lua files with UTF-8 paths first.
+	              "do local function UTF8LuaModuleSearcher(moduleName) local modulePath = moduleName:gsub('%.', '/'); local errors = {}; "
+	              "for template in package.path:gmatch('[^;]+') do local candidate = template:gsub('%?', function() return modulePath; end); "
+	              "local chunk = __RTE_LoadUTF8LuaFile(candidate); if chunk then return chunk; end; "
+	              "local moduleCandidate = PresetMan:GetFullModulePath(candidate); if moduleCandidate ~= '' and moduleCandidate ~= candidate then "
+	              "chunk = __RTE_LoadUTF8LuaFile(moduleCandidate); if chunk then return chunk; end; end; "
+	              "errors[#errors + 1] = '\\n\\tno UTF-8 Lua module ' .. candidate; end; return table.concat(errors); end; "
+	              "table.insert(package.loaders, 2, UTF8LuaModuleSearcher); end\n"
 	              // Override "require" to be able to track loaded packages so we can clear them when scripts are reloaded.
 	              "_RequiredPackages = {};\n"
 	              "do local OriginalRequire = require; require = function(filePath) _RequiredPackages[filePath] = true; return OriginalRequire(filePath); end; end\n"
@@ -758,44 +824,13 @@ int LuaStateWrapper::RunScriptFile(const std::string& filePath, bool consoleErro
 	lua_pushcfunction(m_State, &AddFileAndLineToError);
 	SetLuaPath(fullScriptPath);
 
-	// LuaJIT's built-in file loader uses narrow paths on Windows. Read the
-	// source through the engine UTF-8 path helper, then compile it from memory.
-	std::ifstream scriptStream(UTF8::PathFromString(fullScriptPath), std::ios::binary);
-	std::string scriptSource;
-	int loadStatus = 0;
-	bool luaLoadErrorOnStack = false;
-	if (scriptStream) {
-		scriptSource.assign(std::istreambuf_iterator<char>(scriptStream), std::istreambuf_iterator<char>());
-		const bool isBytecode = scriptSource.size() >= 3 && scriptSource[0] == '\x1B' && scriptSource[1] == 'L' && (scriptSource[2] == 'u' || scriptSource[2] == 'J');
-		if (!isBytecode) {
-			const bool hasUtf8BOM = scriptSource.size() >= 3 && static_cast<unsigned char>(scriptSource[0]) == 0xEF &&
-			                        static_cast<unsigned char>(scriptSource[1]) == 0xBB && static_cast<unsigned char>(scriptSource[2]) == 0xBF;
-			if (hasUtf8BOM) {
-				scriptSource.erase(0, 3);
-			}
-			if (scriptSource.size() >= 2 && scriptSource[0] == '#' && scriptSource[1] == '!') {
-				const std::size_t lineEnd = scriptSource.find_first_of("\r\n");
-				if (lineEnd == std::string::npos) {
-					scriptSource.clear();
-				} else {
-					scriptSource.replace(0, lineEnd, "--");
-				}
-			}
-			scriptSource = UTF8::PreserveLegacyWindows1251(scriptSource);
-		}
-		const std::string chunkName = "@" + fullScriptPath;
-		loadStatus = luaL_loadbuffer(m_State, scriptSource.data(), scriptSource.size(), chunkName.c_str());
-		luaLoadErrorOnStack = loadStatus != 0;
-	} else {
-		m_LastError = "Unable to open script file: " + fullScriptPath;
-		loadStatus = -1;
-	}
+	// LuaJIT's built-in file loader uses narrow paths on Windows. Share the
+	// UTF-8-aware loader used by Lua loadfile/dofile and the package searcher.
+	const int loadStatus = LoadLuaChunkFromFile(m_State, fullScriptPath);
 	if (loadStatus != 0) {
-		if (luaLoadErrorOnStack) {
-			const char* luaError = lua_tostring(m_State, -1);
-			m_LastError = luaError ? luaError : "Lua failed to compile script source.";
-			lua_pop(m_State, 1);
-		}
+		const char* luaError = lua_tostring(m_State, -1);
+		m_LastError = luaError ? luaError : "Lua failed to load script source.";
+		lua_pop(m_State, 1);
 		if (consoleErrors) {
 			g_ConsoleMan.PrintString("ERROR: " + m_LastError);
 			ClearErrors();
