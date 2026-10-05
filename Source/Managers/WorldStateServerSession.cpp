@@ -62,6 +62,8 @@ bool WorldStateServerSession::Start(const std::string& bindAddress, unsigned sho
 	m_DebugTerrainMutationBaselineSent = false;
 	m_DebugTerrainMutationSmokePassed = false;
 	m_DebugTerrainMutationPatchSent = false;
+	m_LoggedWaitingForWorldState = false;
+	m_DebugEmptyWorldSnapshotSmokeEnabled = false;
 	Log("INFO: world-state host listening on " + bindAddress + ":" + std::to_string(m_Transport.GetBoundPort()) +
 	    " (max clients " + std::to_string(maxPlayers) + ")");
 	return true;
@@ -258,6 +260,14 @@ void WorldStateServerSession::Update(std::uint32_t simulationTick) {
 	g_PerformanceMan.StartPerformanceMeasurement(PerformanceMan::WorldStateSnapshot);
 	const auto snapshotCaptureStarted = std::chrono::steady_clock::now();
 	const WorldStateProtocol::Snapshot snapshot = m_SnapshotBuilder.Capture(simulationTick);
+	if ((snapshot.ActivityClassName.empty() || snapshot.ActivityPreset.empty() || snapshot.ScenePreset.empty()) && !m_DebugEmptyWorldSnapshotSmokeEnabled) {
+		g_PerformanceMan.StopPerformanceMeasurement(PerformanceMan::WorldStateSnapshot);
+		if (!m_LoggedWaitingForWorldState) {
+			Log("INFO: waiting for an active Activity and Scene before sending the first world snapshot");
+			m_LoggedWaitingForWorldState = true;
+		}
+		return;
+	}
 	m_SnapshotCaptureWindowMicroseconds += static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - snapshotCaptureStarted).count());
 	++m_SnapshotCaptureWindowSamples;
 	m_LastSnapshotObjectCount = snapshot.Objects.size();

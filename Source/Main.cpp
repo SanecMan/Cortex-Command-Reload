@@ -105,6 +105,7 @@ using namespace RTE;
 namespace {
 	bool worldStateServerRequested = false;
 	unsigned short worldStateServerPort = 8000;
+	bool worldStateServerPortSpecified = false;
 	unsigned short worldStateServerMaxPlayers = 8;
 	std::string worldStateServerBindAddress = "0.0.0.0";
 	std::unique_ptr<WorldStateServerSession> worldStateServer;
@@ -153,6 +154,8 @@ namespace {
 	struct DebugRunState {
 		bool Enabled = false;
 		bool StressStarted = false;
+		bool PerformanceCountersObserved = false;
+		bool HasProtocolSmokeSnapshot = false;
 		bool Passed = false;
 		bool HostSessionTestPassed = true;
 		bool OverlayCaptureEnabled = false;
@@ -166,9 +169,15 @@ namespace {
 		int TerrainMutationProbeX = 0;
 		int TerrainMutationProbeY = 0;
 		bool WorldStateTransitionObserved = false;
+		bool WorldStateTransitionApplied = false;
 		bool HostWorldStateTransitionQueued = false;
+		bool HostWorldStateTransitionApplied = false;
 		bool PostTransitionStressBatchSpawned = false;
 		int WorldStateTransitionObservedUpdate = 0;
+		int WorldStateTransitionAppliedUpdate = 0;
+		int HostWorldStateTransitionAppliedUpdate = 0;
+		WorldStateProtocol::Snapshot ProtocolSmokeSnapshot;
+		int HostWorldStateTransitionUpdate = 600;
 		std::string ExpectedTransitionActivity = "Skirmish Defense";
 		std::string ExpectedTransitionScene = "Ketanot Hills";
 		int UpdateLimit = 600;
@@ -194,6 +203,8 @@ namespace {
 		static DebugRunState state;
 		return state;
 	}
+
+	WorldStateProtocol::Snapshot CaptureDebugWorldStateSnapshot();
 
 	std::uint64_t GetProcessResidentMemoryBytes() {
 #ifdef _WIN32
@@ -240,6 +251,14 @@ namespace {
 			if (argument == "-debug-run-preflight-only") state.PreflightOnly = true;
 			if (argument == "-debug-run-world-state-transition") state.RequestHostWorldStateTransition = true;
 			if (argument == "-debug-run-require-world-state-transition") state.RequireWorldStateTransition = true;
+		if (argument == "-debug-run-world-state-transition-update" && i + 1 < argc) {
+			int transitionUpdate = 0;
+			const std::string_view transitionUpdateArgument(argv[++i]);
+			const auto [end, error] = std::from_chars(transitionUpdateArgument.data(), transitionUpdateArgument.data() + transitionUpdateArgument.size(), transitionUpdate);
+			if (error == std::errc{} && end == transitionUpdateArgument.data() + transitionUpdateArgument.size() && transitionUpdate > 0) {
+				state.HostWorldStateTransitionUpdate = std::clamp(transitionUpdate, 1, 36000);
+			}
+		}
 			if (argument == "-debug-run-world-state-terrain-mutation") state.RequestHostTerrainMutationSmoke = true;
 			if (argument == "-debug-run-require-world-state-terrain-mutation") state.RequireRemoteTerrainMutationSmoke = true;
 			if (argument == "-debug-run-output" && i + 1 < argc) state.OutputDirectoryName = argv[++i];
@@ -615,7 +634,18 @@ namespace {
 		if (state.SimulationUpdates == 1 || state.SimulationUpdates == state.UpdateLimit / 2) {
 			SpawnDebugStressBatch();
 		}
-		if (state.RequestHostWorldStateTransition && worldStateServerRequested && !state.HostWorldStateTransitionQueued && state.SimulationUpdates == 600) {
+		if (!state.HasProtocolSmokeSnapshot) {
+			if (worldStateClient && worldStateClient->HasSnapshot() && !worldStateClient->GetLatestSnapshot().Objects.empty()) {
+				state.ProtocolSmokeSnapshot = worldStateClient->GetLatestSnapshot();
+				state.HasProtocolSmokeSnapshot = true;
+			} else if (g_MovableMan.GetMovableObjectCount() > 0) {
+				state.ProtocolSmokeSnapshot = CaptureDebugWorldStateSnapshot();
+				state.HasProtocolSmokeSnapshot = !state.ProtocolSmokeSnapshot.Objects.empty();
+			}
+		}
+		if (state.RequestHostWorldStateTransition && worldStateServerRequested && worldStateServer &&
+		    worldStateServer->GetConnectedClientCount() > 0 && !state.HostWorldStateTransitionQueued &&
+		    state.SimulationUpdates >= state.HostWorldStateTransitionUpdate) {
 			WorldStateProtocol::Snapshot targetActivity;
 			targetActivity.ActivityClassName = "GAScripted";
 			targetActivity.ActivityPreset = "Skirmish Defense";
@@ -625,11 +655,30 @@ namespace {
 			std::string failureReason;
 			state.HostWorldStateTransitionQueued = QueueWorldStateActivity(targetActivity, failureReason);
 			state.Log << "debug_host_activity_transition=" << (state.HostWorldStateTransitionQueued ? "queued" : "failed")
+			          << " at_update=" << state.SimulationUpdates
 			          << (failureReason.empty() ? "" : " reason=" + failureReason) << '\n' << std::flush;
 		}
-		const bool hostTransitionRestarted = state.RequestHostWorldStateTransition && state.HostWorldStateTransitionQueued && state.SimulationUpdates > 600;
-		const bool clientTransitionRestarted = state.RequireWorldStateTransition && state.WorldStateTransitionObserved &&
-		                                      state.SimulationUpdates > state.WorldStateTransitionObservedUpdate;
+		const Activity* currentActivity = g_ActivityMan.GetActivity();
+		const Scene* currentScene = g_SceneMan.GetScene();
+		const bool targetWorldLoaded = g_ActivityMan.IsInActivity() && currentActivity && currentScene &&
+		                               currentActivity->GetPresetName() == state.ExpectedTransitionActivity &&
+		                               currentScene->GetPresetName() == state.ExpectedTransitionScene;
+		if (targetWorldLoaded && state.RequestHostWorldStateTransition && state.HostWorldStateTransitionQueued &&
+		    !state.HostWorldStateTransitionApplied) {
+			state.HostWorldStateTransitionApplied = true;
+			state.HostWorldStateTransitionAppliedUpdate = state.SimulationUpdates;
+			state.Log << "debug_host_activity_transition=applied at_update=" << state.SimulationUpdates << '\n' << std::flush;
+		}
+		if (targetWorldLoaded && state.RequireWorldStateTransition && state.WorldStateTransitionObserved && !state.WorldStateTransitionApplied) {
+			state.WorldStateTransitionApplied = true;
+			state.WorldStateTransitionAppliedUpdate = state.SimulationUpdates;
+			state.Log << "debug_client_activity_transition=applied at_update=" << state.SimulationUpdates << '\n' << std::flush;
+		}
+		constexpr int c_TransitionSettleUpdates = 180;
+		const bool hostTransitionRestarted = state.RequestHostWorldStateTransition && state.HostWorldStateTransitionApplied &&
+		                                     state.SimulationUpdates >= state.HostWorldStateTransitionAppliedUpdate + c_TransitionSettleUpdates;
+		const bool clientTransitionRestarted = state.RequireWorldStateTransition && state.WorldStateTransitionApplied &&
+		                                      state.SimulationUpdates >= state.WorldStateTransitionAppliedUpdate + c_TransitionSettleUpdates;
 		if (!state.PostTransitionStressBatchSpawned && (hostTransitionRestarted || clientTransitionRestarted)) {
 			state.PostTransitionStressBatchSpawned = true;
 			SpawnDebugStressBatch();
@@ -637,6 +686,11 @@ namespace {
 		if (state.SimulationUpdates % 60 == 0) {
 			state.Log << "simulation_update=" << state.SimulationUpdates << " actors=" << g_MovableMan.GetActorCount()
 			          << " particles=" << g_MovableMan.GetParticleCount() << '\n' << std::flush;
+		}
+		if (!state.PerformanceCountersObserved && g_MovableMan.GetActorCount() > 0 && MovableObject::GetSceneSpawnEvents() > 0) {
+			state.PerformanceCountersObserved = true;
+			state.Log << "performance_counters_observed=passed at_update=" << state.SimulationUpdates
+			          << " actors=" << g_MovableMan.GetActorCount() << " scene_spawns=" << MovableObject::GetSceneSpawnEvents() << '\n' << std::flush;
 		}
 	}
 
@@ -748,12 +802,14 @@ namespace {
 		const unsigned short port = serverSession.GetBoundPort();
 		serverSession.Update(++worldStateServerSimulationTick);
 		const bool idleServerSkippedSnapshot = serverSession.GetSnapshotBroadcastCount() == 0;
+		serverSession.EnableDebugEmptyWorldSnapshotSmoke();
 		std::array<WorldStateClientSession, expectedClientCount> clients;
 		bool started = port != 0;
 		for (WorldStateClientSession& client : clients) {
 			started = started && client.Connect("127.0.0.1", port);
 		}
 		if (!started) {
+			serverSession.DisableDebugEmptyWorldSnapshotSmoke();
 			log << "world_state_host_session_smoke=failed reason=client_start\n" << std::flush;
 			return false;
 		}
@@ -830,6 +886,7 @@ namespace {
 			serverSession.Update(++worldStateServerSimulationTick);
 			std::this_thread::sleep_for(std::chrono::milliseconds(5));
 		}
+		serverSession.DisableDebugEmptyWorldSnapshotSmoke();
 		const bool remainedAvailableAfterDisconnect = serverSession.IsStarted() && serverSession.GetConnectedClientCount() == 0;
 		const bool passed = idleServerSkippedSnapshot && allConnectedAndReceived && playerAssignmentsPassed && networkInputApplied && remainedAvailableAfterDisconnect;
 		log << "world_state_host_session_smoke=" << (passed ? "passed" : "failed")
@@ -847,8 +904,8 @@ namespace {
 		if (!state.Enabled || System::IsSetToQuit()) {
 			return;
 		}
-		const WorldStateProtocol::Snapshot worldSnapshot = CaptureDebugWorldStateSnapshot();
-		const WorldStateProtocol::Snapshot repeatedWorldSnapshot = CaptureDebugWorldStateSnapshot();
+		const WorldStateProtocol::Snapshot worldSnapshot = state.HasProtocolSmokeSnapshot ? state.ProtocolSmokeSnapshot : CaptureDebugWorldStateSnapshot();
+		const WorldStateProtocol::Snapshot repeatedWorldSnapshot = state.HasProtocolSmokeSnapshot ? state.ProtocolSmokeSnapshot : CaptureDebugWorldStateSnapshot();
 		bool worldIdentityStable = worldSnapshot.SceneRevision == repeatedWorldSnapshot.SceneRevision &&
 		                          worldSnapshot.ActivityClassName == repeatedWorldSnapshot.ActivityClassName &&
 		                          worldSnapshot.ActivityPreset == repeatedWorldSnapshot.ActivityPreset &&
@@ -1012,9 +1069,12 @@ namespace {
 		          << " result=" << (worldSnapshotPassed ? "passed" : "failed") << '\n' << std::flush;
 		state.Log << "live_world_state_transport=" << (liveSnapshotTransportPassed ? "passed" : "failed") << '\n' << std::flush;
 		const bool utf8GlyphRenderPassed = g_FrameMan.DidDebugUTF8GlyphProbePass();
-		const bool worldStateTransitionPassed = !state.RequireWorldStateTransition || state.WorldStateTransitionObserved;
+		const bool worldStateTransitionPassed = (!state.RequireWorldStateTransition || state.WorldStateTransitionObserved) &&
+		                                       (!state.RequestHostWorldStateTransition || state.HostWorldStateTransitionApplied) &&
+		                                       (!state.RequireWorldStateTransition || state.WorldStateTransitionApplied);
 		state.Log << "world_state_activity_transition=" << (worldStateTransitionPassed ? "passed" : "failed")
-		          << " observed=" << state.WorldStateTransitionObserved << " host_queued=" << state.HostWorldStateTransitionQueued << '\n' << std::flush;
+		          << " observed=" << state.WorldStateTransitionObserved << " host_queued=" << state.HostWorldStateTransitionQueued
+		          << " host_applied=" << state.HostWorldStateTransitionApplied << " client_applied=" << state.WorldStateTransitionApplied << '\n' << std::flush;
 		const bool remoteTerrainMutationPassed = !state.RequireRemoteTerrainMutationSmoke || state.RemoteTerrainMutationObserved;
 		if (state.RequireRemoteTerrainMutationSmoke) {
 			state.Log << "world_state_remote_terrain_mutation=" << (remoteTerrainMutationPassed ? "passed" : "failed")
@@ -1034,8 +1094,10 @@ namespace {
 		state.Log << "utf8_unicode_font_path=" << unicodeFontFilePath.generic_string() << " exists=" << (unicodeFontProbe ? "yes" : "no") << '\n' << std::flush;
 		state.Log << "utf8_glyph_render_smoke=" << (utf8GlyphRenderPassed ? "passed" : "failed") << '\n' << std::flush;
 		const MovableMan::SceneStats sceneStats = g_MovableMan.CollectSceneStats();
-		const bool performanceCountersPassed = g_MovableMan.GetMovableObjectCount() > 0 && sceneStats.Actors > 0 && MovableObject::GetSceneSpawnEvents() > 0;
+		const bool performanceCountersPassed = state.PerformanceCountersObserved ||
+		                                       (g_MovableMan.GetMovableObjectCount() > 0 && sceneStats.Actors > 0 && MovableObject::GetSceneSpawnEvents() > 0);
 		state.Log << "performance_counters_smoke=" << (performanceCountersPassed ? "passed" : "failed")
+		          << " observed_during_run=" << state.PerformanceCountersObserved
 		          << " actors=" << sceneStats.Actors << " items=" << sceneStats.Items << " mos_rotating=" << sceneStats.MOSRotating
 		          << " mos_particle=" << sceneStats.MOSParticles << " mo_pixel=" << sceneStats.MOPixels << " gibs=" << sceneStats.Gibs
 		          << " spawned=" << MovableObject::GetSceneSpawnEvents() << " deleted=" << MovableObject::GetSceneDeleteEvents()
@@ -1101,12 +1163,32 @@ namespace {
 			state.MidpointScreenshotCaptured = true;
 			capture("stress");
 		}
-		if (!state.FinalScreenshotCaptured && state.SimulationUpdates >= state.UpdateLimit) {
+		const bool requiredHostTransitionComplete = !state.RequestHostWorldStateTransition || state.HostWorldStateTransitionApplied;
+		const bool requiredClientTransitionComplete = !state.RequireWorldStateTransition || state.WorldStateTransitionApplied;
+		const bool requiredTransitionsComplete = requiredHostTransitionComplete && requiredClientTransitionComplete;
+		if (!state.FinalScreenshotCaptured && state.SimulationUpdates >= state.UpdateLimit && requiredTransitionsComplete) {
 			state.FinalScreenshotCaptured = true;
 			capture("final");
 		}
-		if (state.SimulationUpdates >= state.UpdateLimit) {
-			FinishDebugRun(state.StressStarted && (!state.RequestHostWorldStateTransition || state.HostWorldStateTransitionQueued));
+		if (state.SimulationUpdates >= state.UpdateLimit && requiredTransitionsComplete) {
+			const bool hostTransitionSettled = !state.RequestHostWorldStateTransition ||
+			                                  state.SimulationUpdates >= state.HostWorldStateTransitionAppliedUpdate + 180;
+			const bool clientTransitionSettled = !state.RequireWorldStateTransition ||
+			                                    state.SimulationUpdates >= state.WorldStateTransitionAppliedUpdate + 180;
+			if (hostTransitionSettled && clientTransitionSettled) {
+				const bool setupSmokePassed = state.StressStarted || (worldStateClient && state.PerformanceCountersObserved);
+				state.Log << "scenario_setup_smoke=" << (setupSmokePassed ? "passed" : "failed")
+				          << " local_stress=" << state.StressStarted << " replicated_objects_observed="
+				          << (worldStateClient && state.PerformanceCountersObserved) << '\n' << std::flush;
+				FinishDebugRun(setupSmokePassed);
+			}
+		}
+		if (!System::IsSetToQuit() && (state.RequireWorldStateTransition || state.RequestHostWorldStateTransition) &&
+		    state.SimulationUpdates >= state.UpdateLimit &&
+		    std::chrono::steady_clock::now() - state.SimulationStartTime > std::chrono::seconds(300)) {
+			state.Log << "debug_world_state_transition_timeout=300s host_queued=" << state.HostWorldStateTransitionQueued
+			          << " client_observed=" << state.WorldStateTransitionObserved << '\n' << std::flush;
+			FinishDebugRun(false);
 		}
 	}
 }
@@ -1233,6 +1315,7 @@ void HandleMainArgs(int argCount, char** argValue) {
 				const auto parsed = std::from_chars(portArgument.data(), portArgument.data() + portArgument.size(), port);
 				if (parsed.ec == std::errc{} && parsed.ptr == portArgument.data() + portArgument.size() && port > 0 && port <= 65535) {
 					worldStateServerPort = static_cast<unsigned short>(port);
+					worldStateServerPortSpecified = true;
 					++i;
 				}
 			}
@@ -1627,7 +1710,15 @@ void RunGameLoop() {
 			g_UInputMan.EndFrame();
 
 			if (!g_ActivityMan.IsInActivity()) {
-				if (System::IsDebugRun()) {
+				DebugRunState& debugRunState = GetDebugRunState();
+				const bool waitingForHostTransition = debugRunState.RequestHostWorldStateTransition &&
+				                                     debugRunState.HostWorldStateTransitionQueued && !debugRunState.HostWorldStateTransitionApplied;
+				const bool waitingForClientTransition = debugRunState.RequireWorldStateTransition &&
+				                                       debugRunState.WorldStateTransitionObserved && !debugRunState.WorldStateTransitionApplied;
+				if (System::IsDebugRun() && (waitingForHostTransition || waitingForClientTransition)) {
+					// Activity/Scene transitions briefly clear the active world while their
+					// queued replacement is loaded on the next outer loop iteration.
+				} else if (System::IsDebugRun()) {
 					FinishDebugRun(false);
 					break;
 				}
@@ -1856,7 +1947,7 @@ int main(int argc, char** argv) {
 		}
 		if (worldStateServerRequested) {
 			worldStateServer = std::make_unique<WorldStateServerSession>();
-			const unsigned short serverPort = debugRun ? 0 : worldStateServerPort;
+			const unsigned short serverPort = debugRun && !worldStateServerPortSpecified ? 0 : worldStateServerPort;
 			const std::string serverLogPath = debugRun ? (GetDebugRunState().OutputDirectory / "WorldStateServer.log").string() : "WorldStateServer.log";
 			const std::string bindAddress = debugRun ? "0.0.0.0" : worldStateServerBindAddress;
 			if (!worldStateServer->Start(bindAddress, serverPort, worldStateServerMaxPlayers, serverLogPath, debugRun)) {

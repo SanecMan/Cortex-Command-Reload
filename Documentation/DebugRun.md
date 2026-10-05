@@ -10,7 +10,7 @@ The optional number is the target number of simulation updates (60–36,000; def
 
 Output is written to `ScreenShots/DebugRuns/`. Starting another debug run clears only the files owned by this tool in that directory, then replaces its log copies. The main report is `DebugRun.log`; loading and console logs are copied alongside it.
 
-The process exits with code 0 only when the smoke run completes successfully. A failed check, missing activity, interrupted run, or output setup error returns a nonzero exit code, so CI and scripts can detect failures without parsing screenshots.
+The process exits with code 0 only when the smoke run completes successfully. Performance counters are verified during the run and latched, so a later Activity/Scene transition to an initially empty map does not erase evidence collected during the stress phase. Host runs must pass the local stress-spawn check; client runs must observe replicated objects before the transition. A failed check, missing activity, interrupted run, or output setup error returns a nonzero exit code, so CI and scripts can detect failures without parsing screenshots.
 
 Use `-debug-run-preflight-only` to run the UTF-8, file-path and local world-state protocol/transport checks, then exit before SDL, content loading, simulation and rendering. This is useful for automated checks on Windows sessions without an interactive display. It does not count as a gameplay or rendering smoke test and creates no screenshots:
 
@@ -25,7 +25,11 @@ Use `-debug-run-preflight-only` to run the UTF-8, file-path and local world-stat
 & '.\Cortex Command.debug.minimal.exe' -debug-run 900 -debug-overlay -debug-run-output ClientTransition -debug-run-require-world-state-transition -world-state-client 127.0.0.1 18000
 ```
 
-At update 600, the host switches to the built-in `Skirmish Defense` Activity on `Ketanot Hills`. The client run fails unless it receives the new revision and queues that exact Activity/Scene. Check both `ScreenShots/HostTransition/DebugRun.log` and `ScreenShots/ClientTransition/DebugRun.log`; each debug client's transport log is `WorldStateClient.log` in its own output directory. Non-debug clients still write `WorldStateClient.log` in the game directory. Use distinct output names for concurrent runs.
+At the configured update (600 by default), after an external client has connected, the host switches to the built-in `Skirmish Defense` Activity on `Ketanot Hills`. The host and client runs wait for that Activity and Scene to actually become active locally, then continue for 180 simulation updates so the host can broadcast the loaded world and the client can apply it. They fail after 300 seconds if the transition does not complete. The client also fails unless it receives and queues the matching revision. During the brief interval where an Activity restart clears the old world, the automated run keeps the game loop alive. For a reliable two-process run, start the host first and wait for `world_state_host_session_smoke=passed` and the initial screenshot entry, then start the client; this keeps the client's connection out of the host's four-peer slot-assignment self-test. Check both `ScreenShots/HostTransition/DebugRun.log` and `ScreenShots/ClientTransition/DebugRun.log`; each debug client's transport log is `WorldStateClient.log` in its own output directory. Non-debug clients still write `WorldStateClient.log` in the game directory. Use distinct output names for concurrent runs.
+
+When `-world-state-server` is given an explicit port, debug mode now binds that port too; without one it still requests an ephemeral port to avoid collisions.
+
+The client transition check treats the requested update count as a minimum. If the host simulation is slower, the client keeps polling and rendering until it observes the target Activity/Scene revision, with a 300-second timeout after gameplay starts. The final screenshot is captured after that transition is observed.
 
 To verify a real host-side terrain edit reaches a separate client, run a longer host session and read the ephemeral port from its `WorldStateServer.log`:
 

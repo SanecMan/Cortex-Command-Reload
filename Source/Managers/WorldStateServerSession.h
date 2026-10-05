@@ -24,6 +24,8 @@ namespace RTE {
 		void Stop();
 		void Update(std::uint32_t simulationTick);
 		void EnableDebugTerrainMutationSmoke();
+		void EnableDebugEmptyWorldSnapshotSmoke() { m_DebugEmptyWorldSnapshotSmokeEnabled = true; }
+		void DisableDebugEmptyWorldSnapshotSmoke() { m_DebugEmptyWorldSnapshotSmokeEnabled = false; }
 		bool DidDebugTerrainMutationSmokePass() const { return m_DebugTerrainMutationSmokePassed && m_DebugTerrainMutationPatchSent; }
 		bool IsStarted() const { return m_Transport.IsStarted(); }
 		unsigned short GetBoundPort() const { return m_Transport.GetBoundPort(); }
@@ -76,6 +78,8 @@ namespace RTE {
 		bool m_DebugTerrainMutationBaselineSent = false;
 		bool m_DebugTerrainMutationSmokePassed = false;
 		bool m_DebugTerrainMutationPatchSent = false;
+		bool m_LoggedWaitingForWorldState = false;
+		bool m_DebugEmptyWorldSnapshotSmokeEnabled = false;
 		int m_DebugTerrainMutationPixelX = 0;
 		int m_DebugTerrainMutationPixelY = 0;
 	};
