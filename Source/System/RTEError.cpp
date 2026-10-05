@@ -254,7 +254,7 @@ bool RTEError::ShowAbortMessageBox(const std::string& message) {
 	// Don't even show the restart button in debug builds.
 #ifdef RELEASE_BUILD
 	// Getting a junk path from argv[0] is, or should be, impossible but check anyway.
-	if (std::filesystem::exists(System::GetThisExePathAndName())) {
+	if (std::filesystem::exists(UTF8::PathFromString(System::GetThisExePathAndName()))) {
 		abortMessageBoxButtons.emplace_back(0, AbortMessageButton::ButtonRestart, "Restart Game");
 	}
 #endif

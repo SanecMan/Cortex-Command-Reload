@@ -230,7 +230,7 @@ void SaveLoadMenuGUI::CreateSave() {
 void SaveLoadMenuGUI::DeleteSave() {
 	std::string saveFilePath = g_PresetMan.GetFullModulePath(c_UserScriptedSavesModuleName) + "/" + m_SaveGameName->GetText() + ".ccsave";
 
-	std::filesystem::remove(saveFilePath);
+	std::filesystem::remove(UTF8::PathFromString(saveFilePath));
 	g_GUISound.ConfirmSound()->Play();
 
 	m_SaveGamesFetched = false;

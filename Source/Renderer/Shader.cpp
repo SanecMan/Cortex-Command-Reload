@@ -7,6 +7,7 @@
 #include "PresetMan.h"
 #include "ConsoleMan.h"
 #include "System.h"
+#include "System/UTF8.h"
 #include "RTEError.h"
 
 #include "raylib/rlgl.h"
@@ -146,7 +147,11 @@ bool Shader::CompileShader(GLuint shaderID, const std::string& filename, std::st
 		return false;
 	}
 
-	std::ifstream file(filename);
+	std::ifstream file(UTF8::PathFromString(filename), std::ios::binary);
+	if (!file) {
+		error += "Unable to open shader file: " + filename;
+		return false;
+	}
 	std::ostringstream dataStream;
 
 	dataStream << file.rdbuf();

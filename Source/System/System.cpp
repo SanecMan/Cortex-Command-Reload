@@ -116,7 +116,7 @@ void System::Initialize(const char* thisExePathAndName) {
 
 #ifdef _WIN32
 	// Consider Settings.ini not existing as first time boot, then create quick launch files if they are missing.
-	if (!std::filesystem::exists(s_WorkingDirectory + s_UserdataDirectory + "Settings.ini")) {
+	if (!std::filesystem::exists(UTF8::PathFromString(s_WorkingDirectory + s_UserdataDirectory + "Settings.ini"))) {
 		std::array<std::pair<const std::string, const std::string>, 7> quickLaunchFiles = {{
 		    {"Launch Actor Editor.bat", R"(start "" "Cortex Command.exe" -editor "ActorEditor")"},
 		    {"Launch Area Editor.bat", R"(start "" "Cortex Command.exe" -editor "AreaEditor")"},
@@ -130,7 +130,7 @@ void System::Initialize(const char* thisExePathAndName) {
 #endif
 		}};
 		for (const auto& [fileName, fileContent]: quickLaunchFiles) {
-			if (std::filesystem::path filePath = s_WorkingDirectory + fileName; !std::filesystem::exists(filePath)) {
+			if (std::filesystem::path filePath = UTF8::PathFromString(s_WorkingDirectory + fileName); !std::filesystem::exists(filePath)) {
 				std::ofstream fileStream(filePath);
 				fileStream << fileContent;
 				fileStream.close();

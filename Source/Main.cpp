@@ -1893,7 +1893,7 @@ int main(int argc, char** argv) {
 	SDL_SetHint(SDL_HINT_MOUSE_AUTO_CAPTURE, "0");
 	SDL_SetHint("SDL_ALLOW_TOPMOST", "0");
 	SDL_HideCursor();
-	if (!debugRun && std::filesystem::exists("Base.rte/gamecontrollerdb.txt")) {
+	if (!debugRun && std::filesystem::exists(UTF8::PathFromString("Base.rte/gamecontrollerdb.txt"))) {
 		SDL_AddGamepadMappingsFromFile("Base.rte/gamecontrollerdb.txt");
 	}
 
@@ -2080,8 +2080,9 @@ int main(int argc, char** argv) {
 			g_ConsoleMan.SetEnabled(true);
 		} else {
 			// Delete an existing log if there are no warnings so there's less junk in the root folder.
-			if (std::filesystem::exists(System::GetWorkingDirectory() + "LogLoadingWarning.txt")) {
-				std::remove("LogLoadingWarning.txt");
+			const std::filesystem::path loadingWarningPath = UTF8::PathFromString(System::GetWorkingDirectory()) / "LogLoadingWarning.txt";
+			if (std::filesystem::exists(loadingWarningPath)) {
+				std::filesystem::remove(loadingWarningPath);
 			}
 		}
 
