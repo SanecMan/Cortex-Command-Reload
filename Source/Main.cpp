@@ -110,6 +110,7 @@ using namespace RTE;
 
 namespace {
 	bool worldStateServerRequested = false;
+	bool worldStateServerConfigurationFailed = false;
 	unsigned short worldStateServerPort = 8000;
 	bool worldStateServerPortSpecified = false;
 	unsigned short worldStateServerMaxPlayers = 8;
@@ -2120,12 +2121,18 @@ int main(int argc, char** argv) {
 		std::string activityConfigurationError;
 		if (!ConfigureWorldStateHostActivity(activityConfigurationError)) {
 			std::cerr << "[SERVER] " << activityConfigurationError << '\n';
-			DestroyManagers();
-			allegro_exit();
-			SDL_Quit();
-			return EXIT_FAILURE;
+			if (debugRun) {
+				GetDebugRunState().Log << "stage=server_activity_config_failed reason=" << activityConfigurationError << '\n' << std::flush;
+			}
+			// Keep teardown on the normal main() path. Early destruction here left
+			// static/runtime state alive and triggered abort() during CRT shutdown.
+			worldStateServerConfigurationFailed = true;
+			worldStateServerRequested = false;
+			g_ActivityMan.SetStartTutorialActivity();
+			g_ActivityMan.SetRestartActivity();
+			System::SetQuit(true);
 		}
-		if (debugRun) {
+		if (debugRun && !worldStateServerConfigurationFailed) {
 			GetDebugRunState().Log << "stage=server_activity_config_complete\n" << std::flush;
 		}
 	}
@@ -2213,7 +2220,10 @@ int main(int argc, char** argv) {
 	allegro_exit();
 	SDL_Quit();
 
-	return debugRun && !GetDebugRunState().Passed ? EXIT_FAILURE : EXIT_SUCCESS;
+	if (worldStateServerConfigurationFailed && debugRun) {
+		GetDebugRunState().Log << "result=failed reason=invalid_world_state_activity_configuration\n" << std::flush;
+	}
+	return (worldStateServerConfigurationFailed || (debugRun && !GetDebugRunState().Passed)) ? EXIT_FAILURE : EXIT_SUCCESS;
 }
 
 #ifdef _WIN32
