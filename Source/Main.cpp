@@ -138,6 +138,10 @@ namespace {
 			return false;
 		}
 
+		if (worldStateServer) {
+			worldStateServer->ConfigureActivityPlayers(*activity, true);
+		}
+
 		const int sceneResult = snapshot.SceneModuleName.empty() ? g_SceneMan.SetSceneToLoad(snapshot.ScenePreset)
 		                                                       : g_SceneMan.SetSceneToLoad(snapshot.ScenePreset, snapshot.SceneModuleName);
 		if (sceneResult < 0) {
@@ -172,6 +176,7 @@ namespace {
 		bool WorldStateTransitionApplied = false;
 		bool HostWorldStateTransitionQueued = false;
 		bool HostWorldStateTransitionApplied = false;
+		bool HostActivityRosterPassed = true;
 		bool PostTransitionStressBatchSpawned = false;
 		int WorldStateTransitionObservedUpdate = 0;
 		int WorldStateTransitionAppliedUpdate = 0;
@@ -667,6 +672,16 @@ namespace {
 		    !state.HostWorldStateTransitionApplied) {
 			state.HostWorldStateTransitionApplied = true;
 			state.HostWorldStateTransitionAppliedUpdate = state.SimulationUpdates;
+			const std::vector<int> assignedPlayerSlots = worldStateServer ? worldStateServer->GetAssignedPlayerSlots() : std::vector<int>{};
+			state.HostActivityRosterPassed = !assignedPlayerSlots.empty();
+			for (const int playerSlot : assignedPlayerSlots) {
+				if (playerSlot < Players::PlayerOne || playerSlot >= Players::MaxPlayerCount || !currentActivity->PlayerActive(playerSlot) ||
+				    !currentActivity->PlayerHuman(playerSlot)) {
+					state.HostActivityRosterPassed = false;
+				}
+			}
+			state.Log << "world_state_host_player_roster=" << (state.HostActivityRosterPassed ? "passed" : "failed")
+			          << " assigned_slots=" << assignedPlayerSlots.size() << " human_players=" << static_cast<int>(currentActivity->GetHumanCount()) << '\n' << std::flush;
 			state.Log << "debug_host_activity_transition=applied at_update=" << state.SimulationUpdates << '\n' << std::flush;
 		}
 		if (targetWorldLoaded && state.RequireWorldStateTransition && state.WorldStateTransitionObserved && !state.WorldStateTransitionApplied) {
@@ -1071,6 +1086,7 @@ namespace {
 		const bool utf8GlyphRenderPassed = g_FrameMan.DidDebugUTF8GlyphProbePass();
 		const bool worldStateTransitionPassed = (!state.RequireWorldStateTransition || state.WorldStateTransitionObserved) &&
 		                                       (!state.RequestHostWorldStateTransition || state.HostWorldStateTransitionApplied) &&
+		                                       (!state.RequestHostWorldStateTransition || state.HostActivityRosterPassed) &&
 		                                       (!state.RequireWorldStateTransition || state.WorldStateTransitionApplied);
 		state.Log << "world_state_activity_transition=" << (worldStateTransitionPassed ? "passed" : "failed")
 		          << " observed=" << state.WorldStateTransitionObserved << " host_queued=" << state.HostWorldStateTransitionQueued

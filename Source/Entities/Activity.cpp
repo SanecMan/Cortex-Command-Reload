@@ -417,15 +417,15 @@ int Activity::AddPlayer(int playerToAdd, bool isHuman, int team, float funds, co
 		m_TeamFundsShare[playerToAdd] = 1.0F;
 		m_TeamCount++;
 	} else {
-		float totalFunds = m_TeamFunds[team] + funds;
-		float newRatio = 1.0F + (funds / totalFunds);
+		const float totalFunds = m_TeamFunds[team] + funds;
+		const float newRatio = totalFunds > 0.0F ? 1.0F + (funds / totalFunds) : 1.0F;
 
 		for (int teamPlayer = Players::PlayerOne; teamPlayer < Players::MaxPlayerCount; ++teamPlayer) {
 			if (m_IsActive[teamPlayer] && m_Team[teamPlayer] == team) {
 				m_TeamFundsShare[teamPlayer] /= newRatio;
 			}
 		}
-		m_TeamFundsShare[playerToAdd] = funds / totalFunds;
+		m_TeamFundsShare[playerToAdd] = totalFunds > 0.0F ? funds / totalFunds : 0.0F;
 	}
 
 	m_TeamActive[team] = true;

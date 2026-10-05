@@ -2,7 +2,9 @@
 
 #include "PerformanceMan.h"
 #include "MessageIdentifiers.h"
+#include "Activity.h"
 #include "ActivityMan.h"
+#include "GameActivity.h"
 #include "NetworkMessages.h"
 #include "SceneMan.h"
 #include "SLTerrain.h"
@@ -138,6 +140,62 @@ void WorldStateServerSession::EnableDebugTerrainMutationSmoke() {
 	m_DebugTerrainMutationSmokeEnabled = true;
 }
 
+std::vector<int> WorldStateServerSession::GetAssignedPlayerSlots() const {
+	std::vector<int> playerSlots;
+	playerSlots.reserve(m_PlayerSlotByClient.size());
+	for (const auto& clientPlayer : m_PlayerSlotByClient) {
+		playerSlots.push_back(clientPlayer.second);
+	}
+	std::sort(playerSlots.begin(), playerSlots.end());
+	return playerSlots;
+}
+
+std::size_t WorldStateServerSession::ConfigureActivityPlayers(Activity& activity, bool beforeStart) const {
+	std::size_t configuredPlayers = 0;
+	auto* gameActivity = dynamic_cast<GameActivity*>(&activity);
+	for (const int playerSlot : GetAssignedPlayerSlots()) {
+		if (playerSlot < Players::PlayerTwo || playerSlot >= Players::MaxPlayerCount ||
+		    (activity.PlayerActive(playerSlot) && activity.PlayerHuman(playerSlot))) {
+			continue;
+		}
+		if (activity.GetHumanCount() >= activity.GetMaxPlayerSupport()) {
+			continue;
+		}
+
+		int playerTeam = activity.GetTeamOfPlayer(playerSlot);
+		if (playerTeam < Activity::Teams::TeamOne || playerTeam >= Activity::Teams::MaxTeamCount) {
+			playerTeam = Activity::Teams::TeamOne;
+		}
+		if (!activity.PlayerActive(playerSlot) && activity.TeamActive(playerTeam)) {
+			for (int candidateTeam = Activity::Teams::TeamOne; candidateTeam < Activity::Teams::MaxTeamCount; ++candidateTeam) {
+				if (!activity.TeamActive(candidateTeam)) {
+					playerTeam = candidateTeam;
+					break;
+				}
+			}
+		}
+
+		if (gameActivity && gameActivity->TeamIsCPU(playerTeam)) {
+			gameActivity->SetTeamIsCPU(playerTeam, false);
+		}
+		activity.AddPlayer(playerSlot, true, playerTeam, 0.0F);
+		++configuredPlayers;
+	}
+
+	if (configuredPlayers > 0 || beforeStart) {
+		activity.SetupPlayers();
+	}
+	if (beforeStart && gameActivity && activity.GetTeamCount() < activity.GetMinTeamsRequired()) {
+		for (int team = Activity::Teams::TeamOne; team < Activity::Teams::MaxTeamCount; ++team) {
+			if (!activity.TeamActive(team)) {
+				gameActivity->SetCPUTeam(team);
+				break;
+			}
+		}
+	}
+	return configuredPlayers;
+}
+
 void WorldStateServerSession::Update(std::uint32_t simulationTick) {
 	if (!m_Transport.IsStarted()) {
 		return;
@@ -176,6 +234,12 @@ void WorldStateServerSession::Update(std::uint32_t simulationTick) {
 			assignment.PlayerSlot = assignedPlayer == Players::NoPlayer ? -1 : static_cast<std::int8_t>(assignedPlayer);
 			if (!m_Transport.SendClientAssignment(packet.Sender, assignment, simulationTick)) {
 				Log("ERROR: could not send client player-slot assignment to " + clientAddress);
+			}
+			if (assignedPlayer != Players::NoPlayer && g_ActivityMan.IsInActivity() && g_ActivityMan.GetActivity()) {
+				const std::size_t configuredPlayers = ConfigureActivityPlayers(*g_ActivityMan.GetActivity(), false);
+				if (configuredPlayers > 0) {
+					Log("INFO: added " + std::to_string(configuredPlayers) + " connected client(s) to the running Activity");
+				}
 			}
 			Log("INFO: client connected from " + clientAddress + " (" + std::to_string(m_ConnectedClients) + " connected, input slot " +
 			    (assignedPlayer == Players::NoPlayer ? std::string("none") : std::to_string(assignedPlayer)) + ")");
@@ -219,6 +283,13 @@ void WorldStateServerSession::Update(std::uint32_t simulationTick) {
 			}
 			m_PreviousResetInputByClient[clientAddress] = command.ResetActivityVote;
 			m_PreviousRestartInputByClient[clientAddress] = command.RestartActivityVote;
+			if (!m_DebugEmptyWorldSnapshotSmokeEnabled) {
+				const Activity* activity = g_ActivityMan.GetActivity();
+				if (!activity || !activity->PlayerActive(playerSlot->second) || !activity->PlayerHuman(playerSlot->second)) {
+					Log("WARNING: rejected gameplay input from " + clientAddress + " because its player slot is not active in the current Activity");
+					continue;
+				}
+			}
 			++m_InputCommandCount;
 			constexpr float c_AnalogScale = 1.0F / 32767.0F;
 			const Vector mouseMovement(static_cast<float>(command.MouseDeltaX), static_cast<float>(command.MouseDeltaY));
@@ -230,6 +301,12 @@ void WorldStateServerSession::Update(std::uint32_t simulationTick) {
 				Log("INFO: applied " + std::to_string(m_InputCommandCount) + " client input commands to player slot " +
 				    std::to_string(playerSlot->second) + "; latest held mask=" + std::to_string(command.HeldElements));
 			}
+		}
+	}
+	if (m_ConnectedClients > 0 && g_ActivityMan.IsInActivity() && g_ActivityMan.GetActivity()) {
+		const std::size_t configuredPlayers = ConfigureActivityPlayers(*g_ActivityMan.GetActivity(), false);
+		if (configuredPlayers > 0) {
+			Log("INFO: added " + std::to_string(configuredPlayers) + " connected client(s) to the running Activity");
 		}
 	}
 	ProcessActivityVotes();

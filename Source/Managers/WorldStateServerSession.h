@@ -16,6 +16,8 @@
 
 namespace RTE {
 
+	class Activity;
+
 	/// Optional in-process authoritative snapshot host. It shares the normal simulation;
 	/// it is not a headless server.
 	class WorldStateServerSession {
@@ -30,6 +32,8 @@ namespace RTE {
 		bool IsStarted() const { return m_Transport.IsStarted(); }
 		unsigned short GetBoundPort() const { return m_Transport.GetBoundPort(); }
 		unsigned short GetConnectedClientCount() const { return m_ConnectedClients; }
+		std::vector<int> GetAssignedPlayerSlots() const;
+		std::size_t ConfigureActivityPlayers(Activity& activity, bool beforeStart) const;
 		std::uint32_t GetSnapshotBroadcastCount() const { return m_SnapshotBroadcastCount; }
 		std::uint32_t GetInputCommandCount() const { return m_InputCommandCount; }
 

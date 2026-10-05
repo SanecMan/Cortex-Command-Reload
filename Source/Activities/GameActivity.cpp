@@ -307,11 +307,7 @@ float GameActivity::GetCrabToHumanSpawnRatio(int moduleid) {
 
 void GameActivity::SetCPUTeam(int team) {
 	if (team >= Teams::TeamOne && team < Teams::MaxTeamCount) {
-		// Set the legacy var
-		m_CPUTeam = team;
-
-		m_TeamActive[team] = true;
-		m_TeamIsCPU[team] = true;
+		SetTeamIsCPU(team, true);
 	}
 
 	/* whaaaa?
@@ -319,6 +315,19 @@ void GameActivity::SetCPUTeam(int team) {
 	    for (int player = Players::PlayerOne; player < Players::MaxPlayerCount; ++player)
 	        m_IsHuman[m_Team[player]] = m_IsActive[player] && m_Team[player] != team;
 	*/
+}
+
+void GameActivity::SetTeamIsCPU(int team, bool isCPU) {
+	if (team < Teams::TeamOne || team >= Teams::MaxTeamCount) {
+		return;
+	}
+	m_TeamIsCPU[team] = isCPU;
+	if (isCPU) {
+		m_CPUTeam = team;
+		m_TeamActive[team] = true;
+	} else if (m_CPUTeam == team) {
+		m_CPUTeam = Activity::NoTeam;
+	}
 }
 
 bool GameActivity::IsBuyGUIVisible(int which) const {
