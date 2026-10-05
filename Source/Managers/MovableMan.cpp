@@ -1568,9 +1568,13 @@ void MovableMan::Update() {
 			for (MovableObject* particle: m_Particles) {
 				particle->Update();
 
-				g_PerformanceMan.StartPerformanceMeasurement(PerformanceMan::ScriptsUpdate);
-				particle->UpdateScripts();
-				g_PerformanceMan.StopPerformanceMeasurement(PerformanceMan::ScriptsUpdate);
+				if (particle->HasAnyScripts()) {
+					g_PerformanceMan.StartPerformanceMeasurement(PerformanceMan::ScriptsUpdate);
+					particle->UpdateScripts();
+					g_PerformanceMan.StopPerformanceMeasurement(PerformanceMan::ScriptsUpdate);
+				} else {
+					particle->UpdateScripts();
+				}
 
 				particle->ApplyImpulses();
 				particle->RestDetection();

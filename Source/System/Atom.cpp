@@ -642,6 +642,21 @@ int Atom::Travel(float travelTime, bool autoTravel) {
 	bool& didWrap = m_OwnerMO->m_DidWrap;
 	m_LastHit.Reset();
 
+	// Cosmetic and other explicitly non-colliding objects do not need a pixel-by-pixel
+	// Bresenham sweep. Preserve the same linear movement and scene wrapping while
+	// avoiding terrain and MO lookups for every pixel along the trajectory.
+	if (autoTravel && m_OwnerMO->IgnoreTerrain() && !m_OwnerMO->HitsMOs() && m_TrailLength == 0) {
+		didWrap = false;
+		m_MOIDHit = g_NoMOID;
+		m_TerrainMatHit = g_MaterialAir;
+		m_TerrainHitsDisabled = false;
+		m_MOHitsDisabled = false;
+		m_OwnerMO->m_Pos += velocity * travelTime * c_PPM;
+		didWrap = g_SceneMan.WrapPosition(m_OwnerMO->m_Pos) || didWrap;
+		ClearMOIDIgnoreList();
+		return 0;
+	}
+
 	BITMAP* trailBitmap = 0;
 
 	int hitCount = 0;
