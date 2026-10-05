@@ -9,6 +9,7 @@
 #include "SceneMan.h"
 #include "SLTerrain.h"
 #include "UInputMan.h"
+#include "System/UTF8.h"
 #include "System/WorldStateTerrainTest.h"
 
 #include <algorithm>
@@ -18,7 +19,7 @@ using namespace RTE;
 
 bool WorldStateServerSession::Start(const std::string& bindAddress, unsigned short port, unsigned short maxPlayers, const std::string& logPath, bool truncateLog) {
 	Stop();
-	m_Log.open(logPath, std::ios::out | (truncateLog ? std::ios::trunc : std::ios::app));
+	m_Log.open(UTF8::PathFromString(logPath), std::ios::out | (truncateLog ? std::ios::trunc : std::ios::app));
 	if (!m_Log || !m_Transport.StartServer(port, maxPlayers, bindAddress.c_str())) {
 		Log("ERROR: could not bind world-state server socket");
 		Stop();
