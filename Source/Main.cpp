@@ -211,6 +211,7 @@ namespace {
 		bool PerformanceCountersObserved = false;
 		bool HasProtocolSmokeSnapshot = false;
 		bool Passed = false;
+		bool LuaFilesystemProbePassed = false;
 		bool HostSessionTestPassed = true;
 		bool OverlayCaptureEnabled = false;
 		bool PreflightOnly = false;
@@ -1190,6 +1191,7 @@ namespace {
 		          << ",screen_fx:" << g_SettingsMan.GetScreenEffectsLevel() << ",gore:" << g_SettingsMan.GetGoreDensityPercent()
 		          << ",vsync:" << g_WindowMan.GetVSyncEnabled() << '\n' << std::flush;
 		success = success && performanceCountersPassed;
+		success = success && state.LuaFilesystemProbePassed;
 		success = success && utf8GlyphRenderPassed && worldStateTransitionPassed && remoteTerrainMutationPassed && hostTerrainMutationPassed && state.HostSessionTestPassed && worldIdentityStable && replicaSmokePassed && transientPixelReplicaPassed && terrainPatchApplyPassed &&
 		          networkInputApplicationPassed && worldSnapshotPassed && snapshotCompressionPassed && liveSnapshotTransportPassed;
 		const double elapsedSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - state.StartTime).count();
@@ -2035,6 +2037,56 @@ int main(int argc, char** argv) {
 		const std::string loadTargetSource = "return { text = \"Lua-файл загружен\" }";
 		const std::string packageTargetSource = "return { text = \"Lua-пакет загружен\" }";
 		const bool probeTargetsWritten = writeLuaProbeFile(probeTargetPath, loadTargetSource) && writeLuaProbeFile(probePackagePath, packageTargetSource);
+		bool luaFilesystemPathPassed = false;
+		if (probeTargetsWritten) {
+			const std::string scratchName = "проверка-файловой-системы.txt";
+			const std::string renamedScratchName = "переименованный-файл.txt";
+			const std::string subdirectoryName = "проверка-подкаталога";
+			const std::string scratchRelativePath = probeDirectoryName + "/" + scratchName;
+			const std::string renamedScratchRelativePath = probeDirectoryName + "/" + renamedScratchName;
+			const std::string subdirectoryRelativePath = probeDirectoryName + "/" + subdirectoryName;
+			const std::string scratchContents = "utf8-path-probe-Привет\n";
+			const bool scratchWritten = writeLuaProbeFile(probeDirectory / std::filesystem::u8path(scratchName), scratchContents);
+			const bool subdirectoryCreated = g_LuaMan.DirectoryCreate(subdirectoryRelativePath, false);
+			bool listedUnicodeFile = false;
+			if (const std::vector<std::string>* files = g_LuaMan.FileList(System::GetModDirectory() + probeDirectoryName)) {
+				listedUnicodeFile = std::find(files->begin(), files->end(), scratchName) != files->end();
+				delete files;
+			}
+			bool listedUnicodeDirectory = false;
+			if (const std::vector<std::string>* directories = g_LuaMan.DirectoryList(System::GetModDirectory() + probeDirectoryName)) {
+				listedUnicodeDirectory = std::find(directories->begin(), directories->end(), subdirectoryName) != directories->end();
+				delete directories;
+			}
+			const bool unicodeExistsChecksPassed = g_LuaMan.FileExists(scratchRelativePath) && g_LuaMan.DirectoryExists(subdirectoryRelativePath);
+			bool unicodeFileReadPassed = false;
+			const int fileIndex = g_LuaMan.FileOpen(scratchRelativePath, "r");
+			if (fileIndex >= 0) {
+				unicodeFileReadPassed = g_LuaMan.FileReadLine(fileIndex) == scratchContents;
+				g_LuaMan.FileClose(fileIndex);
+			}
+			const bool renamed = scratchWritten && g_LuaMan.FileRename(scratchRelativePath, renamedScratchRelativePath);
+			const bool renameChecksPassed = renamed && !g_LuaMan.FileExists(scratchRelativePath) && g_LuaMan.FileExists(renamedScratchRelativePath);
+			const bool removed = g_LuaMan.FileRemove(renamed ? renamedScratchRelativePath : scratchRelativePath);
+			const bool subdirectoryRemoved = subdirectoryCreated && g_LuaMan.DirectoryRemove(subdirectoryRelativePath, false);
+			luaFilesystemPathPassed = scratchWritten && subdirectoryCreated && listedUnicodeFile && listedUnicodeDirectory && unicodeExistsChecksPassed &&
+			                          unicodeFileReadPassed && renameChecksPassed && removed && subdirectoryRemoved &&
+			                          !g_LuaMan.FileExists(scratchRelativePath) && !g_LuaMan.FileExists(renamedScratchRelativePath) &&
+			                          !g_LuaMan.DirectoryExists(subdirectoryRelativePath);
+			std::error_code scratchCleanupError;
+			std::filesystem::remove(probeDirectory / std::filesystem::u8path(scratchName), scratchCleanupError);
+			if (renamed) {
+				scratchCleanupError.clear();
+				std::filesystem::remove(probeDirectory / std::filesystem::u8path(renamedScratchName), scratchCleanupError);
+			}
+			if (subdirectoryCreated) {
+				scratchCleanupError.clear();
+				std::filesystem::remove(probeDirectory / std::filesystem::u8path(subdirectoryName), scratchCleanupError);
+			}
+			luaFilesystemPathPassed = luaFilesystemPathPassed && !scratchCleanupError;
+		}
+		state.LuaFilesystemProbePassed = luaFilesystemPathPassed;
+		state.Log << "lua_filesystem_utf8_path_probe=" << (luaFilesystemPathPassed ? "passed" : "failed") << '\n' << std::flush;
 		const std::string loadfileRunner = "local chunk, err = loadfile(\"" + probeTargetModulePath + "\"); "
 		                                   "assert(chunk, err); local value = chunk(); assert(value.text == \"Lua-файл загружен\"); "
 		                                   "error(\"UTF8_LUA_LOADFILE_PROBE: Привет\")";

@@ -1076,8 +1076,9 @@ const std::vector<std::string>* LuaMan::DirectoryList(const std::string& path) {
 #ifndef _WIN32
 		fullPath = GetCaseInsensitiveFullPath(fullPath);
 #endif
-		if (std::filesystem::exists(fullPath)) {
-			for (const auto& entry: std::filesystem::directory_iterator(fullPath)) {
+		const std::filesystem::path nativeFullPath = UTF8::PathFromString(fullPath);
+		if (std::filesystem::exists(nativeFullPath)) {
+			for (const auto& entry: std::filesystem::directory_iterator(nativeFullPath)) {
 				if (entry.is_directory()) {
 					directoryPaths->emplace_back(UTF8::PathToString(entry.path().filename()));
 				}
@@ -1095,8 +1096,9 @@ const std::vector<std::string>* LuaMan::FileList(const std::string& path) {
 #ifndef _WIN32
 		fullPath = GetCaseInsensitiveFullPath(fullPath);
 #endif
-		if (std::filesystem::exists(fullPath)) {
-			for (const auto& entry: std::filesystem::directory_iterator(fullPath)) {
+		const std::filesystem::path nativeFullPath = UTF8::PathFromString(fullPath);
+		if (std::filesystem::exists(nativeFullPath)) {
+			for (const auto& entry: std::filesystem::directory_iterator(nativeFullPath)) {
 				if (entry.is_regular_file()) {
 					filePaths->emplace_back(UTF8::PathToString(entry.path().filename()));
 				}
@@ -1112,7 +1114,7 @@ bool LuaMan::FileExists(const std::string& path) {
 #ifndef _WIN32
 		fullPath = GetCaseInsensitiveFullPath(fullPath);
 #endif
-		return std::filesystem::is_regular_file(fullPath);
+		return std::filesystem::is_regular_file(UTF8::PathFromString(fullPath));
 	}
 	return false;
 }
@@ -1123,7 +1125,7 @@ bool LuaMan::DirectoryExists(const std::string& path) {
 #ifndef _WIN32
 		fullPath = GetCaseInsensitiveFullPath(fullPath);
 #endif
-		return std::filesystem::is_directory(fullPath);
+		return std::filesystem::is_directory(UTF8::PathFromString(fullPath));
 	}
 	return false;
 }
@@ -1223,8 +1225,9 @@ bool LuaMan::FileRemove(const std::string& path) {
 #ifndef _WIN32
 		fullPath = GetCaseInsensitiveFullPath(fullPath);
 #endif
-		if (std::filesystem::is_regular_file(fullPath)) {
-			return std::filesystem::remove(fullPath);
+		const std::filesystem::path nativeFullPath = UTF8::PathFromString(fullPath);
+		if (std::filesystem::is_regular_file(nativeFullPath)) {
+			return std::filesystem::remove(nativeFullPath);
 		}
 	}
 	g_ConsoleMan.PrintString("ERROR: Failed to remove file " + path);
@@ -1238,10 +1241,11 @@ bool LuaMan::DirectoryCreate(const std::string& path, bool recursive) {
 		fullPath = GetCaseInsensitiveFullPath(fullPath);
 #endif
 		try {
+			const std::filesystem::path nativeFullPath = UTF8::PathFromString(fullPath);
 			if (recursive) {
-				return std::filesystem::create_directories(fullPath);
+				return std::filesystem::create_directories(nativeFullPath);
 			} else {
-				return std::filesystem::create_directory(fullPath);
+				return std::filesystem::create_directory(nativeFullPath);
 			}
 		} catch (const std::filesystem::filesystem_error& e) {}
 	}
@@ -1255,12 +1259,13 @@ bool LuaMan::DirectoryRemove(const std::string& path, bool recursive) {
 #ifndef _WIN32
 		fullPath = GetCaseInsensitiveFullPath(fullPath);
 #endif
-		if (std::filesystem::is_directory(fullPath)) {
+		const std::filesystem::path nativeFullPath = UTF8::PathFromString(fullPath);
+		if (std::filesystem::is_directory(nativeFullPath)) {
 			try {
 				if (recursive) {
-					return std::filesystem::remove_all(fullPath) > 0;
+					return std::filesystem::remove_all(nativeFullPath) > 0;
 				} else {
-					return std::filesystem::remove(fullPath);
+					return std::filesystem::remove(nativeFullPath);
 				}
 			} catch (const std::filesystem::filesystem_error& e) {}
 		}
@@ -1279,9 +1284,11 @@ bool LuaMan::FileRename(const std::string& oldPath, const std::string& newPath) 
 #endif
 		// Ensures parity between Linux which can overwrite an empty directory, while Windows can't
 		// Ensures parity between Linux which can't rename a directory to a newPath that is a file in order to overwrite it, while Windows can
-		if (std::filesystem::is_regular_file(fullOldPath) && !std::filesystem::exists(fullNewPath)) {
+		const std::filesystem::path nativeOldPath = UTF8::PathFromString(fullOldPath);
+		const std::filesystem::path nativeNewPath = UTF8::PathFromString(fullNewPath);
+		if (std::filesystem::is_regular_file(nativeOldPath) && !std::filesystem::exists(nativeNewPath)) {
 			try {
-				std::filesystem::rename(fullOldPath, fullNewPath);
+				std::filesystem::rename(nativeOldPath, nativeNewPath);
 				return true;
 			} catch (const std::filesystem::filesystem_error& e) {}
 		}
@@ -1300,9 +1307,11 @@ bool LuaMan::DirectoryRename(const std::string& oldPath, const std::string& newP
 #endif
 		// Ensures parity between Linux which can overwrite an empty directory, while Windows can't
 		// Ensures parity between Linux which can't rename a directory to a newPath that is a file in order to overwrite it, while Windows can
-		if (std::filesystem::is_directory(fullOldPath) && !std::filesystem::exists(fullNewPath)) {
+		const std::filesystem::path nativeOldPath = UTF8::PathFromString(fullOldPath);
+		const std::filesystem::path nativeNewPath = UTF8::PathFromString(fullNewPath);
+		if (std::filesystem::is_directory(nativeOldPath) && !std::filesystem::exists(nativeNewPath)) {
 			try {
-				std::filesystem::rename(fullOldPath, fullNewPath);
+				std::filesystem::rename(nativeOldPath, nativeNewPath);
 				return true;
 			} catch (const std::filesystem::filesystem_error& e) {}
 		}
