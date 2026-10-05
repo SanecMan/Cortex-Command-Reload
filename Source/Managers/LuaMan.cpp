@@ -9,6 +9,9 @@
 #include "tracy/Tracy.hpp"
 #include "tracy/TracyLua.hpp"
 
+#include <fstream>
+#include <iterator>
+
 using namespace RTE;
 
 const std::unordered_set<std::string> LuaMan::c_FileAccessModes = {"r", "r+", "w", "w+", "a", "a+", "rt", "wt"};
@@ -755,10 +758,44 @@ int LuaStateWrapper::RunScriptFile(const std::string& filePath, bool consoleErro
 	lua_pushcfunction(m_State, &AddFileAndLineToError);
 	SetLuaPath(fullScriptPath);
 
-	// Load the script file's contents onto the stack
-	if (luaL_loadfile(m_State, fullScriptPath.c_str())) {
-		m_LastError = lua_tostring(m_State, -1);
-		lua_pop(m_State, 1);
+	// LuaJIT's built-in file loader uses narrow paths on Windows. Read the
+	// source through the engine UTF-8 path helper, then compile it from memory.
+	std::ifstream scriptStream(UTF8::PathFromString(fullScriptPath), std::ios::binary);
+	std::string scriptSource;
+	int loadStatus = 0;
+	bool luaLoadErrorOnStack = false;
+	if (scriptStream) {
+		scriptSource.assign(std::istreambuf_iterator<char>(scriptStream), std::istreambuf_iterator<char>());
+		const bool isBytecode = scriptSource.size() >= 3 && scriptSource[0] == '\x1B' && scriptSource[1] == 'L' && (scriptSource[2] == 'u' || scriptSource[2] == 'J');
+		if (!isBytecode) {
+			const bool hasUtf8BOM = scriptSource.size() >= 3 && static_cast<unsigned char>(scriptSource[0]) == 0xEF &&
+			                        static_cast<unsigned char>(scriptSource[1]) == 0xBB && static_cast<unsigned char>(scriptSource[2]) == 0xBF;
+			if (hasUtf8BOM) {
+				scriptSource.erase(0, 3);
+			}
+			if (scriptSource.size() >= 2 && scriptSource[0] == '#' && scriptSource[1] == '!') {
+				const std::size_t lineEnd = scriptSource.find_first_of("\r\n");
+				if (lineEnd == std::string::npos) {
+					scriptSource.clear();
+				} else {
+					scriptSource.replace(0, lineEnd, "--");
+				}
+			}
+			scriptSource = UTF8::PreserveLegacyWindows1251(scriptSource);
+		}
+		const std::string chunkName = "@" + fullScriptPath;
+		loadStatus = luaL_loadbuffer(m_State, scriptSource.data(), scriptSource.size(), chunkName.c_str());
+		luaLoadErrorOnStack = loadStatus != 0;
+	} else {
+		m_LastError = "Unable to open script file: " + fullScriptPath;
+		loadStatus = -1;
+	}
+	if (loadStatus != 0) {
+		if (luaLoadErrorOnStack) {
+			const char* luaError = lua_tostring(m_State, -1);
+			m_LastError = luaError ? luaError : "Lua failed to compile script source.";
+			lua_pop(m_State, 1);
+		}
 		if (consoleErrors) {
 			g_ConsoleMan.PrintString("ERROR: " + m_LastError);
 			ClearErrors();

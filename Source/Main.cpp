@@ -1232,6 +1232,13 @@ namespace {
 /// Initializes all the essential managers.
 /// </summary>
 void InitializeManagers() {
+	auto logDebugInitializationStage = [](const char* stage) {
+		if (System::IsDebugRun()) {
+			DebugRunState& state = GetDebugRunState();
+			state.Log << "stage=manager_init_" << stage << '\n' << std::flush;
+		}
+	};
+	logDebugInitializationStage("construct_begin");
 	ThreadMan::Construct();
 	TimerMan::Construct();
 	PresetMan::Construct();
@@ -1255,17 +1262,27 @@ void InitializeManagers() {
 	CameraMan::Construct();
 	ActivityMan::Construct();
 	LoadingScreen::Construct();
+	logDebugInitializationStage("construct_complete");
 
 	g_ThreadMan.Initialize();
+	logDebugInitializationStage("threads");
 	g_SettingsMan.Initialize();
+	logDebugInitializationStage("settings");
 	g_WindowMan.Initialize();
+	logDebugInitializationStage("window");
 	g_GLResourceMan.Initialize();
+	logDebugInitializationStage("gl_resources");
 
 	g_LuaMan.Initialize();
+	logDebugInitializationStage("lua");
 	g_TimerMan.Initialize();
+	logDebugInitializationStage("timer");
 	g_FrameMan.Initialize();
+	logDebugInitializationStage("frame");
 	g_PostProcessMan.Initialize();
+	logDebugInitializationStage("post_process");
 	g_PerformanceMan.Initialize();
+	logDebugInitializationStage("performance");
 
 	if (!System::IsDebugRun() && g_AudioMan.Initialize()) {
 		g_GUISound.Initialize();
@@ -1273,17 +1290,24 @@ void InitializeManagers() {
 	}
 
 	g_UInputMan.Initialize();
+	logDebugInitializationStage("input");
 	g_ConsoleMan.Initialize();
+	logDebugInitializationStage("console");
 	g_SceneMan.Initialize();
+	logDebugInitializationStage("scene");
 	g_MovableMan.Initialize();
+	logDebugInitializationStage("movable");
 	g_MetaMan.Initialize();
+	logDebugInitializationStage("meta");
 	g_MenuMan.Initialize();
+	logDebugInitializationStage("menu");
 
 	// Overwrite Settings.ini after all the managers are created to fully populate the file. Up until this moment Settings.ini is populated only with minimal required properties to run.
 	// If Settings.ini already exists and is fully populated, this will deal with overwriting it to apply any overrides performed by the managers at boot (e.g resolution validation).
 	if (g_SettingsMan.SettingsNeedOverwrite()) {
 		g_SettingsMan.UpdateSettingsFile();
 	}
+	logDebugInitializationStage("complete");
 }
 
 /// <summary>
@@ -1900,6 +1924,64 @@ int main(int argc, char** argv) {
 		GetDebugRunState().ModuleLoadEndTime = std::chrono::steady_clock::now();
 		GetDebugRunState().SimulationStartTime = GetDebugRunState().ModuleLoadEndTime;
 		GetDebugRunState().Log << "stage=modules_loaded\n" << std::flush;
+
+		// Exercise Lua's real file-loading path with a temporary Cyrillic module
+		// directory and filename. Only create a uniquely named directory when it
+		// does not already exist; cleanup removes only the exact files created here.
+		DebugRunState& state = GetDebugRunState();
+		const std::string probeDirectoryName = state.OutputDirectoryName + "_LuaProbe.rte";
+		const std::filesystem::path probeDirectory = UTF8::PathFromString(System::GetWorkingDirectory()) /
+		                                            UTF8::PathFromString(System::GetModDirectory()) /
+		                                            UTF8::PathFromString(probeDirectoryName);
+		const std::filesystem::path probeScriptPath = probeDirectory / std::filesystem::u8path("проверка.lua");
+		const std::string probeModulePath = UTF8::PathToString(UTF8::PathFromString(System::GetModDirectory()) /
+		                                                       UTF8::PathFromString(probeDirectoryName) /
+		                                                       std::filesystem::u8path("проверка.lua"));
+		std::error_code probeError;
+		const bool probeDirectoryAlreadyExists = std::filesystem::exists(probeDirectory, probeError);
+		bool probeDirectoryCreated = false;
+		if (!probeDirectoryAlreadyExists && !probeError) {
+			probeDirectoryCreated = std::filesystem::create_directory(probeDirectory, probeError);
+		}
+		auto runLuaSourceProbe = [&](std::string_view source, std::string_view expectedError) {
+			if (!probeDirectoryCreated) {
+				return false;
+			}
+			std::ofstream sourceFile(UTF8::PathFromString(UTF8::PathToString(probeScriptPath)), std::ios::binary | std::ios::trunc);
+			if (!sourceFile) {
+				return false;
+			}
+			sourceFile.write(source.data(), static_cast<std::streamsize>(source.size()));
+			sourceFile.close();
+			if (!sourceFile) {
+				return false;
+			}
+			LuaStateWrapper& luaState = g_LuaMan.GetMasterScriptState();
+			const int runResult = luaState.RunScriptFile(probeModulePath, false, false);
+			const std::string luaError = luaState.GetLastError();
+			luaState.ClearErrors();
+			return runResult < 0 && luaError.find(expectedError) != std::string::npos;
+		};
+		const std::string utf8LuaSource = "error(\"UTF8_LUA_PATH_PROBE: Привет\")";
+		const bool utf8LuaPathPassed = runLuaSourceProbe(utf8LuaSource, "UTF8_LUA_PATH_PROBE: Привет");
+		const std::string bomLuaSource = std::string("\xEF\xBB\xBF") + "error(\"UTF8_LUA_BOM_PROBE: Привет\")";
+		const bool luaBOMPassed = runLuaSourceProbe(bomLuaSource, "UTF8_LUA_BOM_PROBE: Привет");
+		const std::string legacyLuaSource = std::string("error(\"CP1251_LUA_PROBE: ") + "\xCF\xF0\xE8\xE2\xE5\xF2" + "\")";
+		const bool legacyLuaSourcePassed = runLuaSourceProbe(legacyLuaSource, "CP1251_LUA_PROBE: Привет");
+		if (probeDirectoryCreated) {
+			probeError.clear();
+			std::filesystem::remove(probeScriptPath, probeError);
+			const bool probeFileRemoved = !probeError;
+			probeError.clear();
+			std::filesystem::remove(probeDirectory, probeError);
+			state.Log << "lua_utf8_source_path_probe=" << (utf8LuaPathPassed && probeFileRemoved ? "passed" : "failed") << '\n'
+			          << "lua_utf8_bom_probe=" << (luaBOMPassed && probeFileRemoved ? "passed" : "failed") << '\n'
+			          << "lua_legacy_windows1251_source_probe=" << (legacyLuaSourcePassed && probeFileRemoved ? "passed" : "failed") << '\n'
+			          << "lua_probe_cleanup=" << (!probeError ? "passed" : "failed") << '\n' << std::flush;
+		} else {
+			state.Log << "lua_utf8_source_path_probe=failed reason="
+			          << (probeDirectoryAlreadyExists ? "probe_directory_already_exists" : "probe_directory_create_failed") << '\n' << std::flush;
+		}
 	}
 	if (!worldStateClientAddress.empty()) {
 		const std::filesystem::path clientLogPath = debugRun ? (GetDebugRunState().OutputDirectory / "WorldStateClient.log") : std::filesystem::path("WorldStateClient.log");
