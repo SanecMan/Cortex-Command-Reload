@@ -411,6 +411,12 @@ bool Reader::EndIncludeFile() {
 	if (m_ReportProgress) {
 		m_ReportProgress(m_ReportTabs + m_FileName + " - done! " + static_cast<char>(-42), false);
 	}
+	if (!m_StreamStack.empty() && g_SettingsMan.IsMeasuringModuleLoadTime()) {
+		const auto includeDuration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - m_StreamStack.top().IncludeStartTime);
+		if (includeDuration >= std::chrono::milliseconds(100)) {
+			g_ConsoleMan.PrintString("Slow included file [" + m_FilePath + "] duration: " + std::to_string(includeDuration.count()) + "ms");
+		}
+	}
 
 	if (m_StreamStack.empty()) {
 		m_EndOfStreams = true;

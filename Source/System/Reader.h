@@ -1,6 +1,7 @@
 #pragma once
 
 #include <functional>
+#include <chrono>
 #include <string>
 #include <memory>
 #include <stack>
@@ -220,13 +221,14 @@ namespace RTE {
 		struct StreamInfo {
 			/// Constructor method used to instantiate a StreamInfo object in system memory.
 			StreamInfo(std::istream* stream, const std::string& filePath, int currentLine, int prevIndent) :
-			    Stream(stream), FilePath(filePath), CurrentLine(currentLine), PreviousIndent(prevIndent) {}
+			    Stream(stream), FilePath(filePath), CurrentLine(currentLine), PreviousIndent(prevIndent), IncludeStartTime(std::chrono::steady_clock::now()) {}
 
 			// NOTE: These members are owned by the reader that owns this struct, so are not deleted when this is destroyed.
 			std::istream* Stream; //!< Currently used stream, is not on the StreamStack until a new stream is opened.
 			std::string FilePath; //!< Currently used stream's filepath.
 			int CurrentLine; //!< The line number the stream is on.
 			int PreviousIndent; //!< Count of tabs encountered on the last line DiscardEmptySpace() discarded.
+			std::chrono::steady_clock::time_point IncludeStartTime; //!< Start time of the included file represented by this stack frame.
 		};
 
 		std::unique_ptr<std::istream> m_Stream; //!< Currently used stream, is not on the StreamStack until a new stream is opened.
