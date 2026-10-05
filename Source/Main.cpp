@@ -911,11 +911,14 @@ namespace {
 		interpolationTarget.Tick += 3;
 		if (!interpolationTarget.Objects.empty()) {
 			interpolationTarget.Objects.front().PositionX += 30.0F;
+			interpolationTarget.Objects.front().Rotation += c_TwoPI - 0.2F;
 		}
 		const WorldStateClientReplica::ApplyResult interpolationApply = replicaSmoke.Apply(interpolationTarget);
 		const std::uint32_t interpolatedObjectCount = replicaSmoke.AdvanceInterpolation();
 		const bool interpolationSmokePassed = !interpolationTarget.Objects.empty() && interpolationApply.MissingPresets == 0 &&
-		                                     interpolatedObjectCount == interpolationTarget.Objects.size();
+		                                     interpolatedObjectCount == interpolationTarget.Objects.size() &&
+		                                     interpolationApply.RotationInterpolationsScheduled == interpolationTarget.Objects.size() &&
+		                                     std::abs(interpolationApply.MaxRotationInterpolationDeltaRadians - 0.2) < 0.01;
 		const bool replicaSmokePassed = firstApply.Updated + firstApply.Spawned == worldSnapshot.Objects.size() && firstApply.MissingPresets == 0 &&
 		                               removalApply.Removed == firstApply.Spawned && removalApply.Updated == 0 && removalApply.Spawned == 0 &&
 		                               restoredApply.Updated + restoredApply.Spawned == worldSnapshot.Objects.size() && restoredApply.MissingPresets == 0 &&
@@ -924,6 +927,9 @@ namespace {
 		state.Log << "world_state_replica_smoke=" << (replicaSmokePassed ? "passed" : "failed") << " objects=" << worldSnapshot.Objects.size()
 		          << " first_updated=" << firstApply.Updated << " first_spawned=" << firstApply.Spawned << " removed=" << removalApply.Removed
 		          << " repeat_updated=" << repeatedApply.Updated << " interpolated=" << interpolatedObjectCount << '\n' << std::flush;
+		state.Log << "world_state_rotation_interpolation_smoke=" << (interpolationSmokePassed ? "passed" : "failed")
+		          << " scheduled=" << interpolationApply.RotationInterpolationsScheduled
+		          << " max_shortest_delta_rad=" << interpolationApply.MaxRotationInterpolationDeltaRadians << '\n' << std::flush;
 		WorldStateProtocol::Snapshot transientPixelSnapshot = worldSnapshot;
 		transientPixelSnapshot.Objects.clear();
 		WorldStateProtocol::ObjectState transientPixel;

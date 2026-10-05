@@ -2,6 +2,7 @@
 
 #include "Actor.h"
 #include "Atom.h"
+#include "Constants.h"
 #include "HeldDevice.h"
 #include "MOPixel.h"
 #include "MovableMan.h"
@@ -173,6 +174,7 @@ WorldStateClientReplica::ApplyResult WorldStateClientReplica::Apply(const WorldS
 		MovableObject* object = nullptr;
 		bool clientOwned = false;
 		bool wasTrackedReplica = false;
+		float interpolationStartRotation = 0.0F;
 		if (auto existing = m_Objects.find(state.NetworkId); existing != m_Objects.end() && existing->second.Object && activeObjects.contains(existing->second.Object)) {
 			object = existing->second.Object;
 			clientOwned = existing->second.ClientOwned;
@@ -218,6 +220,7 @@ WorldStateClientReplica::ApplyResult WorldStateClientReplica::Apply(const WorldS
 			activeObjects.insert(object);
 		} else {
 			const Vector interpolationStartPosition = object->GetPos();
+			interpolationStartRotation = object->GetRotAngle();
 			const double dx = static_cast<double>(object->GetPos().GetX()) - state.PositionX;
 			const double dy = static_cast<double>(object->GetPos().GetY()) - state.PositionY;
 			const double positionError = std::sqrt(dx * dx + dy * dy);
@@ -228,6 +231,7 @@ WorldStateClientReplica::ApplyResult WorldStateClientReplica::Apply(const WorldS
 			if (wasTrackedReplica) {
 				object->SetPos(interpolationStartPosition);
 				object->SetPrevPos(interpolationStartPosition);
+				object->SetRotAngle(interpolationStartRotation);
 			}
 			++result.Updated;
 		}
@@ -241,6 +245,11 @@ WorldStateClientReplica::ApplyResult WorldStateClientReplica::Apply(const WorldS
 			const Vector interpolationDelta = g_SceneMan.ShortestDistance(object->GetPos(), Vector(state.PositionX, state.PositionY));
 			replica.InterpolationDeltaX = interpolationDelta.GetX();
 			replica.InterpolationDeltaY = interpolationDelta.GetY();
+			replica.InterpolationStartRotation = interpolationStartRotation;
+			replica.InterpolationDeltaRotation = std::remainder(state.Rotation - interpolationStartRotation, c_TwoPI);
+			++result.RotationInterpolationsScheduled;
+			result.MaxRotationInterpolationDeltaRadians = std::max(result.MaxRotationInterpolationDeltaRadians,
+			                                                        std::abs(static_cast<double>(replica.InterpolationDeltaRotation)));
 			replica.InterpolationElapsedTicks = 0;
 			replica.InterpolationDurationTicks = interpolationDurationTicks;
 		} else {
@@ -270,6 +279,7 @@ std::uint32_t WorldStateClientReplica::AdvanceInterpolation() {
 		                            replica.InterpolationStartY + replica.InterpolationDeltaY * progress);
 		g_SceneMan.WrapPosition(interpolatedPosition);
 		replica.Object->SetPos(interpolatedPosition);
+		replica.Object->SetRotAngle(replica.InterpolationStartRotation + replica.InterpolationDeltaRotation * progress);
 		++advancedObjects;
 		if (replica.InterpolationElapsedTicks == replica.InterpolationDurationTicks) {
 			replica.InterpolationDurationTicks = 0;

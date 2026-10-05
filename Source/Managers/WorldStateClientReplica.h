@@ -22,6 +22,8 @@ namespace RTE {
 			double TotalPositionErrorBeforeCorrection = 0.0;
 			double MeanPositionErrorBeforeCorrection = 0.0;
 			double MaxPositionErrorBeforeCorrection = 0.0;
+			std::uint32_t RotationInterpolationsScheduled = 0;
+			double MaxRotationInterpolationDeltaRadians = 0.0;
 			std::vector<std::string> MissingPresetDetails;
 		};
 
@@ -38,6 +40,8 @@ namespace RTE {
 			float InterpolationStartY = 0.0F;
 			float InterpolationDeltaX = 0.0F;
 			float InterpolationDeltaY = 0.0F;
+			float InterpolationStartRotation = 0.0F;
+			float InterpolationDeltaRotation = 0.0F;
 			std::uint32_t InterpolationElapsedTicks = 0;
 			std::uint32_t InterpolationDurationTicks = 0;
 		};
