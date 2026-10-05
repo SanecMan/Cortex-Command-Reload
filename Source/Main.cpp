@@ -52,6 +52,8 @@
 #include "ActivityMan.h"
 #include "MovableMan.h"
 #include "MovableObject.h"
+#include "Entities/Activity.h"
+#include "Activities/GameActivity.h"
 #include "PrimitiveMan.h"
 #include "ThreadMan.h"
 #include "LuaMan.h"
@@ -112,6 +114,9 @@ namespace {
 	bool worldStateServerPortSpecified = false;
 	unsigned short worldStateServerMaxPlayers = 8;
 	std::string worldStateServerBindAddress = "0.0.0.0";
+	std::string worldStateServerActivityClass;
+	std::string worldStateServerActivityPreset;
+	std::string worldStateServerScenePreset;
 	std::unique_ptr<WorldStateServerSession> worldStateServer;
 	std::uint32_t worldStateServerSimulationTick = 0;
 	std::string worldStateClientAddress;
@@ -154,6 +159,46 @@ namespace {
 			return false;
 		}
 
+		g_ActivityMan.SetStartActivity(activity);
+		g_ActivityMan.SetRestartActivity();
+		return true;
+	}
+
+	bool ConfigureWorldStateHostActivity(std::string& failureReason) {
+		const bool hasActivityClass = !worldStateServerActivityClass.empty();
+		const bool hasActivityPreset = !worldStateServerActivityPreset.empty();
+		const bool hasScenePreset = !worldStateServerScenePreset.empty();
+		if (hasActivityClass != hasActivityPreset || (hasActivityClass && !hasScenePreset)) {
+			failureReason = "world-state server Activity requires both class and preset, and a custom Scene preset";
+			return false;
+		}
+		if (!hasActivityClass && !hasScenePreset) {
+			g_ActivityMan.SetStartTutorialActivity();
+			g_ActivityMan.SetRestartActivity();
+			return true;
+		}
+
+		const std::string activityClass = hasActivityClass ? worldStateServerActivityClass : "GATutorial";
+		const std::string activityPresetName = hasActivityClass ? worldStateServerActivityPreset : "Tutorial Mission";
+		const Entity* activityPreset = g_PresetMan.GetEntityPreset(activityClass, activityPresetName);
+		Entity* activityClone = activityPreset ? activityPreset->Clone() : nullptr;
+		Activity* activity = dynamic_cast<Activity*>(activityClone);
+		if (!activity) {
+			delete activityClone;
+			failureReason = "world-state server Activity preset is unavailable: " + activityClass + "/" + activityPresetName;
+			return false;
+		}
+		if (!hasActivityClass) {
+			if (GameActivity* gameActivity = dynamic_cast<GameActivity*>(activity)) {
+				gameActivity->SetStartingGold(10000);
+			}
+		}
+
+		if (g_SceneMan.SetSceneToLoad(worldStateServerScenePreset) < 0) {
+			delete activity;
+			failureReason = "world-state server Scene preset is unavailable: " + worldStateServerScenePreset;
+			return false;
+		}
 		g_ActivityMan.SetStartActivity(activity);
 		g_ActivityMan.SetRestartActivity();
 		return true;
@@ -1391,6 +1436,14 @@ void HandleMainArgs(int argCount, char** argValue) {
 			}
 			++i;
 		}
+		if (!lastArg && currentArg == "-world-state-activity" && i + 2 < argCount) {
+			worldStateServerActivityClass = argValue[i + 1];
+			worldStateServerActivityPreset = argValue[i + 2];
+			i += 2;
+		}
+		if (!lastArg && currentArg == "-world-state-scene") {
+			worldStateServerScenePreset = argValue[++i];
+		}
 
 		if (currentArg == "-cout") {
 			System::EnableLoggingToCLI();
@@ -2059,14 +2112,22 @@ int main(int argc, char** argv) {
 		std::cout << "[NETWORK] Loaded server Activity '" << snapshot.ActivityPreset << "' and Scene '" << snapshot.ScenePreset << "' from module '"
 		          << snapshot.SceneModuleName << "'\n";
 	}
-	if (debugRun && worldStateClientAddress.empty()) {
-		g_ActivityMan.SetStartTutorialActivity();
-		g_ActivityMan.SetRestartActivity();
-	} else if (worldStateServerRequested) {
-		// Prototype host mode needs a real Activity to simulate. Tutorial provides a
-		// known built-in starting point until server config can select Activity/Scene.
-		g_ActivityMan.SetStartTutorialActivity();
-		g_ActivityMan.SetRestartActivity();
+	if (worldStateClientAddress.empty() && (debugRun || worldStateServerRequested)) {
+		if (debugRun) {
+			GetDebugRunState().Log << "stage=server_activity_config_begin class=" << worldStateServerActivityClass
+			                      << " preset=" << worldStateServerActivityPreset << " scene=" << worldStateServerScenePreset << '\n' << std::flush;
+		}
+		std::string activityConfigurationError;
+		if (!ConfigureWorldStateHostActivity(activityConfigurationError)) {
+			std::cerr << "[SERVER] " << activityConfigurationError << '\n';
+			DestroyManagers();
+			allegro_exit();
+			SDL_Quit();
+			return EXIT_FAILURE;
+		}
+		if (debugRun) {
+			GetDebugRunState().Log << "stage=server_activity_config_complete\n" << std::flush;
+		}
 	}
 
 	if (!System::IsInExternalModuleValidationMode()) {
@@ -2086,7 +2147,13 @@ int main(int argc, char** argv) {
 			}
 		}
 
+		if (debugRun) {
+			GetDebugRunState().Log << "stage=activity_initialize_begin\n" << std::flush;
+		}
 		const bool activityInitialized = g_ActivityMan.Initialize();
+		if (debugRun) {
+			GetDebugRunState().Log << "stage=activity_initialize_complete result=" << activityInitialized << '\n' << std::flush;
+		}
 		if (!activityInitialized && !debugRun) {
 			if (!worldStateServerRequested && worldStateClientAddress.empty()) {
 				RunMenuLoop();
