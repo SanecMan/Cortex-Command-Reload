@@ -2,6 +2,7 @@
 
 #include "UTF8.h"
 
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <cmath>
@@ -359,8 +360,10 @@ inline bool DecodeInputCommand(std::span<const std::uint8_t> packet, InputComman
 	return true;
 }
 
-inline bool EncodeSnapshot(const Snapshot& snapshot, std::uint32_t sequence, std::vector<std::uint8_t>& packet) {
+inline bool EncodeSnapshot(const Snapshot& snapshot, std::uint32_t sequence, std::vector<std::uint8_t>& packet, std::vector<std::uint64_t>& networkIds) {
 	packet.clear();
+	// Transport callers retain this scratch vector so its storage can be reused between snapshots.
+	networkIds.clear();
 	if (snapshot.Objects.size() > c_MaxObjects || snapshot.ActivityClassName.size() > c_MaxStringBytes || snapshot.ActivityPreset.size() > c_MaxStringBytes ||
 	    snapshot.ActivityModuleName.size() > c_MaxStringBytes || snapshot.SceneModuleName.size() > c_MaxStringBytes || snapshot.ScenePreset.size() > c_MaxStringBytes ||
 	    !UTF8::IsValid(snapshot.ActivityClassName) || !UTF8::IsValid(snapshot.ActivityPreset) || !UTF8::IsValid(snapshot.ActivityModuleName) ||
@@ -368,7 +371,6 @@ inline bool EncodeSnapshot(const Snapshot& snapshot, std::uint32_t sequence, std
 		return false;
 	}
 
-	std::unordered_set<std::uint64_t> networkIds;
 	networkIds.reserve(snapshot.Objects.size());
 	packet.reserve(c_HeaderSize + 32 + snapshot.Objects.size() * 64);
 	packet.resize(c_HeaderSize, 0);
@@ -381,9 +383,10 @@ inline bool EncodeSnapshot(const Snapshot& snapshot, std::uint32_t sequence, std
 	}
 	Detail::WriteUnsigned(packet, snapshot.Objects.size(), sizeof(std::uint32_t));
 	for (const ObjectState& object : snapshot.Objects) {
-		if (!Detail::ValidObject(object) || !networkIds.insert(object.NetworkId).second) {
+		if (!Detail::ValidObject(object)) {
 			return false;
 		}
+		networkIds.push_back(object.NetworkId);
 		Detail::WriteUnsigned(packet, object.NetworkId, sizeof(object.NetworkId));
 		if (!Detail::WriteString(packet, object.ClassName) || !Detail::WriteString(packet, object.ModuleName) || !Detail::WriteString(packet, object.PresetName)) {
 			return false;
@@ -410,6 +413,10 @@ inline bool EncodeSnapshot(const Snapshot& snapshot, std::uint32_t sequence, std
 			return false;
 		}
 	}
+	std::sort(networkIds.begin(), networkIds.end());
+	if (std::adjacent_find(networkIds.begin(), networkIds.end()) != networkIds.end()) {
+		return false;
+	}
 
 	std::size_t headerOffset = 0;
 	auto WriteHeaderUnsigned = [&](std::uint64_t value, std::size_t byteCount) {
@@ -424,6 +431,11 @@ inline bool EncodeSnapshot(const Snapshot& snapshot, std::uint32_t sequence, std
 	WriteHeaderUnsigned(sequence, sizeof(sequence));
 	WriteHeaderUnsigned(packet.size() - c_HeaderSize, sizeof(std::uint32_t));
 	return true;
+}
+
+inline bool EncodeSnapshot(const Snapshot& snapshot, std::uint32_t sequence, std::vector<std::uint8_t>& packet) {
+	std::vector<std::uint64_t> networkIds;
+	return EncodeSnapshot(snapshot, sequence, packet, networkIds);
 }
 
 inline bool DecodeSnapshot(std::span<const std::uint8_t> packet, Snapshot& snapshot, std::uint32_t* sequence = nullptr) {

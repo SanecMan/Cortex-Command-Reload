@@ -76,7 +76,7 @@ bool WorldStateTransport::SendSnapshot(const RakNet::AddressOrGUID& target, cons
 	std::vector<std::uint8_t> packet;
 	std::vector<std::uint8_t> wirePacket;
 	bool compressed = false;
-	return WorldStateProtocol::EncodeSnapshot(snapshot, sequence, packet) && WorldStateCompression::EncodeForWire(packet, wirePacket, compressed) &&
+	return WorldStateProtocol::EncodeSnapshot(snapshot, sequence, packet, m_SnapshotNetworkIdScratch) && WorldStateCompression::EncodeForWire(packet, wirePacket, compressed) &&
 	       Send(target, wirePacket, false, UNRELIABLE_SEQUENCED);
 }
 
@@ -86,7 +86,7 @@ bool WorldStateTransport::BroadcastSnapshot(const WorldStateProtocol::Snapshot& 
 	std::vector<std::uint8_t> packet;
 	std::vector<std::uint8_t> wirePacket;
 	bool compressed = false;
-	if (!WorldStateProtocol::EncodeSnapshot(snapshot, sequence, packet)) {
+	if (!WorldStateProtocol::EncodeSnapshot(snapshot, sequence, packet, m_SnapshotNetworkIdScratch)) {
 		return false;
 	}
 	const auto encodedAt = std::chrono::steady_clock::now();

@@ -58,6 +58,7 @@ namespace RTE {
 		bool Send(const RakNet::AddressOrGUID& target, std::span<const std::uint8_t> packet, bool broadcast, PacketReliability reliability = RELIABLE_ORDERED);
 
 		RakNet::RakPeerInterface* m_Peer = nullptr;
+		std::vector<std::uint64_t> m_SnapshotNetworkIdScratch;
 	};
 
 } // namespace RTE
