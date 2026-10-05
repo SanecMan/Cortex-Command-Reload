@@ -53,7 +53,7 @@ void DataModule::Clear() {
 }
 
 int DataModule::Create(const std::string& moduleName, const ProgressCallback& progressCallback) {
-	m_FileName = UTF8::PathToString(UTF8::PathFromString(UTF8::PreserveLegacyWindows1251(moduleName)));
+	m_FileName = UTF8::PathToString(UTF8::PathFromString(UTF8::PreserveLegacyWindows1251Path(moduleName)));
 	m_ModuleID = g_PresetMan.GetModuleID(moduleName);
 	m_CrabToHumanSpawnRatio = 0;
 
@@ -459,10 +459,10 @@ void DataModule::ReloadAllScripts() const {
 int DataModule::FindAndRead(const ProgressCallback& progressCallback) {
 	int result = 0;
 	const std::string directoryToScan = g_PresetMan.GetFullModulePath(m_FileName);
-	for (const std::filesystem::directory_entry& directoryEntry: std::filesystem::directory_iterator(System::GetWorkingDirectory() + directoryToScan)) {
+	for (const std::filesystem::directory_entry& directoryEntry: std::filesystem::directory_iterator(UTF8::PathFromString(System::GetWorkingDirectory() + directoryToScan))) {
 		if (directoryEntry.path().extension() == ".ini" && directoryEntry.path().filename() != "Index.ini") {
 			Reader iniReader;
-			if (iniReader.Create(directoryToScan + "/" + directoryEntry.path().filename().generic_string(), false, progressCallback) >= 0) {
+			if (iniReader.Create(directoryToScan + "/" + UTF8::PathToString(directoryEntry.path().filename()), false, progressCallback) >= 0) {
 				result = Serializable::CreateSerializable(iniReader, false, true, true);
 				if (progressCallback) {
 					progressCallback(" ", true);

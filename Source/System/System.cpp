@@ -54,7 +54,7 @@ const std::string System::s_ZippedModulePackageExtension = ".zip";
 const std::unordered_set<std::string> System::s_SupportedExtensions = {".ini", ".txt", ".lua", ".cfg", ".bmp", ".png", ".jpg", ".jpeg", ".wav", ".ogg", ".mp3", ".flac"};
 
 void System::Initialize(const char* thisExePathAndName) {
-	s_ThisExePathAndName = UTF8::PathToString(UTF8::PathFromString(UTF8::PreserveLegacyWindows1251(thisExePathAndName)));
+	s_ThisExePathAndName = UTF8::PathToString(UTF8::PathFromString(UTF8::PreserveLegacyWindows1251Path(thisExePathAndName)));
 
 #ifdef _WIN32
 	std::array<wchar_t, 32768> executablePathBuffer{};
@@ -252,23 +252,25 @@ void System::PrintToCLI(const std::string& stringToPrint) {
 }
 
 std::string System::ExtractZippedDataModule(const std::string& zippedModulePath) {
-	std::string zippedModuleName = System::GetModDirectory() + std::filesystem::path(zippedModulePath).filename().generic_string();
+	std::string zippedModuleName = System::GetModDirectory() + UTF8::PathToString(UTF8::PathFromString(zippedModulePath).filename());
 
-	unzFile zippedModule = unzOpen(zippedModuleName.c_str());
+	unzFile zippedModule = unzOpen64(zippedModuleName.c_str());
 	std::stringstream extractionProgressReport;
 	bool abortExtract = false;
 
 	if (!zippedModule) {
 		bool makeDirResult = false;
-		if (!std::filesystem::exists(s_WorkingDirectory + "_FailedExtract")) {
+		if (!std::filesystem::exists(UTF8::PathFromString(s_WorkingDirectory + "_FailedExtract"))) {
 			makeDirResult = MakeDirectory(s_WorkingDirectory + "_FailedExtract");
 		}
 		if (makeDirResult) {
 			extractionProgressReport << "Failed to extract Data module from: " + zippedModuleName + " - Moving zip file to failed extract directory!\n";
-			std::filesystem::rename(s_WorkingDirectory + zippedModuleName, s_WorkingDirectory + "_FailedExtract/" + zippedModuleName);
+			std::filesystem::rename(UTF8::PathFromString(s_WorkingDirectory + zippedModuleName),
+			                        UTF8::PathFromString(s_WorkingDirectory + "_FailedExtract/" + zippedModuleName));
 		} else {
 			extractionProgressReport << "Failed to extract Data module from: " + zippedModuleName + " - Failed to create directory to move zip file into, deleting zip file!\n";
-			std::remove((s_WorkingDirectory + zippedModuleName).c_str());
+			std::error_code removeError;
+			std::filesystem::remove(UTF8::PathFromString(s_WorkingDirectory + zippedModuleName), removeError);
 		}
 		return extractionProgressReport.str();
 	}
@@ -299,7 +301,7 @@ std::string System::ExtractZippedDataModule(const std::string& zippedModulePath)
 #endif
 		// Check if the directory we are trying to extract into exists, and if not, create it.
 		std::string outputFileDirectory = outputFileName.substr(0, outputFileName.find_last_of("/\\") + 1);
-		if (!std::filesystem::exists(outputFileDirectory)) {
+		if (!std::filesystem::exists(UTF8::PathFromString(outputFileDirectory))) {
 			if (!MakeDirectory(s_WorkingDirectory + outputFileDirectory)) {
 				extractionProgressReport << "\tFailed to create directory: " + outputFileName + " - Extraction aborted!\n";
 				abortExtract = true;
@@ -309,7 +311,7 @@ std::string System::ExtractZippedDataModule(const std::string& zippedModulePath)
 			}
 		}
 		// If the output file is a directly, go the next entry listed in the zip file.
-		if (std::filesystem::is_directory(outputFileName)) {
+		if (std::filesystem::is_directory(UTF8::PathFromString(outputFileName))) {
 			unzCloseCurrentFile(zippedModule);
 			if ((i + 1) < zippedModuleInfo.number_entry && unzGoToNextFile(zippedModule) != UNZ_OK) {
 				extractionProgressReport << "\tCould not read next file inside zip - Extraction aborted!\n";
@@ -319,7 +321,7 @@ std::string System::ExtractZippedDataModule(const std::string& zippedModulePath)
 		}
 
 		// Validate so only certain file types are extracted.
-		std::string fileExtension = std::filesystem::path(outputFileName).extension().generic_string();
+		std::string fileExtension = UTF8::PathToString(UTF8::PathFromString(outputFileName).extension());
 		std::transform(fileExtension.begin(), fileExtension.end(), fileExtension.begin(), tolower);
 
 		if (s_SupportedExtensions.find(fileExtension) == s_SupportedExtensions.end()) {
@@ -380,7 +382,8 @@ std::string System::ExtractZippedDataModule(const std::string& zippedModulePath)
 
 	if (!abortExtract) {
 		extractionProgressReport << "Successfully extracted Data Module from: " + zippedModuleName + " - Deleting zip file!\n";
-		std::remove((s_WorkingDirectory + zippedModuleName).c_str());
+		std::error_code removeError;
+		std::filesystem::remove(UTF8::PathFromString(s_WorkingDirectory + zippedModuleName), removeError);
 	}
 
 	return extractionProgressReport.str();

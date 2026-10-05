@@ -236,4 +236,23 @@ inline std::string PreserveLegacyWindows1251(std::string_view text) {
 	return converted;
 }
 
+// Decode legacy Windows-1251 bytes in path components without re-encoding
+// already-valid UTF-8 parent directories or separators.
+inline std::string PreserveLegacyWindows1251Path(std::string_view path) {
+	std::string converted;
+	converted.reserve(path.size());
+	std::size_t componentStart = 0;
+	while (componentStart < path.size()) {
+		const std::size_t separator = path.find_first_of("/\\", componentStart);
+		const std::size_t componentEnd = separator == std::string_view::npos ? path.size() : separator;
+		converted.append(PreserveLegacyWindows1251(path.substr(componentStart, componentEnd - componentStart)));
+		if (separator == std::string_view::npos) {
+			break;
+		}
+		converted.push_back(path[separator]);
+		componentStart = separator + 1;
+	}
+	return converted;
+}
+
 } // namespace RTE::UTF8

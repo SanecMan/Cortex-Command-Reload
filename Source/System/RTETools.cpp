@@ -3,6 +3,7 @@
 #include "Vector.h"
 #include "Matrix.h"
 #include "System.h"
+#include "UTF8.h"
 
 #include <string_view>
 
@@ -205,12 +206,12 @@ namespace RTE {
 	}
 
 	std::string GetCaseInsensitiveFullPath(const std::string& fullPath) {
-		if (std::filesystem::exists(fullPath)) {
+		if (std::filesystem::exists(UTF8::PathFromString(fullPath))) {
 			return fullPath;
 		}
 
-		std::filesystem::path inspectedPath = System::GetWorkingDirectory();
-		const std::filesystem::path relativeFilePath = std::filesystem::path(fullPath).lexically_relative(inspectedPath);
+		std::filesystem::path inspectedPath = UTF8::PathFromString(System::GetWorkingDirectory());
+		const std::filesystem::path relativeFilePath = UTF8::PathFromString(fullPath).lexically_relative(inspectedPath);
 
 		// Iterate over all path parts
 		for (std::filesystem::path::const_iterator relativeFilePathIterator = relativeFilePath.begin(); relativeFilePathIterator != relativeFilePath.end(); ++relativeFilePathIterator) {
@@ -219,7 +220,7 @@ namespace RTE {
 			// Iterate over all entries in the path part's directory,
 			// to check if the path part is in there case insensitively
 			for (const std::filesystem::path& filesystemEntryPath: std::filesystem::directory_iterator(inspectedPath)) {
-				if (StringsEqualCaseInsensitive(filesystemEntryPath.filename().generic_string(), relativeFilePathIterator->generic_string())) {
+				if (StringsEqualCaseInsensitive(UTF8::PathToString(filesystemEntryPath.filename()), UTF8::PathToString(*relativeFilePathIterator))) {
 					inspectedPath = filesystemEntryPath;
 
 					// If the path part is found, stop looking for it
@@ -231,13 +232,13 @@ namespace RTE {
 			if (!pathPartExists) {
 				// If part of the path exists, append the rest of fullPath its parts
 				while (relativeFilePathIterator != relativeFilePath.end()) {
-					inspectedPath /= relativeFilePathIterator->generic_string();
+					inspectedPath /= *relativeFilePathIterator;
 					relativeFilePathIterator++;
 				}
 				break;
 			}
 		}
 
-		return inspectedPath.generic_string();
+		return UTF8::PathToString(inspectedPath);
 	}
 } // namespace RTE

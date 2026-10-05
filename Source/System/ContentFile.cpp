@@ -88,7 +88,7 @@ int ContentFile::GetDataModuleID() const {
 
 void ContentFile::SetDataPath(const std::string& newDataPath) {
 	m_DataPath = g_PresetMan.GetFullModulePath(newDataPath);
-	m_DataPathExtension = std::filesystem::path(m_DataPath).extension().string();
+	m_DataPathExtension = UTF8::PathToString(UTF8::PathFromString(m_DataPath).extension());
 
 	RTEAssert(!m_DataPathExtension.empty(), "Failed to find file extension when trying to find file with path and name:\n" + m_DataPath + "\n" + GetFormattedReaderPosition());
 

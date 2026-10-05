@@ -78,6 +78,8 @@
 #ifdef _WIN32
 #include "windows.h"
 #include <psapi.h>
+#include <shellapi.h>
+#pragma comment(lib, "Shell32.lib")
 #elif defined(__linux__)
 #include <unistd.h>
 #endif
@@ -93,8 +95,10 @@
 #include <filesystem>
 #include <memory>
 #include <sstream>
+#include <string>
 #include <string_view>
 #include <thread>
+#include <vector>
 
 extern "C" {
 FILE __iob_func[3] = {*stdin, *stdout, *stderr};
@@ -293,17 +297,17 @@ namespace {
 			return true;
 		}
 
-		const std::filesystem::path outputName(state.OutputDirectoryName);
+		const std::filesystem::path outputName = UTF8::PathFromString(state.OutputDirectoryName);
 		if (outputName.empty() || outputName.has_parent_path() || outputName.filename() != outputName || outputName == "." || outputName == ".." ||
 		    state.OutputDirectoryName.find_first_of("/\\:") != std::string::npos) {
 			std::cerr << "Debug run output must be a single directory name under the screenshots directory.\n";
 			return false;
 		}
-		state.OutputDirectory = std::filesystem::path(System::GetWorkingDirectory()) / System::GetScreenshotDirectory() / outputName;
+		state.OutputDirectory = UTF8::PathFromString(System::GetWorkingDirectory()) / System::GetScreenshotDirectory() / UTF8::PathFromString(state.OutputDirectoryName);
 		std::error_code filesystemError;
 		const std::filesystem::file_status existingPathStatus = std::filesystem::symlink_status(state.OutputDirectory, filesystemError);
 		if (!filesystemError && std::filesystem::is_symlink(existingPathStatus)) {
-			std::cerr << "Debug run output path must not be a symlink: " << state.OutputDirectory.string() << '\n';
+			std::cerr << "Debug run output path must not be a symlink: " << UTF8::PathToString(state.OutputDirectory) << '\n';
 			return false;
 		}
 		filesystemError.clear();
@@ -316,7 +320,7 @@ namespace {
 			if (filesystemError) {
 				break;
 			}
-			const std::string name = entry.path().filename().string();
+			const std::string name = UTF8::PathToString(entry.path().filename());
 			const bool isDebugArtifact = name == "DebugRun.log" || name == "LogLoading.txt" || name == "LogLoadingWarning.txt" || name == "LogConsole.txt" || name.starts_with("debug-run-");
 			if (isDebugArtifact && (entry.is_regular_file(filesystemError) || entry.is_symlink(filesystemError))) {
 				filesystemError.clear();
@@ -351,6 +355,7 @@ namespace {
 			return false;
 		}
 		const std::string unicodePath = UTF8::PathToString(state.OutputDirectory / std::filesystem::u8path("тест-путь.tmp"));
+		const bool utf8PathRoundTripPassed = UTF8::PathToString(UTF8::PathFromString(unicodePath)) == unicodePath;
 		constexpr std::string_view fileProbe = "UTF-8 file path round trip";
 		FILE* unicodeFile = UTF8::OpenFile(unicodePath, "wb");
 		bool unicodeFileWritten = unicodeFile && std::fwrite(fileProbe.data(), 1, fileProbe.size(), unicodeFile) == fileProbe.size();
@@ -376,8 +381,12 @@ namespace {
 			unicodeGUIReader.Create(unicodePath);
 			unicodeGUIReaderOpened = unicodeGUIReader.ReaderOK();
 		}
-		const std::string legacyFileName = "\xF2\xE5\xF1\xF2-\xEF\xF3\xF2\xFC.tmp";
+		const std::string legacyFileName = "legacy-\xF2\xE5\xF1\xF2-\xEF\xF3\xF2\xFC.tmp";
 		const std::string legacyPath = UTF8::PathToString(state.OutputDirectory) + "/" + legacyFileName;
+		const std::string legacyPathUTF8 = UTF8::PreserveLegacyWindows1251Path(legacyPath);
+		std::ofstream legacyFile(UTF8::PathFromString(legacyPathUTF8), std::ios::binary | std::ios::trunc);
+		const bool legacyFileWritten = legacyFile.is_open() && static_cast<bool>(legacyFile << "legacy path reader smoke");
+		legacyFile.close();
 		bool legacyReaderOpened = false;
 		{
 			Reader legacyPathReader(legacyPath, false, nullptr, true, true);
@@ -391,13 +400,23 @@ namespace {
 		}
 		std::error_code unicodeFileCleanupError;
 		const bool unicodeFileRemoved = std::filesystem::remove(UTF8::PathFromString(unicodePath), unicodeFileCleanupError);
-		const bool unicodeFilePathPassed = unicodeFileWritten && unicodeFileRead && unicodePathResolved && unicodeReaderOpened && unicodeGUIReaderOpened &&
-		                                   legacyReaderOpened && legacyGUIReaderOpened && unicodeFileRemoved && !unicodeFileCleanupError;
+		std::error_code legacyFileExistsError;
+		const bool legacyFileExistedBeforeCleanup = std::filesystem::exists(UTF8::PathFromString(legacyPathUTF8), legacyFileExistsError);
+		std::error_code legacyFileCleanupError;
+		const bool legacyFileRemoved = std::filesystem::remove(UTF8::PathFromString(legacyPathUTF8), legacyFileCleanupError);
+		std::error_code legacyFileExistsAfterCleanupError;
+		const bool legacyFileCleaned = !std::filesystem::exists(UTF8::PathFromString(legacyPathUTF8), legacyFileExistsAfterCleanupError);
+		const bool unicodeFilePathPassed = utf8PathRoundTripPassed && unicodeFileWritten && unicodeFileRead && unicodePathResolved && unicodeReaderOpened && unicodeGUIReaderOpened &&
+		                                   legacyFileWritten && legacyReaderOpened && legacyGUIReaderOpened && legacyFileExistedBeforeCleanup && legacyFileCleaned &&
+		                                   !legacyFileExistsError && !legacyFileCleanupError && !legacyFileExistsAfterCleanupError &&
+		                                   unicodeFileRemoved && !unicodeFileCleanupError;
 		state.Log << "utf8_file_path_smoke=" << (unicodeFilePathPassed ? "passed" : "failed")
-		          << " written=" << unicodeFileWritten << " read=" << unicodeFileRead << " resolved=" << unicodePathResolved
+		          << " path_round_trip=" << utf8PathRoundTripPassed << " written=" << unicodeFileWritten << " read=" << unicodeFileRead << " resolved=" << unicodePathResolved
 		          << " reader_opened=" << unicodeReaderOpened << " gui_reader_opened=" << unicodeGUIReaderOpened
-		          << " legacy_reader_opened=" << legacyReaderOpened << " legacy_gui_reader_opened=" << legacyGUIReaderOpened << " removed=" << unicodeFileRemoved
-		          << " cleanup_error=" << unicodeFileCleanupError.value() << '\n' << std::flush;
+		          << " legacy_written=" << legacyFileWritten << " legacy_reader_opened=" << legacyReaderOpened << " legacy_gui_reader_opened=" << legacyGUIReaderOpened
+		          << " legacy_existed=" << legacyFileExistedBeforeCleanup << " legacy_removed=" << legacyFileRemoved << " legacy_cleaned=" << legacyFileCleaned
+		          << " legacy_cleanup_error=" << legacyFileCleanupError.value() << " removed=" << unicodeFileRemoved << " cleanup_error=" << unicodeFileCleanupError.value()
+		          << '\n' << std::flush;
 		if (!unicodeFilePathPassed) {
 			return false;
 		}
@@ -1107,7 +1126,7 @@ namespace {
 			unicodeFontFilePath = std::filesystem::u8path(System::GetWorkingDirectory()) / unicodeFontFilePath;
 		}
 		std::ifstream unicodeFontProbe(unicodeFontFilePath, std::ios::binary);
-		state.Log << "utf8_unicode_font_path=" << unicodeFontFilePath.generic_string() << " exists=" << (unicodeFontProbe ? "yes" : "no") << '\n' << std::flush;
+		state.Log << "utf8_unicode_font_path=" << UTF8::PathToString(unicodeFontFilePath) << " exists=" << (unicodeFontProbe ? "yes" : "no") << '\n' << std::flush;
 		state.Log << "utf8_glyph_render_smoke=" << (utf8GlyphRenderPassed ? "passed" : "failed") << '\n' << std::flush;
 		const MovableMan::SceneStats sceneStats = g_MovableMan.CollectSceneStats();
 		const bool performanceCountersPassed = state.PerformanceCountersObserved ||
@@ -1148,9 +1167,9 @@ namespace {
 		}
 		state.Log.flush();
 		state.Passed = success;
-		g_ConsoleMan.SaveAllText((state.OutputDirectory / "LogConsole.txt").string());
+		g_ConsoleMan.SaveAllText(UTF8::PathToString(state.OutputDirectory / "LogConsole.txt"));
 		for (const char* logName : {"LogLoading.txt", "LogLoadingWarning.txt"}) {
-			const std::filesystem::path source = std::filesystem::path(System::GetWorkingDirectory()) / logName;
+			const std::filesystem::path source = UTF8::PathFromString(System::GetWorkingDirectory()) / UTF8::PathFromString(logName);
 			if (std::filesystem::exists(source)) {
 				std::error_code copyError;
 				std::filesystem::copy_file(source, state.OutputDirectory / logName, std::filesystem::copy_options::overwrite_existing, copyError);
@@ -1167,7 +1186,7 @@ namespace {
 		}
 		++state.RenderedFrames;
 		const auto capture = [&](const char* label) {
-			const std::string imageName = state.OutputDirectory.filename().string() + "/debug-run-" + std::string(label) + ".png";
+		const std::string imageName = UTF8::PathToString(state.OutputDirectory.filename()) + "/debug-run-" + std::string(label) + ".png";
 			const int screenshotResult = g_FrameMan.SaveScreenToPNGBlocking(imageName);
 			state.Log << "screenshot=" << imageName << " result=" << screenshotResult << '\n' << std::flush;
 		};
@@ -1964,7 +1983,7 @@ int main(int argc, char** argv) {
 		if (worldStateServerRequested) {
 			worldStateServer = std::make_unique<WorldStateServerSession>();
 			const unsigned short serverPort = debugRun && !worldStateServerPortSpecified ? 0 : worldStateServerPort;
-			const std::string serverLogPath = debugRun ? (GetDebugRunState().OutputDirectory / "WorldStateServer.log").string() : "WorldStateServer.log";
+			const std::string serverLogPath = debugRun ? UTF8::PathToString(GetDebugRunState().OutputDirectory / "WorldStateServer.log") : "WorldStateServer.log";
 			const std::string bindAddress = debugRun ? "0.0.0.0" : worldStateServerBindAddress;
 			if (!worldStateServer->Start(bindAddress, serverPort, worldStateServerMaxPlayers, serverLogPath, debugRun)) {
 				worldStateServer.reset();
@@ -2014,5 +2033,30 @@ int main(int argc, char** argv) {
 }
 
 #ifdef _WIN32
-int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) { return main(__argc, __argv); }
+int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
+	int wideArgumentCount = 0;
+	LPWSTR* wideArguments = CommandLineToArgvW(GetCommandLineW(), &wideArgumentCount);
+	if (!wideArguments) {
+		return main(__argc, __argv);
+	}
+	std::vector<std::string> utf8Arguments;
+	utf8Arguments.reserve(static_cast<std::size_t>(wideArgumentCount));
+	for (int argumentIndex = 0; argumentIndex < wideArgumentCount; ++argumentIndex) {
+		const std::wstring_view wideArgument(wideArguments[argumentIndex]);
+		std::u16string utf16Argument;
+		utf16Argument.reserve(wideArgument.size());
+		for (const wchar_t codeUnit : wideArgument) {
+			utf16Argument.push_back(static_cast<char16_t>(codeUnit));
+		}
+		utf8Arguments.push_back(UTF8::EncodeUTF16(utf16Argument));
+	}
+	std::vector<char*> utf8Argv;
+	utf8Argv.reserve(utf8Arguments.size());
+	for (std::string& argument : utf8Arguments) {
+		utf8Argv.push_back(argument.data());
+	}
+	const int result = main(static_cast<int>(utf8Argv.size()), utf8Argv.data());
+	LocalFree(wideArguments);
+	return result;
+}
 #endif

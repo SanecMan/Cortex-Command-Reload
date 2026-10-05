@@ -18,6 +18,7 @@
 #include "GUIListBox.h"
 #include "GUITextBox.h"
 #include "GUIComboBox.h"
+#include "UTF8.h"
 
 #include <execution>
 
@@ -110,8 +111,8 @@ void SaveLoadMenuGUI::PopulateSaveGamesList() {
 	              m_SaveGames.begin(), m_SaveGames.end(),
 	              [](SaveRecord& record) {
 		              // load zip sav file
-		              std::string filePath = record.SavePath.string();
-		              unzFile zippedSaveFile = unzOpen(filePath.c_str());
+			              std::string filePath = UTF8::PathToString(record.SavePath);
+			              unzFile zippedSaveFile = unzOpen64(filePath.c_str());
 		              if (!zippedSaveFile) {
 			              return;
 		              }
@@ -139,7 +140,7 @@ void SaveLoadMenuGUI::PopulateSaveGamesList() {
 					  
 		              buffer[info.uncompressed_size] = 0; // need to null-terminate manually
 
-					  Reader reader(std::make_unique<std::istringstream>(buffer), record.SavePath.string(), true, nullptr, false);
+					  Reader reader(std::make_unique<std::istringstream>(buffer), UTF8::PathToString(record.SavePath), true, nullptr, false);
 		              while (reader.NextProperty()) {
 			              std::string propName = reader.ReadPropName();
 			              if (propName == "ActivityName") {
@@ -160,7 +161,9 @@ void SaveLoadMenuGUI::PopulateSaveGamesList() {
 void SaveLoadMenuGUI::UpdateSaveGamesGUIList() {
 	const std::string& currentOrder = m_OrderByComboBox->GetSelectedItem()->m_Name;
 	if (currentOrder == "Name") {
-		std::stable_sort(m_SaveGames.begin(), m_SaveGames.end(), [](const SaveRecord& lhs, const SaveRecord& rhs) { return lhs.SavePath.stem().string() < rhs.SavePath.stem().string(); });
+		std::stable_sort(m_SaveGames.begin(), m_SaveGames.end(), [](const SaveRecord& lhs, const SaveRecord& rhs) {
+			return UTF8::PathToString(lhs.SavePath.stem()) < UTF8::PathToString(rhs.SavePath.stem());
+		});
 	} else if (currentOrder == "Date") {
 		std::stable_sort(m_SaveGames.begin(), m_SaveGames.end(), [](const SaveRecord& lhs, const SaveRecord& rhs) { return lhs.SaveDate > rhs.SaveDate; });
 	} else if (currentOrder == "Activity") {
@@ -172,7 +175,7 @@ void SaveLoadMenuGUI::UpdateSaveGamesGUIList() {
 		const SaveRecord& save = m_SaveGames[i];
 
 		std::stringstream saveNameText;
-		saveNameText << std::left << std::setfill(' ') << std::setw(32) << save.SavePath.stem().string();
+		saveNameText << std::left << std::setfill(' ') << std::setw(32) << UTF8::PathToString(save.SavePath.stem());
 
 		// This is so much more fucking difficult than it has any right to be
 #if defined(_MSC_VER) || __GNUC__ > 12
@@ -239,7 +242,7 @@ void SaveLoadMenuGUI::UpdateButtonEnabledStates() {
 	int existingSaveItemIndex = -1;
 	for (int i = 0; i < m_SaveGamesListBox->GetItemList()->size(); ++i) {
 		SaveRecord& save = m_SaveGames[m_SaveGamesListBox->GetItem(i)->m_ExtraIndex];
-		if (save.SavePath.stem().string() == m_SaveGameName->GetText()) {
+		if (UTF8::PathToString(save.SavePath.stem()) == m_SaveGameName->GetText()) {
 			existingSaveItemIndex = i;
 			break;
 		}
@@ -359,7 +362,7 @@ bool SaveLoadMenuGUI::HandleInputEvents(PauseMenuGUI* pauseMenu) {
 
 			if (guiEvent.GetControl() == m_SaveGamesListBox && (guiEvent.GetMsg() == GUIListBox::Select && m_SaveGamesListBox->GetSelectedIndex() > -1)) {
 				const SaveRecord& record = m_SaveGames[m_SaveGamesListBox->GetSelected()->m_ExtraIndex];
-				m_SaveGameName->SetText(record.SavePath.stem().string());
+				m_SaveGameName->SetText(UTF8::PathToString(record.SavePath.stem()));
 			}
 
 			if (guiEvent.GetControl() == m_OrderByComboBox && guiEvent.GetMsg() == GUIComboBox::Closed) {

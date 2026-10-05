@@ -27,7 +27,7 @@ GUIReader::GUIReader() {
 }
 
 int GUIReader::Create(const std::string& fileName) {
-	m_FilePath = UTF8::PathToString(UTF8::PathFromString(UTF8::PreserveLegacyWindows1251(fileName)));
+	m_FilePath = UTF8::PathToString(UTF8::PathFromString(UTF8::PreserveLegacyWindows1251Path(fileName)));
 
 	if (m_FilePath.empty()) {
 		return -1;

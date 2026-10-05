@@ -2,6 +2,7 @@
 
 #include "Reader.h"
 #include "Writer.h"
+#include "UTF8.h"
 
 #include <string>
 #include <filesystem>
@@ -119,7 +120,7 @@ namespace RTE {
 		/// Replaces backslashes with forward slashes in file paths to eliminate issues with cross-platform compatibility or invalid escape sequences.
 		/// @param pathToCorrect Reference to the file path string to correct slashes in.
 		// TODO: Add a warning log entry if backslashes are found in a data path. Perhaps overwrite them in the ini file itself.
-		std::string CorrectBackslashesInPath(const std::string& pathToCorrect) const { return std::filesystem::path(pathToCorrect).generic_string(); }
+		std::string CorrectBackslashesInPath(const std::string& pathToCorrect) const { return UTF8::PathToString(UTF8::PathFromString(pathToCorrect)); }
 #pragma endregion
 
 #pragma region Logging

@@ -1007,7 +1007,7 @@ const std::vector<std::string>* LuaMan::DirectoryList(const std::string& path) {
 		if (std::filesystem::exists(fullPath)) {
 			for (const auto& entry: std::filesystem::directory_iterator(fullPath)) {
 				if (entry.is_directory()) {
-					directoryPaths->emplace_back(entry.path().filename().generic_string());
+					directoryPaths->emplace_back(UTF8::PathToString(entry.path().filename()));
 				}
 			}
 		}
@@ -1026,7 +1026,7 @@ const std::vector<std::string>* LuaMan::FileList(const std::string& path) {
 		if (std::filesystem::exists(fullPath)) {
 			for (const auto& entry: std::filesystem::directory_iterator(fullPath)) {
 				if (entry.is_regular_file()) {
-					filePaths->emplace_back(entry.path().filename().generic_string());
+					filePaths->emplace_back(UTF8::PathToString(entry.path().filename()));
 				}
 			}
 		}
@@ -1085,12 +1085,12 @@ int LuaMan::FileOpen(const std::string& path, const std::string& accessMode) {
 		FILE* file = UTF8::OpenFile(fullPath, accessMode);
 #else
 		FILE* file = [&fullPath, &accessMode]() -> FILE* {
-			if (std::filesystem::exists(fullPath)) {
+			if (std::filesystem::exists(UTF8::PathFromString(fullPath))) {
 				return UTF8::OpenFile(fullPath, accessMode);
 			}
 
-			std::filesystem::path inspectedPath = System::GetWorkingDirectory();
-			const std::filesystem::path relativeFilePath = std::filesystem::path(fullPath).lexically_relative(inspectedPath);
+			std::filesystem::path inspectedPath = UTF8::PathFromString(System::GetWorkingDirectory());
+			const std::filesystem::path relativeFilePath = UTF8::PathFromString(fullPath).lexically_relative(inspectedPath);
 
 			// Iterate over all path parts
 			for (std::filesystem::path::const_iterator relativeFilePathIterator = relativeFilePath.begin(); relativeFilePathIterator != relativeFilePath.end(); ++relativeFilePathIterator) {
@@ -1099,7 +1099,7 @@ int LuaMan::FileOpen(const std::string& path, const std::string& accessMode) {
 				// Iterate over all entries in the path part's directory,
 				// to check if the path part is in there case insensitively
 				for (const std::filesystem::path& filesystemEntryPath: std::filesystem::directory_iterator(inspectedPath)) {
-					if (StringsEqualCaseInsensitive(filesystemEntryPath.filename().generic_string(), relativeFilePathIterator->generic_string())) {
+					if (StringsEqualCaseInsensitive(UTF8::PathToString(filesystemEntryPath.filename()), UTF8::PathToString(*relativeFilePathIterator))) {
 						inspectedPath = filesystemEntryPath;
 
 						// If the path part is found, stop looking for it
@@ -1111,7 +1111,7 @@ int LuaMan::FileOpen(const std::string& path, const std::string& accessMode) {
 				if (!pathPartExists) {
 					// If this is the last part, then all directories in relativeFilePath exist, but the file doesn't
 					if (std::next(relativeFilePathIterator) == relativeFilePath.end()) {
-						return UTF8::OpenFile((inspectedPath / relativeFilePath.filename()).generic_string(), accessMode);
+						return UTF8::OpenFile(UTF8::PathToString(inspectedPath / relativeFilePath.filename()), accessMode);
 					}
 
 					// Some directory in relativeFilePath doesn't exist, so the file can't be created
@@ -1120,7 +1120,7 @@ int LuaMan::FileOpen(const std::string& path, const std::string& accessMode) {
 			}
 
 			// If the file exists, open it
-			return UTF8::OpenFile(inspectedPath.generic_string(), accessMode);
+			return UTF8::OpenFile(UTF8::PathToString(inspectedPath), accessMode);
 		}();
 #endif
 		if (file) {

@@ -317,8 +317,8 @@ void RTEError::UnhandledExceptionFunc(const std::string& description, const std:
 
 	if (s_LastIgnoredAssertLocation.line() > 0) {
 		// This typically contains the absolute path to the file on whatever machine this was compiled on, so in that case get only the file name.
-		std::filesystem::path filePath = s_LastIgnoredAssertLocation.file_name();
-		std::string fileName = (filePath.has_root_name() || filePath.has_root_directory()) ? filePath.filename().generic_string() : s_LastIgnoredAssertLocation.file_name();
+		std::filesystem::path filePath = UTF8::PathFromString(s_LastIgnoredAssertLocation.file_name());
+		std::string fileName = (filePath.has_root_name() || filePath.has_root_directory()) ? UTF8::PathToString(filePath.filename()) : s_LastIgnoredAssertLocation.file_name();
 		std::string srcLocation = "file '" + fileName + "', line " + std::to_string(s_LastIgnoredAssertLocation.line()) + ",\nin function '" + s_LastIgnoredAssertLocation.function_name() + "'";
 
 		if (!s_LastIgnoredAssertDescription.empty()) {
@@ -363,8 +363,8 @@ void RTEError::AbortFunc(const std::string& description, const std::source_locat
 
 	if (!System::IsInExternalModuleValidationMode()) {
 		// This typically contains the absolute path to the file on whatever machine this was compiled on, so in that case get only the file name.
-		std::filesystem::path filePath = srcLocation.file_name();
-		std::string fileName = (filePath.has_root_name() || filePath.has_root_directory()) ? filePath.filename().generic_string() : srcLocation.file_name();
+		std::filesystem::path filePath = UTF8::PathFromString(srcLocation.file_name());
+		std::string fileName = (filePath.has_root_name() || filePath.has_root_directory()) ? UTF8::PathToString(filePath.filename()) : srcLocation.file_name();
 
 		std::string lineNum = std::to_string(srcLocation.line());
 		std::string funcName = srcLocation.function_name();
@@ -433,8 +433,8 @@ void RTEError::AssertFunc(const std::string& description, const std::source_loca
 	}
 
 	// This typically contains the absolute path to the file on whatever machine this was compiled on, so in that case get only the file name.
-	std::filesystem::path filePath = srcLocation.file_name();
-	std::string fileName = (filePath.has_root_name() || filePath.has_root_directory()) ? filePath.filename().generic_string() : srcLocation.file_name();
+	std::filesystem::path filePath = UTF8::PathFromString(srcLocation.file_name());
+	std::string fileName = (filePath.has_root_name() || filePath.has_root_directory()) ? UTF8::PathToString(filePath.filename()) : srcLocation.file_name();
 
 	std::string lineNum = std::to_string(srcLocation.line());
 	std::string funcName = srcLocation.function_name();

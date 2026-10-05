@@ -17,6 +17,7 @@
 #include "SLBackground.h"
 #include "Scene.h"
 #include "System.h"
+#include "UTF8.h"
 
 #include "RenderTarget.h"
 
@@ -640,8 +641,9 @@ int FrameMan::SaveScreenToPNGBlocking(const std::string& relativePath) {
 		return -1;
 	}
 	SaveScreenToBitmap();
-	const std::filesystem::path outputPath = std::filesystem::path(System::GetWorkingDirectory()) / System::GetScreenshotDirectory() / relativePath;
-	return IMG_SavePNG(m_ScreenDumpBuffer.get(), outputPath.string().c_str()) ? 0 : -1;
+	const std::filesystem::path outputPath = UTF8::PathFromString(System::GetWorkingDirectory()) / System::GetScreenshotDirectory() / UTF8::PathFromString(relativePath);
+	const std::string outputPathUTF8 = UTF8::PathToString(outputPath);
+	return IMG_SavePNG(m_ScreenDumpBuffer.get(), outputPathUTF8.c_str()) ? 0 : -1;
 }
 
 int FrameMan::SaveIndexedPNG(const char* fileName, BITMAP* bitmapToSave) const {
