@@ -12,7 +12,7 @@ Output is written to `ScreenShots/DebugRuns/`. Starting another debug run clears
 
 The process exits with code 0 only when the smoke run completes successfully. Performance counters are verified during the run and latched, so a later Activity/Scene transition to an initially empty map does not erase evidence collected during the stress phase. Host runs must pass the local stress-spawn check; client runs must observe replicated objects before the transition. A failed check, missing activity, interrupted run, or output setup error returns a nonzero exit code, so CI and scripts can detect failures without parsing screenshots.
 
-Use `-debug-run-preflight-only` to run the UTF-8, file-path and local world-state protocol/transport checks, then exit before SDL, content loading, simulation and rendering. This is useful for automated checks on Windows sessions without an interactive display. It does not count as a gameplay or rendering smoke test and creates no screenshots:
+Use `-debug-run-preflight-only` to run the UTF-8 text/path checks, a Cyrillic ZIP create/open/read/delete round trip, and the local world-state protocol/transport checks, then exit before SDL, content loading, simulation and rendering. This is useful for automated checks on Windows sessions without an interactive display. It does not count as a gameplay or rendering smoke test and creates no screenshots:
 
 ```powershell
 & '.\Cortex Command.debug.minimal.exe' -debug-run 60 -debug-run-preflight-only

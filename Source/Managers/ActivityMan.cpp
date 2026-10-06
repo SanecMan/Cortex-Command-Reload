@@ -25,14 +25,7 @@
 
 #include "MusicMan.h"
 #include "UTF8.h"
-
-#ifdef SYSTEM_MINIZIP
-#include <minizip/zip.h>
-#include <minizip/unzip.h>
-#else
-#include "zip.h"
-#include "unzip.h"
-#endif
+#include "UTF8Zip.h"
 
 #include "tracy/Tracy.hpp"
 
@@ -173,7 +166,7 @@ bool ActivityMan::SaveCurrentGame(const std::string& fileName) {
 	auto saveWriterData = [fileName, sceneLayerInfos, indexWriter](Writer* mainWriter) {
 		// Create zip sav file
 	const std::string saveFilePath = g_PresetMan.GetFullModulePath(c_UserScriptedSavesModuleName) + "/" + fileName + ".ccsave";
-	zipFile zippedSaveFile = zipOpen64(saveFilePath.c_str(), APPEND_STATUS_CREATE);
+	zipFile zippedSaveFile = UTF8::OpenZipForWriting(saveFilePath, APPEND_STATUS_CREATE);
 		if (!zippedSaveFile) {
 			g_ConsoleMan.PrintString("ERROR: Couldn't create zip save file!");
 			delete mainWriter;
@@ -273,12 +266,12 @@ bool ActivityMan::LoadAndLaunchGame(const std::string& fileName) {
 
 	// load zip sav file
 	std::string saveFilePath = filePath + ".ccsave";
-	unzFile zippedSaveFile = unzOpen64(saveFilePath.c_str());
+	unzFile zippedSaveFile = UTF8::OpenZipForReading(saveFilePath);
 	if (!zippedSaveFile) {
 		// Might be trying to open one we're already saving too, wait until we finish saving and try again
 		if (m_SaveGameTask.valid()) {
 			m_SaveGameTask.wait();
-			zippedSaveFile = unzOpen64(saveFilePath.c_str());
+			zippedSaveFile = UTF8::OpenZipForReading(saveFilePath);
 		}
 
 		if (!zippedSaveFile) {

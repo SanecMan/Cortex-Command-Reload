@@ -1,14 +1,9 @@
 #include "System.h"
 
 #include "RTETools.h"
-#ifdef SYSTEM_MINIZIP
-#include <minizip/unzip.h>
-#else
-#include "unzip.h"
-#endif
-
 #include "RTEError.h"
 #include "UTF8.h"
+#include "UTF8Zip.h"
 
 // Convenience macro to not have to write this out.
 #define _LINUX_OR_MACOSX_ (__unix__ || (__APPLE__ && __MACH__))
@@ -254,7 +249,7 @@ void System::PrintToCLI(const std::string& stringToPrint) {
 std::string System::ExtractZippedDataModule(const std::string& zippedModulePath) {
 	std::string zippedModuleName = System::GetModDirectory() + UTF8::PathToString(UTF8::PathFromString(zippedModulePath).filename());
 
-	unzFile zippedModule = unzOpen64(zippedModuleName.c_str());
+	unzFile zippedModule = UTF8::OpenZipForReading(zippedModuleName);
 	std::stringstream extractionProgressReport;
 	bool abortExtract = false;
 

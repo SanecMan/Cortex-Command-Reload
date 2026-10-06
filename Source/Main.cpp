@@ -61,6 +61,7 @@
 #include "System.h"
 #include "System/Reader.h"
 #include "System/UTF8.h"
+#include "System/UTF8Zip.h"
 #include "System/WorldStateProtocol.h"
 #include "System/WorldStateTerrainTest.h"
 #include "WorldStateCompression.h"
@@ -476,6 +477,44 @@ namespace {
 		if (!unicodeFilePathPassed) {
 			return false;
 		}
+
+		const std::string unicodeArchivePath = UTF8::PathToString(state.OutputDirectory / std::filesystem::u8path("debug-run-проверка-архива.zip"));
+		constexpr std::string_view archiveEntryContents = "UTF-8 archive path round trip";
+		zipFile unicodeArchiveWriter = UTF8::OpenZipForWriting(unicodeArchivePath, APPEND_STATUS_CREATE);
+		zip_fileinfo archiveEntryInfo{};
+		const int archiveEntryOpened = unicodeArchiveWriter ? zipOpenNewFileInZip_64(unicodeArchiveWriter, "entry.txt", &archiveEntryInfo, nullptr, 0, nullptr, 0,
+		                                                                            nullptr, Z_DEFLATED, -1, 0)
+		                                                  : ZIP_PARAMERROR;
+		const int archiveEntryWritten = archiveEntryOpened == ZIP_OK
+		                                    ? zipWriteInFileInZip(unicodeArchiveWriter, archiveEntryContents.data(), static_cast<std::uint32_t>(archiveEntryContents.size()))
+		                                    : ZIP_PARAMERROR;
+		const int archiveEntryClosed = archiveEntryOpened == ZIP_OK ? zipCloseFileInZip(unicodeArchiveWriter) : ZIP_PARAMERROR;
+		const int archiveClosed = unicodeArchiveWriter ? zipClose(unicodeArchiveWriter, nullptr) : ZIP_PARAMERROR;
+		unzFile unicodeArchiveReader = (archiveEntryWritten == ZIP_OK && archiveEntryClosed == ZIP_OK && archiveClosed == ZIP_OK)
+		                                   ? UTF8::OpenZipForReading(unicodeArchivePath)
+		                                   : nullptr;
+		const bool archiveEntryFound = unicodeArchiveReader && unzGoToFirstFile(unicodeArchiveReader) == UNZ_OK && unzOpenCurrentFile(unicodeArchiveReader) == UNZ_OK;
+		std::array<char, archiveEntryContents.size()> archiveContents{};
+		const int archiveBytesRead = archiveEntryFound ? unzReadCurrentFile(unicodeArchiveReader, archiveContents.data(), static_cast<std::uint32_t>(archiveContents.size())) : -1;
+		const bool unicodeArchiveRoundTripPassed = archiveBytesRead == static_cast<int>(archiveContents.size()) &&
+		                                          std::string_view(archiveContents.data(), archiveContents.size()) == archiveEntryContents;
+		if (unicodeArchiveReader) {
+			if (archiveEntryFound) unzCloseCurrentFile(unicodeArchiveReader);
+			unzClose(unicodeArchiveReader);
+		}
+		std::error_code archiveCleanupError;
+		const bool unicodeArchiveRemoved = std::filesystem::remove(UTF8::PathFromString(unicodeArchivePath), archiveCleanupError);
+		const bool unicodeArchivePathPassed = archiveEntryOpened == ZIP_OK && archiveEntryWritten == ZIP_OK && archiveEntryClosed == ZIP_OK && archiveClosed == ZIP_OK &&
+		                                      archiveEntryFound && unicodeArchiveRoundTripPassed && unicodeArchiveRemoved && !archiveCleanupError;
+		state.Log << "utf8_zip_path_smoke=" << (unicodeArchivePathPassed ? "passed" : "failed") << " writer_open=" << (unicodeArchiveWriter != nullptr)
+		          << " entry_open=" << (archiveEntryOpened == ZIP_OK) << " entry_written=" << (archiveEntryWritten == ZIP_OK)
+		          << " archive_open=" << (unicodeArchiveReader != nullptr) << " entry_found=" << archiveEntryFound
+		          << " round_trip=" << unicodeArchiveRoundTripPassed << " removed=" << unicodeArchiveRemoved << " cleanup_error=" << archiveCleanupError.value()
+		          << '\n' << std::flush;
+		if (!unicodeArchivePathPassed) {
+			return false;
+		}
+
 		WorldStateProtocol::Snapshot networkSnapshot;
 		networkSnapshot.Tick = 1234;
 		networkSnapshot.SceneRevision = 7;

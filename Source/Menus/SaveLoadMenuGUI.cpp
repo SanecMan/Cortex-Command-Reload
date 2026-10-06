@@ -19,16 +19,9 @@
 #include "GUITextBox.h"
 #include "GUIComboBox.h"
 #include "UTF8.h"
+#include "UTF8Zip.h"
 
 #include <execution>
-
-#ifdef SYSTEM_MINIZIP
-#include <minizip/zip.h>
-#include <minizip/unzip.h>
-#else
-#include "zip.h"
-#include "unzip.h"
-#endif
 
 using namespace RTE;
 
@@ -112,7 +105,7 @@ void SaveLoadMenuGUI::PopulateSaveGamesList() {
 	              [](SaveRecord& record) {
 		              // load zip sav file
 			              std::string filePath = UTF8::PathToString(record.SavePath);
-			              unzFile zippedSaveFile = unzOpen64(filePath.c_str());
+			              unzFile zippedSaveFile = UTF8::OpenZipForReading(filePath);
 		              if (!zippedSaveFile) {
 			              return;
 		              }
