@@ -56,6 +56,10 @@ The host waits until it has sent the client's baseline material patch for a dete
 
 The resident-memory measurement is the Windows working set or Linux resident pages, in bytes; `0` means that the platform query failed or is not implemented. The network check uses four local client peers and does not connect remote gameplay clients.
 
+### 2026-10-07 particle-settling crash follow-up
+
+The October 6 `AbortLog.txt` pointed to a null particle-material dereference in the settling pass. The current source guards both the particle material and terrain material before reading settling properties or drawing into terrain (`MovableMan::Update`); this is included in commit `d744362bc00`. Rebuilt Windows x64 `Debug Minimal` and `Final` configurations with MSBuild, then ran the Final executable through `-debug-run 60 -module VoidWanderers.rte`. The run spawned the 16-actor/256-particle stress batches, completed 60 updates, captured three screenshots, passed the UTF-8 glyph-render and world-state transport checks, and exited with `result=passed` (process exit status 0). Artifacts are in `ScreenShots/CrashGuardFinalVerifyOct7/`. This verifies the rebuilt executable on the automated stress scenario; it does not replay the exact saved game/session from the old crash dump. The build emitted one existing LuaJIT `C4244` conversion warning.
+
 On Windows, an unhandled exception also writes `AbortDump.dmp` next to `AbortLog.txt` and `AbortScreen.png`. The dump is overwritten by the next crash and includes thread state plus memory referenced from thread stacks; it can contain game/session data, so review it before sharing it publicly. Windows system error text in the crash dialog is converted to UTF-8 before it is passed to SDL.
 
 ## Latest crash follow-up
