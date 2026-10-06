@@ -145,9 +145,9 @@ void Controller::SetTeam(short team) {
 	m_Team = team;
 }
 
-void Controller::Update() {
+bool Controller::Update() {
 	if (IsDisabled()) {
-		return;
+		return false;
 	}
 
 	if (m_ControlledActor) {
@@ -155,22 +155,26 @@ void Controller::Update() {
 
 		if (m_ControlledActor->GetHealth() == 0.0f || m_ControlledActor->GetStatus() == Actor::DYING || m_ControlledActor->GetStatus() == Actor::DEAD) {
 			// Keep old states so jetpacks stay on etc
-			return;
+			return ShouldUpdateAIThisFrame();
 		}
 	}
 
 	switch (m_InputMode) {
 		case InputMode::CIM_PLAYER:
 			GetInputFromPlayer();
-			break;
+			return false;
 		case InputMode::CIM_AI:
-			if (ShouldUpdateAIThisFrame()) {
-				// AI will be updated in separate UpdateAI call, but we need to clear the command state for them
-				ResetCommandState();
+			{
+				const bool shouldUpdateAI = ShouldUpdateAIThisFrame();
+				if (shouldUpdateAI) {
+					// AI will be updated in separate UpdateAI call, but we need to clear the command state for them
+					ResetCommandState();
+				}
+				return shouldUpdateAI;
 			}
-			break;
 		default:
 			ResetCommandState();
+			return false;
 	}
 }
 

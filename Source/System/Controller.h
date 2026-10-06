@@ -293,8 +293,8 @@ namespace RTE {
 #pragma endregion
 
 #pragma region Virtual Override Methods
-		/// Updates this Controller. Supposed to be done every frame.
-		void Update();
+		/// Updates this Controller and reports whether an AI callback is due on this simulation update.
+		bool Update();
 #pragma endregion
 
 #pragma region Operator Overloads

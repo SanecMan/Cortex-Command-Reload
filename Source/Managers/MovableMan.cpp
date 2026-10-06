@@ -1844,36 +1844,76 @@ void MovableMan::UpdateControllers() {
 
 	g_PerformanceMan.StartPerformanceMeasurement(PerformanceMan::ActorsAI);
 	{
+		LuaStateWrapper& masterScriptState = g_LuaMan.GetMasterScriptState();
+		LuaStatesArray& luaStates = g_LuaMan.GetThreadedScriptStates();
+		bool threadedStateOrderChanged = m_ThreadedAIStateOrder.size() != luaStates.size();
+		if (!threadedStateOrderChanged) {
+			for (std::size_t stateIndex = 0; stateIndex < luaStates.size(); ++stateIndex) {
+				if (m_ThreadedAIStateOrder[stateIndex] != &luaStates[stateIndex]) {
+					threadedStateOrderChanged = true;
+					break;
+				}
+			}
+		}
+		if (threadedStateOrderChanged) {
+			m_ThreadedAIStateOrder.clear();
+			m_ThreadedAIStateIndices.clear();
+			m_ThreadedAIStateOrder.reserve(luaStates.size());
+			m_ThreadedAIStateIndices.reserve(luaStates.size());
+			for (std::size_t stateIndex = 0; stateIndex < luaStates.size(); ++stateIndex) {
+				LuaStateWrapper* state = &luaStates[stateIndex];
+				m_ThreadedAIStateOrder.push_back(state);
+				m_ThreadedAIStateIndices.emplace(state, stateIndex);
+			}
+			m_ActorsToUpdateAIByLuaState.resize(luaStates.size());
+		}
+
 		m_ActorsToUpdateAI.clear();
+		m_MasterActorsToUpdateAI.clear();
+		for (auto& actorsForState: m_ActorsToUpdateAIByLuaState) {
+			actorsForState.clear();
+		}
 		if (m_ActorsToUpdateAI.capacity() < m_Actors.size()) {
 			m_ActorsToUpdateAI.reserve(m_Actors.size());
 		}
 		for (Actor* actor: m_Actors) {
-			actor->GetController()->Update();
-			if (actor->GetController()->ShouldUpdateAIThisFrame()) {
+			if (actor->GetController()->Update()) {
 				m_ActorsToUpdateAI.push_back(actor);
+				LuaStateWrapper* actorLuaState = actor->GetLuaState();
+				if (actorLuaState == &masterScriptState) {
+					m_MasterActorsToUpdateAI.push_back(actor);
+				} else {
+					const auto stateIndex = m_ThreadedAIStateIndices.find(actorLuaState);
+					if (stateIndex != m_ThreadedAIStateIndices.end()) {
+						m_ActorsToUpdateAIByLuaState[stateIndex->second].push_back(actor);
+					}
+				}
 			}
 		}
 
-		LuaStateWrapper& masterScriptState = g_LuaMan.GetMasterScriptState();
 		g_LuaMan.SetThreadLuaStateOverride(&masterScriptState);
-		for (Actor* actor: m_ActorsToUpdateAI) {
-			if (actor->GetLuaState() == &masterScriptState) {
-				actor->RunScriptedFunctionInAppropriateScripts("ThreadedUpdateAI", false, true, {}, {}, {});
-			}
+		for (Actor* actor: m_MasterActorsToUpdateAI) {
+			actor->RunScriptedFunctionInAppropriateScripts("ThreadedUpdateAI", false, true, {}, {}, {});
 		}
 		g_LuaMan.SetThreadLuaStateOverride(nullptr);
 
-		LuaStatesArray& luaStates = g_LuaMan.GetThreadedScriptStates();
-		g_ThreadMan.GetPriorityThreadPool().parallelize_loop(luaStates.size(),
+		m_ActiveThreadedAIStateIndices.clear();
+		if (m_ActiveThreadedAIStateIndices.capacity() < m_ActorsToUpdateAIByLuaState.size()) {
+			m_ActiveThreadedAIStateIndices.reserve(m_ActorsToUpdateAIByLuaState.size());
+		}
+		for (std::size_t stateIndex = 0; stateIndex < m_ActorsToUpdateAIByLuaState.size(); ++stateIndex) {
+			if (!m_ActorsToUpdateAIByLuaState[stateIndex].empty()) {
+				m_ActiveThreadedAIStateIndices.push_back(stateIndex);
+			}
+		}
+		g_ThreadMan.GetPriorityThreadPool().parallelize_loop(m_ActiveThreadedAIStateIndices.size(),
 		                                                     [&](int start, int end) {
 			                                                     RTEAssert(start + 1 == end, "Threaded script state being updated across multiple threads!");
-			                                                     LuaStateWrapper& luaState = luaStates[start];
+			                                                     const std::size_t stateIndex = m_ActiveThreadedAIStateIndices[start];
+			                                                     LuaStateWrapper& luaState = luaStates[stateIndex];
 			                                                     g_LuaMan.SetThreadLuaStateOverride(&luaState);
-			                                                     for (Actor* actor: m_ActorsToUpdateAI) {
-				                                                     if (actor->GetLuaState() == &luaState) {
-				                                                         actor->RunScriptedFunctionInAppropriateScripts("ThreadedUpdateAI", false, true, {}, {}, {});
-				                                                     }
+			                                                     for (Actor* actor: m_ActorsToUpdateAIByLuaState[stateIndex]) {
+				                                                     actor->RunScriptedFunctionInAppropriateScripts("ThreadedUpdateAI", false, true, {}, {}, {});
 			                                                     }
 			                                                     g_LuaMan.SetThreadLuaStateOverride(nullptr);
 		                                                     })

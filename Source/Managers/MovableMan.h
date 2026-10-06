@@ -14,6 +14,7 @@
 #include <mutex>
 #include <map>
 #include <future>
+#include <unordered_map>
 #include <unordered_set>
 
 #define g_MovableMan MovableMan::Instance()
@@ -30,6 +31,7 @@ namespace RTE {
 	class SceneObject;
 	class Box;
 	class LuabindObjectWrapper;
+	class LuaStateWrapper;
 
 	/// A struct to keep all data about a an alarming event for the AI Actors.
 	struct AlarmEvent {
@@ -580,6 +582,12 @@ namespace RTE {
 		std::deque<Actor*> m_Actors;
 		// Reused scratch list for actors whose throttled AI callbacks run this update.
 		std::vector<Actor*> m_ActorsToUpdateAI;
+		// Reused buckets keep each Lua thread's AI callbacks isolated without rescanning all actors per thread.
+		std::vector<Actor*> m_MasterActorsToUpdateAI;
+		std::vector<std::vector<Actor*>> m_ActorsToUpdateAIByLuaState;
+		std::vector<LuaStateWrapper*> m_ThreadedAIStateOrder;
+		std::unordered_map<const LuaStateWrapper*, std::size_t> m_ThreadedAIStateIndices;
+		std::vector<std::size_t> m_ActiveThreadedAIStateIndices;
 		// A map to give a unique contiguous identifier per-actor. This is re-created per frame.
 		std::unordered_map<const Actor*, int> m_ContiguousActorIDs;
 		// List of items that are pickup-able by actors
