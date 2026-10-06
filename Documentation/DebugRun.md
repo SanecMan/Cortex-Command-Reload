@@ -29,6 +29,15 @@ At the configured update (600 by default), after an external client has connecte
 
 When `-world-state-server` is given an explicit port, debug mode now binds that port too; without one it still requests an ephemeral port to avoid collisions.
 
+To verify that lifecycle packets are polled while the host simulation is paused, start a long-running diagnostic host and then a client from the game directory:
+
+```powershell
+& '.\Cortex Command.debug.minimal.exe' -debug-run 36000 -debug-run-output NetworkPauseHost -debug-run-pause-after-client -debug-run-require-client-disconnect-after-pause -world-state-server 18000 -module VoidWanderers.rte
+& '.\Cortex Command.debug.minimal.exe' -debug-run 180 -debug-run-output NetworkPauseClient -world-state-client 127.0.0.1 18000 -module VoidWanderers.rte
+```
+
+The host waits until it has sent snapshots to a real client, pauses simulation 30 updates after the first connection, and keeps rendering/polling the transport. The short client run exits normally after receiving and applying replicated state. The host then records `network_disconnect_while_paused=passed`, saves a final screenshot, and exits; its log also shows that the server remained active until disconnect handling completed. Each process loads the official content plus the selected `VoidWanderers.rte` module, avoiding the rest of the installed Mods collection for this protocol test.
+
 The client transition check treats the requested update count as a minimum. If the host simulation is slower, the client keeps polling and rendering until it observes the target Activity/Scene revision, with a 300-second timeout after gameplay starts. The final screenshot is captured after that transition is observed.
 
 To verify a real host-side terrain edit reaches a separate client, run a longer host session and read the ephemeral port from its `WorldStateServer.log`:

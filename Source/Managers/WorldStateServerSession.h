@@ -24,6 +24,7 @@ namespace RTE {
 	public:
 		bool Start(const std::string& bindAddress, unsigned short port, unsigned short maxPlayers, const std::string& logPath, bool truncateLog = false);
 		void Stop();
+		void PollNetwork(std::uint32_t simulationTick);
 		void Update(std::uint32_t simulationTick);
 		void EnableDebugTerrainMutationSmoke();
 		void EnableDebugEmptyWorldSnapshotSmoke() { m_DebugEmptyWorldSnapshotSmokeEnabled = true; }
@@ -74,6 +75,7 @@ namespace RTE {
 		std::unordered_map<std::string, bool> m_RestartVotesByClient;
 		std::unordered_map<std::string, bool> m_PreviousResetInputByClient;
 		std::unordered_map<std::string, bool> m_PreviousRestartInputByClient;
+		std::deque<WorldStateTransport::ReceivedPacket> m_PendingInputPackets;
 		std::chrono::steady_clock::time_point m_LastActivityVoteAction{};
 		std::array<bool, Players::MaxPlayerCount> m_InputSlotsInUse{};
 		bool m_DebugTerrainMutationSmokeEnabled = false;
@@ -83,6 +85,7 @@ namespace RTE {
 		bool m_DebugTerrainMutationSmokePassed = false;
 		bool m_DebugTerrainMutationPatchSent = false;
 		bool m_LoggedWaitingForWorldState = false;
+		bool m_TerrainBaselinePending = false;
 		bool m_DebugEmptyWorldSnapshotSmokeEnabled = false;
 		int m_DebugTerrainMutationPixelX = 0;
 		int m_DebugTerrainMutationPixelY = 0;

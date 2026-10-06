@@ -219,6 +219,12 @@ namespace {
 		bool RequireWorldStateTransition = false;
 		bool RequestHostTerrainMutationSmoke = false;
 		bool RequireRemoteTerrainMutationSmoke = false;
+		bool PauseSimulationAfterClient = false;
+		bool RequireClientDisconnectAfterPause = false;
+		bool SawClientForPauseTest = false;
+		bool SimulationPausedByDebugRun = false;
+		bool SawClientBeforeDebugDisconnect = false;
+		bool ClientDisconnectWhilePausedObserved = false;
 		bool RemoteTerrainMutationObserved = false;
 		bool TerrainMutationProbeLocated = false;
 		int TerrainMutationProbeX = 0;
@@ -234,6 +240,7 @@ namespace {
 		int HostWorldStateTransitionAppliedUpdate = 0;
 		WorldStateProtocol::Snapshot ProtocolSmokeSnapshot;
 		int HostWorldStateTransitionUpdate = 600;
+		int PauseSimulationAfterClientUpdate = 0;
 		std::string ExpectedTransitionActivity = "Skirmish Defense";
 		std::string ExpectedTransitionScene = "Ketanot Hills";
 		int UpdateLimit = 600;
@@ -307,6 +314,8 @@ namespace {
 			if (argument == "-debug-run-preflight-only") state.PreflightOnly = true;
 			if (argument == "-debug-run-world-state-transition") state.RequestHostWorldStateTransition = true;
 			if (argument == "-debug-run-require-world-state-transition") state.RequireWorldStateTransition = true;
+			if (argument == "-debug-run-pause-after-client") state.PauseSimulationAfterClient = true;
+			if (argument == "-debug-run-require-client-disconnect-after-pause") state.RequireClientDisconnectAfterPause = true;
 		if (argument == "-debug-run-world-state-transition-update" && i + 1 < argc) {
 			int transitionUpdate = 0;
 			const std::string_view transitionUpdateArgument(argv[++i]);
@@ -773,6 +782,18 @@ namespace {
 			state.Log << "performance_counters_observed=passed at_update=" << state.SimulationUpdates
 			          << " actors=" << g_MovableMan.GetActorCount() << " scene_spawns=" << MovableObject::GetSceneSpawnEvents() << '\n' << std::flush;
 		}
+		if (state.PauseSimulationAfterClient && worldStateServer && worldStateServer->GetConnectedClientCount() > 0) {
+			if (!state.SawClientForPauseTest) {
+				state.SawClientForPauseTest = true;
+				state.PauseSimulationAfterClientUpdate = state.SimulationUpdates + 30;
+				state.Log << "pause_after_client_scheduled=true at_update=" << state.PauseSimulationAfterClientUpdate << '\n' << std::flush;
+			}
+			if (!state.SimulationPausedByDebugRun && state.SimulationUpdates >= state.PauseSimulationAfterClientUpdate) {
+				g_TimerMan.PauseSim(true);
+				state.SimulationPausedByDebugRun = true;
+				state.Log << "simulation_paused_after_client=true at_update=" << state.SimulationUpdates << '\n' << std::flush;
+			}
+		}
 	}
 
 	WorldStateProtocol::Snapshot CaptureDebugWorldStateSnapshot() {
@@ -1192,6 +1213,11 @@ namespace {
 		          << ",vsync:" << g_WindowMan.GetVSyncEnabled() << '\n' << std::flush;
 		success = success && performanceCountersPassed;
 		success = success && state.LuaFilesystemProbePassed;
+		if (state.RequireClientDisconnectAfterPause) {
+			state.Log << "network_disconnect_while_paused=" << (state.ClientDisconnectWhilePausedObserved ? "passed" : "failed")
+			          << " paused=" << state.SimulationPausedByDebugRun << " client_seen=" << state.SawClientBeforeDebugDisconnect << '\n' << std::flush;
+			success = success && state.ClientDisconnectWhilePausedObserved;
+		}
 		success = success && utf8GlyphRenderPassed && worldStateTransitionPassed && remoteTerrainMutationPassed && hostTerrainMutationPassed && state.HostSessionTestPassed && worldIdentityStable && replicaSmokePassed && transientPixelReplicaPassed && terrainPatchApplyPassed &&
 		          networkInputApplicationPassed && worldSnapshotPassed && snapshotCompressionPassed && liveSnapshotTransportPassed;
 		const double elapsedSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - state.StartTime).count();
@@ -1225,6 +1251,24 @@ namespace {
 		}
 		state.Log.close();
 		System::SetQuit();
+	}
+
+	void CheckDebugRunClientDisconnectWhilePaused() {
+		DebugRunState& state = GetDebugRunState();
+		if (!state.Enabled || !state.RequireClientDisconnectAfterPause || !worldStateServer || System::IsSetToQuit()) {
+			return;
+		}
+		if (worldStateServer->GetConnectedClientCount() > 0) {
+			state.SawClientBeforeDebugDisconnect = true;
+		}
+		if (state.SimulationPausedByDebugRun && state.SawClientBeforeDebugDisconnect && worldStateServer->GetConnectedClientCount() == 0) {
+			state.ClientDisconnectWhilePausedObserved = true;
+			state.Log << "network_disconnect_detected_while_simulation_paused=true\n" << std::flush;
+			const std::string imageName = UTF8::PathToString(state.OutputDirectory.filename()) + "/debug-run-final.png";
+			const int screenshotResult = g_FrameMan.SaveScreenToPNGBlocking(imageName);
+			state.Log << "screenshot=" << imageName << " result=" << screenshotResult << '\n' << std::flush;
+			FinishDebugRun(true);
+		}
 	}
 
 	void CaptureDebugRunFrame() {
@@ -1609,6 +1653,12 @@ void RunGameLoop() {
 		g_WindowMan.ClearBackbuffer();
 
 		g_TimerMan.Update();
+		// Keep transport/lifecycle polling responsive even when the fixed simulation
+		// step is paused or an Activity is sitting in an editor-only state. Gameplay
+		// commands and world snapshots are still applied only on simulation ticks.
+		if (worldStateClient) worldStateClient->Update();
+		if (worldStateServer && worldStateServer->IsStarted()) worldStateServer->PollNetwork(worldStateServerSimulationTick);
+		CheckDebugRunClientDisconnectWhilePaused();
 
 		// Simulation update, as many times as the fixed update step allows in the span since last frame draw.
 		while (g_TimerMan.TimeForSimUpdate()) {
@@ -1619,7 +1669,6 @@ void RunGameLoop() {
 			g_PerformanceMan.NewPerformanceSample();
 			g_PerformanceMan.UpdateMSPSU();
 			g_TimerMan.UpdateSim();
-			if (worldStateClient && worldStateClient->IsConnected()) worldStateClient->Update();
 			if (worldStateServer && worldStateServer->IsStarted()) {
 				worldStateServer->Update(++worldStateServerSimulationTick);
 			}

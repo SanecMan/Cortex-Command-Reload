@@ -53,6 +53,7 @@ bool WorldStateServerSession::Start(const std::string& bindAddress, unsigned sho
 	m_RestartVotesByClient.clear();
 	m_PreviousResetInputByClient.clear();
 	m_PreviousRestartInputByClient.clear();
+	m_PendingInputPackets.clear();
 	m_LastActivityVoteAction = {};
 	m_InputSlotsInUse.fill(false);
 	// This session runs inside the playable host client. Keep its local PlayerOne
@@ -66,6 +67,7 @@ bool WorldStateServerSession::Start(const std::string& bindAddress, unsigned sho
 	m_DebugTerrainMutationSmokePassed = false;
 	m_DebugTerrainMutationPatchSent = false;
 	m_LoggedWaitingForWorldState = false;
+	m_TerrainBaselinePending = false;
 	m_DebugEmptyWorldSnapshotSmokeEnabled = false;
 	Log("INFO: world-state host listening on " + bindAddress + ":" + std::to_string(m_Transport.GetBoundPort()) +
 	    " (max clients " + std::to_string(maxPlayers) + ")");
@@ -85,6 +87,8 @@ void WorldStateServerSession::Stop() {
 	m_RestartVotesByClient.clear();
 	m_PreviousResetInputByClient.clear();
 	m_PreviousRestartInputByClient.clear();
+	m_PendingInputPackets.clear();
+	m_TerrainBaselinePending = false;
 	m_InputSlotsInUse.fill(false);
 	if (m_SnapshotCaptureWindowSamples > 0 || m_SnapshotPayloadWindowSamples > 0) {
 		const double averageCaptureMilliseconds = m_SnapshotCaptureWindowSamples > 0
@@ -197,25 +201,19 @@ std::size_t WorldStateServerSession::ConfigureActivityPlayers(Activity& activity
 	return configuredPlayers;
 }
 
-void WorldStateServerSession::Update(std::uint32_t simulationTick) {
+void WorldStateServerSession::PollNetwork(std::uint32_t simulationTick) {
 	if (!m_Transport.IsStarted()) {
 		return;
-	}
-	for (const auto& [clientAddress, player] : m_PlayerSlotByClient) {
-		g_UInputMan.ClearNetworkInputImpulse(player);
 	}
 	std::vector<WorldStateTransport::ReceivedPacket> packets;
 	m_Transport.Poll(packets);
 	for (const WorldStateTransport::ReceivedPacket& packet : packets) {
 		if (packet.Identifier == ID_NEW_INCOMING_CONNECTION) {
 			++m_ConnectedClients;
-			if (g_SceneMan.GetScene() && g_SceneMan.GetScene()->GetTerrain()) {
-				// A queued patch may have been captured before this peer connected or before
-				// another terrain edit. Rebuild the pending batch from the current terrain;
-				// existing peers receive the same fresh baseline as the new peer.
-				m_PendingTerrainPatches.clear();
-				g_SceneMan.RegisterTerrainChange(0, 0, g_SceneMan.GetSceneWidth(), g_SceneMan.GetSceneHeight());
-			}
+			// Defer terrain access until the next simulation update, but remember to
+			// rebuild the batch for this newly connected peer.
+			m_PendingTerrainPatches.clear();
+			m_TerrainBaselinePending = true;
 			const std::string clientAddress(packet.Sender.ToString(true));
 			m_LastInputSequenceByClient.erase(clientAddress);
 			m_ResetVotesByClient.erase(clientAddress);
@@ -236,12 +234,6 @@ void WorldStateServerSession::Update(std::uint32_t simulationTick) {
 			if (!m_Transport.SendClientAssignment(packet.Sender, assignment, simulationTick)) {
 				Log("ERROR: could not send client player-slot assignment to " + clientAddress);
 			}
-			if (assignedPlayer != Players::NoPlayer && g_ActivityMan.IsInActivity() && g_ActivityMan.GetActivity()) {
-				const std::size_t configuredPlayers = ConfigureActivityPlayers(*g_ActivityMan.GetActivity(), false);
-				if (configuredPlayers > 0) {
-					Log("INFO: added " + std::to_string(configuredPlayers) + " connected client(s) to the running Activity");
-				}
-			}
 			Log("INFO: client connected from " + clientAddress + " (" + std::to_string(m_ConnectedClients) + " connected, input slot " +
 			    (assignedPlayer == Players::NoPlayer ? std::string("none") : std::to_string(assignedPlayer)) + ")");
 		} else if (packet.Identifier == ID_DISCONNECTION_NOTIFICATION || packet.Identifier == ID_CONNECTION_LOST) {
@@ -257,51 +249,79 @@ void WorldStateServerSession::Update(std::uint32_t simulationTick) {
 				m_InputSlotsInUse[slot->second] = false;
 				m_PlayerSlotByClient.erase(slot);
 			}
+			std::erase_if(m_PendingInputPackets, [&clientAddress](const WorldStateTransport::ReceivedPacket& pendingPacket) {
+				return pendingPacket.Sender.ToString(true) == clientAddress;
+			});
 			Log("INFO: client disconnected from " + clientAddress + " (" + std::to_string(m_ConnectedClients) + " connected)");
 		} else if (packet.Identifier == ID_CCR_WORLD_STATE) {
-			WorldStateProtocol::InputCommand command;
-			std::uint32_t sequence = 0;
-			const std::string clientAddress(packet.Sender.ToString(true));
-			auto previous = m_LastInputSequenceByClient.find(clientAddress);
-			if (!WorldStateProtocol::DecodeInputCommand(packet.Payload, command, &sequence) ||
-			    (previous != m_LastInputSequenceByClient.end() && static_cast<std::int32_t>(sequence - previous->second) <= 0)) {
-				Log("WARNING: rejected invalid or stale client input command from " + clientAddress);
+			constexpr std::size_t c_MaxPendingInputPackets = 512;
+			if (m_PendingInputPackets.size() == c_MaxPendingInputPackets) {
+				m_PendingInputPackets.pop_front();
+			}
+			m_PendingInputPackets.push_back(packet);
+		}
+	}
+}
+
+void WorldStateServerSession::Update(std::uint32_t simulationTick) {
+	if (!m_Transport.IsStarted()) {
+		return;
+	}
+	PollNetwork(simulationTick);
+	for (const auto& [clientAddress, player] : m_PlayerSlotByClient) {
+		g_UInputMan.ClearNetworkInputImpulse(player);
+	}
+	if (m_TerrainBaselinePending) {
+		if (g_SceneMan.GetScene() && g_SceneMan.GetScene()->GetTerrain()) {
+			g_SceneMan.RegisterTerrainChange(0, 0, g_SceneMan.GetSceneWidth(), g_SceneMan.GetSceneHeight());
+			m_TerrainBaselinePending = false;
+		}
+	}
+	while (!m_PendingInputPackets.empty()) {
+		WorldStateTransport::ReceivedPacket packet = std::move(m_PendingInputPackets.front());
+		m_PendingInputPackets.pop_front();
+		WorldStateProtocol::InputCommand command;
+		std::uint32_t sequence = 0;
+		const std::string clientAddress(packet.Sender.ToString(true));
+		auto previous = m_LastInputSequenceByClient.find(clientAddress);
+		if (!WorldStateProtocol::DecodeInputCommand(packet.Payload, command, &sequence) ||
+		    (previous != m_LastInputSequenceByClient.end() && static_cast<std::int32_t>(sequence - previous->second) <= 0)) {
+			Log("WARNING: rejected invalid or stale client input command from " + clientAddress);
+			continue;
+		}
+		auto playerSlot = m_PlayerSlotByClient.find(clientAddress);
+		if (playerSlot == m_PlayerSlotByClient.end()) {
+			Log("WARNING: rejected gameplay input from spectator " + clientAddress + " (no free player slot)");
+			continue;
+		}
+		m_LastInputSequenceByClient[clientAddress] = sequence;
+		const bool previousReset = m_PreviousResetInputByClient[clientAddress];
+		const bool previousRestart = m_PreviousRestartInputByClient[clientAddress];
+		if (command.ResetActivityVote && !previousReset) {
+			m_ResetVotesByClient[clientAddress] = true;
+		}
+		if (command.RestartActivityVote && !previousRestart) {
+			m_RestartVotesByClient[clientAddress] = true;
+		}
+		m_PreviousResetInputByClient[clientAddress] = command.ResetActivityVote;
+		m_PreviousRestartInputByClient[clientAddress] = command.RestartActivityVote;
+		if (!m_DebugEmptyWorldSnapshotSmokeEnabled) {
+			const Activity* activity = g_ActivityMan.GetActivity();
+			if (!activity || !activity->PlayerActive(playerSlot->second) || !activity->PlayerHuman(playerSlot->second)) {
+				Log("WARNING: rejected gameplay input from " + clientAddress + " because its player slot is not active in the current Activity");
 				continue;
 			}
-			auto playerSlot = m_PlayerSlotByClient.find(clientAddress);
-			if (playerSlot == m_PlayerSlotByClient.end()) {
-				Log("WARNING: rejected gameplay input from spectator " + clientAddress + " (no free player slot)");
-				continue;
-			}
-			m_LastInputSequenceByClient[clientAddress] = sequence;
-			const bool previousReset = m_PreviousResetInputByClient[clientAddress];
-			const bool previousRestart = m_PreviousRestartInputByClient[clientAddress];
-			if (command.ResetActivityVote && !previousReset) {
-				m_ResetVotesByClient[clientAddress] = true;
-			}
-			if (command.RestartActivityVote && !previousRestart) {
-				m_RestartVotesByClient[clientAddress] = true;
-			}
-			m_PreviousResetInputByClient[clientAddress] = command.ResetActivityVote;
-			m_PreviousRestartInputByClient[clientAddress] = command.RestartActivityVote;
-			if (!m_DebugEmptyWorldSnapshotSmokeEnabled) {
-				const Activity* activity = g_ActivityMan.GetActivity();
-				if (!activity || !activity->PlayerActive(playerSlot->second) || !activity->PlayerHuman(playerSlot->second)) {
-					Log("WARNING: rejected gameplay input from " + clientAddress + " because its player slot is not active in the current Activity");
-					continue;
-				}
-			}
-			++m_InputCommandCount;
-			constexpr float c_AnalogScale = 1.0F / 32767.0F;
-			const Vector mouseMovement(static_cast<float>(command.MouseDeltaX), static_cast<float>(command.MouseDeltaY));
-			const Vector analogMove(command.AnalogMoveX * c_AnalogScale, command.AnalogMoveY * c_AnalogScale);
-			const Vector analogAim(command.AnalogAimX * c_AnalogScale, command.AnalogAimY * c_AnalogScale);
-			g_UInputMan.SetNetworkInputState(playerSlot->second, command.HeldElements, mouseMovement, command.MouseWheelDelta,
-			                                command.MouseButtonsHeld, analogMove, analogAim);
-			if (m_InputCommandCount == 1 || m_InputCommandCount % 120 == 0) {
-				Log("INFO: applied " + std::to_string(m_InputCommandCount) + " client input commands to player slot " +
-				    std::to_string(playerSlot->second) + "; latest held mask=" + std::to_string(command.HeldElements));
-			}
+		}
+		++m_InputCommandCount;
+		constexpr float c_AnalogScale = 1.0F / 32767.0F;
+		const Vector mouseMovement(static_cast<float>(command.MouseDeltaX), static_cast<float>(command.MouseDeltaY));
+		const Vector analogMove(command.AnalogMoveX * c_AnalogScale, command.AnalogMoveY * c_AnalogScale);
+		const Vector analogAim(command.AnalogAimX * c_AnalogScale, command.AnalogAimY * c_AnalogScale);
+		g_UInputMan.SetNetworkInputState(playerSlot->second, command.HeldElements, mouseMovement, command.MouseWheelDelta,
+		                                command.MouseButtonsHeld, analogMove, analogAim);
+		if (m_InputCommandCount == 1 || m_InputCommandCount % 120 == 0) {
+			Log("INFO: applied " + std::to_string(m_InputCommandCount) + " client input commands to player slot " +
+			    std::to_string(playerSlot->second) + "; latest held mask=" + std::to_string(command.HeldElements));
 		}
 	}
 	if (m_ConnectedClients > 0 && g_ActivityMan.IsInActivity() && g_ActivityMan.GetActivity()) {
