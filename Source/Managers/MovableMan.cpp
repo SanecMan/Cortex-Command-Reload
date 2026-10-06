@@ -1728,26 +1728,29 @@ void MovableMan::Update() {
 			midIt = parIt;
 
 			while (parIt != m_Particles.end()) {
-				Vector parPos((*parIt)->GetPos());
-				Material const* terrMat = g_SceneMan.GetMaterialFromID(g_SceneMan.GetTerrain()->GetMaterialPixel(parPos.GetFloorIntX(), parPos.GetFloorIntY()));
-				int piling = (*parIt)->GetMaterial()->GetPiling();
-				if (piling > 0) {
-					for (int s = 0; s < piling && (terrMat->GetIndex() == (*parIt)->GetMaterial()->GetIndex() || terrMat->GetIndex() == (*parIt)->GetMaterial()->GetSettleMaterial()); ++s) {
+				MovableObject* particle = *parIt;
+				Vector parPos(particle->GetPos());
+				SLTerrain* terrain = g_SceneMan.GetTerrain();
+				Material const* particleMat = particle->GetMaterial();
+				Material const* terrMat = terrain ? g_SceneMan.GetMaterialFromID(terrain->GetMaterialPixel(parPos.GetFloorIntX(), parPos.GetFloorIntY())) : nullptr;
+				if (particleMat && terrMat) {
+					int piling = particleMat->GetPiling();
+					for (int s = 0; s < piling && terrMat && (terrMat->GetIndex() == particleMat->GetIndex() || terrMat->GetIndex() == particleMat->GetSettleMaterial()); ++s) {
 						if ((piling - s) % 2 == 0) {
 							parPos.m_Y -= 1.0F;
 						} else {
 							parPos.m_X += (RandomNum() >= 0.5F ? 1.0F : -1.0F);
 						}
-						terrMat = g_SceneMan.GetMaterialFromID(g_SceneMan.GetTerrain()->GetMaterialPixel(parPos.GetFloorIntX(), parPos.GetFloorIntY()));
+						terrMat = g_SceneMan.GetMaterialFromID(terrain->GetMaterialPixel(parPos.GetFloorIntX(), parPos.GetFloorIntY()));
 					}
 					(*parIt)->SetPos(parPos.GetFloored());
+					if (terrMat && particle->GetDrawPriority() >= terrMat->GetPriority()) {
+						particle->DrawToTerrain(terrain);
+					}
 				}
-				if ((*parIt)->GetDrawPriority() >= terrMat->GetPriority()) {
-					(*parIt)->DrawToTerrain(g_SceneMan.GetTerrain());
-				}
-				(*parIt)->DestroyScriptState();
-				delete (*parIt);
-				m_ValidParticles.erase(*parIt);
+				particle->DestroyScriptState();
+				m_ValidParticles.erase(particle);
+				delete particle;
 				parIt++;
 			}
 			m_Particles.erase(midIt, m_Particles.end());
