@@ -115,9 +115,9 @@ void MOPixel::Destroy(bool notInherited) {
 	Clear();
 }
 
-int MOPixel::GetDrawPriority() const { return m_Atom->GetMaterial()->GetPriority(); }
+int MOPixel::GetDrawPriority() const { return GetMaterial()->GetPriority(); }
 
-const Material* MOPixel::GetMaterial() const { return m_Atom->GetMaterial(); }
+const Material* MOPixel::GetMaterial() const { return m_Atom ? m_Atom->GetMaterial() : g_SceneMan.GetMaterialFromID(g_MaterialAir); }
 
 void MOPixel::SetAtom(Atom* newAtom) {
 	delete m_Atom;

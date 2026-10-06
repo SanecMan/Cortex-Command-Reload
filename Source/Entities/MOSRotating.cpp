@@ -606,9 +606,7 @@ void MOSRotating::SetAsNoID() {
 }
 
 Material const* MOSRotating::GetMaterial() const {
-	//    if (m_pAtomGroup)
-	return m_pAtomGroup->GetMaterial();
-	//    return 0;
+	return m_pAtomGroup ? m_pAtomGroup->GetMaterial() : g_SceneMan.GetMaterialFromID(g_MaterialAir);
 }
 
 /*

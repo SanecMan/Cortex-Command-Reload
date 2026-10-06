@@ -78,9 +78,9 @@ void MOSParticle::Destroy(bool notInherited) {
 	Clear();
 }
 
-int MOSParticle::GetDrawPriority() const { return m_Atom->GetMaterial()->GetPriority(); }
+int MOSParticle::GetDrawPriority() const { return GetMaterial()->GetPriority(); }
 
-const Material* MOSParticle::GetMaterial() const { return m_Atom->GetMaterial(); }
+const Material* MOSParticle::GetMaterial() const { return m_Atom ? m_Atom->GetMaterial() : g_SceneMan.GetMaterialFromID(g_MaterialAir); }
 
 void MOSParticle::SetAtom(Atom* newAtom) {
 	delete m_Atom;
