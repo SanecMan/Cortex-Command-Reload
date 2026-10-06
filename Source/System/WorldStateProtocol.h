@@ -18,7 +18,7 @@
 namespace RTE::WorldStateProtocol {
 
 inline constexpr std::uint32_t c_Magic = 0x31524343; // "CCR1" on the wire.
-inline constexpr std::uint16_t c_Version = 6;
+inline constexpr std::uint16_t c_Version = 7;
 inline constexpr std::size_t c_HeaderSize = 16;
 inline constexpr std::size_t c_MaxPacketSize = 4 * 1024 * 1024;
 inline constexpr std::size_t c_MaxObjects = 65535;
@@ -72,6 +72,15 @@ struct ObjectState {
 	float PixelMass = 0.0F;
 	std::uint32_t PixelLifetime = 0;
 	float PixelSharpness = 1.0F;
+	bool HasEquippedDevice = false;
+	std::string EquippedDeviceClassName;
+	std::string EquippedDeviceModuleName;
+	std::string EquippedDevicePresetName;
+	bool HasEquippedDeviceMagazine = false;
+	std::string EquippedDeviceMagazineClassName;
+	std::string EquippedDeviceMagazineModuleName;
+	std::string EquippedDeviceMagazinePresetName;
+	std::int32_t EquippedDeviceMagazineRounds = 0;
 };
 
 struct Snapshot {
@@ -165,6 +174,27 @@ namespace Detail {
 	}
 
 	inline bool ValidObject(const ObjectState& object) {
+		const bool equipmentIdentityValid = object.EquippedDeviceClassName.size() <= c_MaxStringBytes &&
+		                                   object.EquippedDeviceModuleName.size() <= c_MaxStringBytes &&
+		                                   object.EquippedDevicePresetName.size() <= c_MaxStringBytes &&
+		                                   object.EquippedDeviceMagazineClassName.size() <= c_MaxStringBytes &&
+		                                   object.EquippedDeviceMagazineModuleName.size() <= c_MaxStringBytes &&
+		                                   object.EquippedDeviceMagazinePresetName.size() <= c_MaxStringBytes &&
+		                                   UTF8::IsValid(object.EquippedDeviceClassName) && UTF8::IsValid(object.EquippedDeviceModuleName) &&
+		                                   UTF8::IsValid(object.EquippedDevicePresetName) && UTF8::IsValid(object.EquippedDeviceMagazineClassName) &&
+		                                   UTF8::IsValid(object.EquippedDeviceMagazineModuleName) && UTF8::IsValid(object.EquippedDeviceMagazinePresetName);
+		const bool noEquipmentData = !object.HasEquippedDevice && !object.HasEquippedDeviceMagazine && object.EquippedDeviceClassName.empty() &&
+		                            object.EquippedDeviceModuleName.empty() && object.EquippedDevicePresetName.empty() &&
+		                            object.EquippedDeviceMagazineClassName.empty() && object.EquippedDeviceMagazineModuleName.empty() &&
+		                            object.EquippedDeviceMagazinePresetName.empty() && object.EquippedDeviceMagazineRounds == 0;
+		const bool noMagazineData = !object.HasEquippedDeviceMagazine && object.EquippedDeviceMagazineClassName.empty() &&
+		                            object.EquippedDeviceMagazineModuleName.empty() && object.EquippedDeviceMagazinePresetName.empty() &&
+		                            object.EquippedDeviceMagazineRounds == 0;
+		const bool deviceDataValid = object.HasEquippedDevice && !object.EquippedDeviceClassName.empty() && !object.EquippedDevicePresetName.empty() &&
+		                             (noMagazineData || (object.HasEquippedDeviceMagazine && object.EquippedDeviceClassName == "HDFirearm" &&
+		                                                 !object.EquippedDeviceMagazineClassName.empty() && !object.EquippedDeviceMagazinePresetName.empty()));
+		const bool equipmentFieldsValid = equipmentIdentityValid &&
+		                                  (object.Flags == c_ObjectFlagActor ? (noEquipmentData || deviceDataValid) : noEquipmentData);
 		return object.NetworkId != 0 && !object.ClassName.empty() && object.ClassName.size() <= c_MaxStringBytes &&
 		       object.ModuleName.size() <= c_MaxStringBytes && object.PresetName.size() <= c_MaxStringBytes &&
 		       UTF8::IsValid(object.ClassName) && UTF8::IsValid(object.ModuleName) && UTF8::IsValid(object.PresetName) &&
@@ -172,7 +202,7 @@ namespace Detail {
 		       std::isfinite(object.VelocityY) && std::isfinite(object.Rotation) && std::isfinite(object.AngularVelocity) &&
 		       std::isfinite(object.Health) && object.Team >= c_NoTeam && object.Team < c_MaxTeamCount &&
 		       (object.Flags == c_ObjectFlagActor || object.Flags == c_ObjectFlagItem || object.Flags == c_ObjectFlagParticle || object.Flags == c_ObjectFlagTransientPixel) &&
-		       object.PixelColorIndex <= 255 && std::isfinite(object.PixelMass) && object.PixelMass >= 0.0F && std::isfinite(object.PixelSharpness);
+		       object.PixelColorIndex <= 255 && std::isfinite(object.PixelMass) && object.PixelMass >= 0.0F && std::isfinite(object.PixelSharpness) && equipmentFieldsValid;
 	}
 } // namespace Detail
 
@@ -409,6 +439,23 @@ inline bool EncodeSnapshot(const Snapshot& snapshot, std::uint32_t sequence, std
 			Detail::WriteUnsigned(packet, object.PixelLifetime, sizeof(object.PixelLifetime));
 			Detail::WriteFloat(packet, object.PixelSharpness);
 		}
+		if (object.Flags == c_ObjectFlagActor) {
+			Detail::WriteUnsigned(packet, object.HasEquippedDevice ? 1 : 0, sizeof(std::uint8_t));
+			if (object.HasEquippedDevice) {
+				if (!Detail::WriteString(packet, object.EquippedDeviceClassName) || !Detail::WriteString(packet, object.EquippedDeviceModuleName) ||
+				    !Detail::WriteString(packet, object.EquippedDevicePresetName)) {
+					return false;
+				}
+				Detail::WriteUnsigned(packet, object.HasEquippedDeviceMagazine ? 1 : 0, sizeof(std::uint8_t));
+				if (object.HasEquippedDeviceMagazine) {
+					if (!Detail::WriteString(packet, object.EquippedDeviceMagazineClassName) || !Detail::WriteString(packet, object.EquippedDeviceMagazineModuleName) ||
+					    !Detail::WriteString(packet, object.EquippedDeviceMagazinePresetName)) {
+						return false;
+					}
+					Detail::WriteUnsigned(packet, std::bit_cast<std::uint32_t>(object.EquippedDeviceMagazineRounds), sizeof(std::uint32_t));
+				}
+			}
+		}
 		if (packet.size() > c_MaxPacketSize) {
 			return false;
 		}
@@ -495,6 +542,24 @@ inline bool DecodeSnapshot(std::span<const std::uint8_t> packet, Snapshot& snaps
 			if (!Detail::ReadFloat(packet, offset, object.PixelMass) || !Detail::ReadUnsigned(packet, offset, sizeof(object.PixelLifetime), value)) return false;
 			object.PixelLifetime = static_cast<std::uint32_t>(value);
 			if (!Detail::ReadFloat(packet, offset, object.PixelSharpness)) return false;
+		}
+		if (object.Flags == c_ObjectFlagActor) {
+			if (!Detail::ReadUnsigned(packet, offset, sizeof(std::uint8_t), value) || value > 1) return false;
+			object.HasEquippedDevice = value != 0;
+			if (object.HasEquippedDevice) {
+				if (!Detail::ReadString(packet, offset, object.EquippedDeviceClassName) || !Detail::ReadString(packet, offset, object.EquippedDeviceModuleName) ||
+				    !Detail::ReadString(packet, offset, object.EquippedDevicePresetName) || !Detail::ReadUnsigned(packet, offset, sizeof(std::uint8_t), value) || value > 1) {
+					return false;
+				}
+				object.HasEquippedDeviceMagazine = value != 0;
+				if (object.HasEquippedDeviceMagazine) {
+					if (!Detail::ReadString(packet, offset, object.EquippedDeviceMagazineClassName) || !Detail::ReadString(packet, offset, object.EquippedDeviceMagazineModuleName) ||
+					    !Detail::ReadString(packet, offset, object.EquippedDeviceMagazinePresetName) || !Detail::ReadUnsigned(packet, offset, sizeof(std::uint32_t), value)) {
+						return false;
+					}
+					object.EquippedDeviceMagazineRounds = std::bit_cast<std::int32_t>(static_cast<std::uint32_t>(value));
+				}
+			}
 		}
 		if (!Detail::ValidObject(object) || !networkIds.insert(object.NetworkId).second) return false;
 		decoded.Objects.push_back(std::move(object));

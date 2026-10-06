@@ -3,7 +3,10 @@
 #include "Activity.h"
 #include "ActivityMan.h"
 #include "Actor.h"
+#include "AHuman.h"
+#include "HDFirearm.h"
 #include "HeldDevice.h"
+#include "Magazine.h"
 #include "MovableMan.h"
 #include "MovableObject.h"
 #include "MOPixel.h"
@@ -101,6 +104,23 @@ WorldStateProtocol::Snapshot WorldStateSnapshotBuilder::Capture(std::uint32_t ti
 		if (const auto* actor = dynamic_cast<const Actor*>(movableObject)) {
 			object.Health = actor->GetHealth();
 			object.Flags = WorldStateProtocol::c_ObjectFlagActor;
+			if (const auto* human = dynamic_cast<const AHuman*>(actor)) {
+				if (const HeldDevice* device = human->GetEquippedItem()) {
+					object.HasEquippedDevice = true;
+					object.EquippedDeviceClassName = device->GetClassName();
+					object.EquippedDeviceModuleName = device->GetModuleName();
+					object.EquippedDevicePresetName = device->GetPresetName();
+					if (const auto* firearm = dynamic_cast<const HDFirearm*>(device)) {
+						if (const Magazine* magazine = firearm->GetMagazine()) {
+							object.HasEquippedDeviceMagazine = true;
+							object.EquippedDeviceMagazineClassName = magazine->GetClassName();
+							object.EquippedDeviceMagazineModuleName = magazine->GetModuleName();
+							object.EquippedDeviceMagazinePresetName = magazine->GetPresetName();
+							object.EquippedDeviceMagazineRounds = magazine->GetRoundCount();
+						}
+					}
+				}
+			}
 		} else if (dynamic_cast<const HeldDevice*>(movableObject)) {
 			object.Flags = WorldStateProtocol::c_ObjectFlagItem;
 		} else if (const auto* pixel = dynamic_cast<const MOPixel*>(movableObject); pixel && (object.PresetName.empty() || object.PresetName == "None")) {

@@ -1,9 +1,12 @@
 #include "WorldStateClientReplica.h"
 
 #include "Actor.h"
+#include "AHuman.h"
 #include "Atom.h"
 #include "Constants.h"
 #include "HeldDevice.h"
+#include "HDFirearm.h"
+#include "Magazine.h"
 #include "MOPixel.h"
 #include "MovableMan.h"
 #include "MovableObject.h"
@@ -80,7 +83,7 @@ namespace {
 		return object;
 	}
 
-	void ApplyFields(MovableObject& target, const WorldStateProtocol::ObjectState& state) {
+	bool ApplyFields(MovableObject& target, const WorldStateProtocol::ObjectState& state) {
 		target.SetPos(Vector(state.PositionX, state.PositionY));
 		target.SetPrevPos(target.GetPos());
 		target.SetVel(Vector(state.VelocityX, state.VelocityY));
@@ -97,6 +100,70 @@ namespace {
 		if (Actor* actor = dynamic_cast<Actor*>(&target)) {
 			actor->SetHealth(state.Health);
 		}
+		if (auto* human = dynamic_cast<AHuman*>(&target)) {
+			HeldDevice* equippedDevice = human->GetEquippedItem();
+			const bool equippedDeviceMatches = equippedDevice && equippedDevice->GetClassName() == state.EquippedDeviceClassName &&
+			                                  equippedDevice->GetModuleName() == state.EquippedDeviceModuleName &&
+			                                  equippedDevice->GetPresetName() == state.EquippedDevicePresetName;
+			if (!state.HasEquippedDevice) {
+				human->UnequipFGArm();
+				return human->GetEquippedItem() == nullptr;
+			} else {
+				if (!equippedDeviceMatches && !human->EquipNamedDevice(state.EquippedDeviceModuleName, state.EquippedDevicePresetName, false)) {
+					const int deviceModuleId = state.EquippedDeviceModuleName.empty() ? -1 : g_PresetMan.GetModuleID(state.EquippedDeviceModuleName);
+					const Entity* devicePreset = g_PresetMan.GetEntityPreset(state.EquippedDeviceClassName, state.EquippedDevicePresetName, deviceModuleId);
+					if (devicePreset) {
+						Entity* deviceClone = devicePreset->Clone();
+						if (auto* device = dynamic_cast<HeldDevice*>(deviceClone)) {
+							human->AddInventoryItem(device);
+						} else {
+							delete deviceClone;
+						}
+					}
+				}
+				human->EquipNamedDevice(state.EquippedDeviceModuleName, state.EquippedDevicePresetName, true);
+				equippedDevice = human->GetEquippedItem();
+				if (!equippedDevice || equippedDevice->GetClassName() != state.EquippedDeviceClassName ||
+				    equippedDevice->GetModuleName() != state.EquippedDeviceModuleName || equippedDevice->GetPresetName() != state.EquippedDevicePresetName) {
+					return false;
+				}
+				if (auto* firearm = dynamic_cast<HDFirearm*>(equippedDevice)) {
+					Magazine* magazine = firearm->GetMagazine();
+					const bool magazineMatches = magazine && state.HasEquippedDeviceMagazine &&
+					                            magazine->GetClassName() == state.EquippedDeviceMagazineClassName &&
+					                            magazine->GetModuleName() == state.EquippedDeviceMagazineModuleName &&
+					                            magazine->GetPresetName() == state.EquippedDeviceMagazinePresetName;
+					if (!state.HasEquippedDeviceMagazine) {
+						firearm->SetMagazine(nullptr);
+						return firearm->GetMagazine() == nullptr;
+					} else {
+						if (!magazineMatches) {
+							const int magazineModuleId = state.EquippedDeviceMagazineModuleName.empty() ? -1 : g_PresetMan.GetModuleID(state.EquippedDeviceMagazineModuleName);
+							const Entity* magazinePreset = g_PresetMan.GetEntityPreset(state.EquippedDeviceMagazineClassName,
+							                                                           state.EquippedDeviceMagazinePresetName, magazineModuleId);
+							if (magazinePreset) {
+								Entity* magazineEntityClone = magazinePreset->Clone();
+								if (auto* magazineClone = dynamic_cast<Magazine*>(magazineEntityClone)) {
+									firearm->SetMagazine(magazineClone);
+									magazine = magazineClone;
+								} else {
+									delete magazineEntityClone;
+								}
+							}
+						}
+						if (magazine && magazine->GetClassName() == state.EquippedDeviceMagazineClassName &&
+						    magazine->GetModuleName() == state.EquippedDeviceMagazineModuleName &&
+						    magazine->GetPresetName() == state.EquippedDeviceMagazinePresetName) {
+							magazine->SetRoundCount(state.EquippedDeviceMagazineRounds);
+							return magazine->GetRoundCount() == state.EquippedDeviceMagazineRounds;
+						}
+						return false;
+					}
+				}
+				return !state.HasEquippedDeviceMagazine;
+			}
+		}
+		return true;
 	}
 
 	void CollectLocalObjects(std::vector<MovableObject*>& objects) {
@@ -208,7 +275,11 @@ WorldStateClientReplica::ApplyResult WorldStateClientReplica::Apply(const WorldS
 				}
 				continue;
 			}
-			ApplyFields(*object, state);
+			const bool fieldsApplied = ApplyFields(*object, state);
+			if (state.ClassName == "AHuman") {
+				if (fieldsApplied) ++result.HumanEquipmentStatesApplied;
+				else ++result.MissingPresets;
+			}
 			if (!g_MovableMan.AddMO(object)) {
 				object->DestroyScriptState();
 				delete object;
@@ -227,7 +298,11 @@ WorldStateClientReplica::ApplyResult WorldStateClientReplica::Apply(const WorldS
 			result.TotalPositionErrorBeforeCorrection += positionError;
 			result.MaxPositionErrorBeforeCorrection = std::max(result.MaxPositionErrorBeforeCorrection, positionError);
 			++result.PositionErrorsMeasured;
-			ApplyFields(*object, state);
+			const bool fieldsApplied = ApplyFields(*object, state);
+			if (state.ClassName == "AHuman") {
+				if (fieldsApplied) ++result.HumanEquipmentStatesApplied;
+				else ++result.MissingPresets;
+			}
 			if (wasTrackedReplica) {
 				object->SetPos(interpolationStartPosition);
 				object->SetPrevPos(interpolationStartPosition);

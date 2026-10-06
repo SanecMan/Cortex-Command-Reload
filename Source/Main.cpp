@@ -539,6 +539,15 @@ namespace {
 		networkActor.Team = 1;
 		networkActor.Flags = WorldStateProtocol::c_ObjectFlagActor;
 		networkActor.HFlipped = true;
+		networkActor.HasEquippedDevice = true;
+		networkActor.EquippedDeviceClassName = "HDFirearm";
+		networkActor.EquippedDeviceModuleName = "Base.rte";
+		networkActor.EquippedDevicePresetName = "Тестовое оружие";
+		networkActor.HasEquippedDeviceMagazine = true;
+		networkActor.EquippedDeviceMagazineClassName = "Magazine";
+		networkActor.EquippedDeviceMagazineModuleName = "Base.rte";
+		networkActor.EquippedDeviceMagazinePresetName = "Тестовый магазин";
+		networkActor.EquippedDeviceMagazineRounds = 17;
 		networkSnapshot.Objects.push_back(networkActor);
 		WorldStateProtocol::ObjectState transientPixel;
 		transientPixel.NetworkId = 0x8877665544332211ULL;
@@ -556,6 +565,13 @@ namespace {
 		std::vector<std::uint8_t> networkPacket;
 		WorldStateProtocol::Snapshot decodedSnapshot;
 		std::uint32_t decodedSequence = 0;
+		WorldStateProtocol::Snapshot infiniteAmmoSnapshot = networkSnapshot;
+		infiniteAmmoSnapshot.Objects.front().EquippedDeviceMagazineRounds = -7;
+		std::vector<std::uint8_t> infiniteAmmoPacket;
+		WorldStateProtocol::Snapshot decodedInfiniteAmmoSnapshot;
+		const bool infiniteAmmoRoundTripPassed = WorldStateProtocol::EncodeSnapshot(infiniteAmmoSnapshot, 100, infiniteAmmoPacket) &&
+		                                        WorldStateProtocol::DecodeSnapshot(infiniteAmmoPacket, decodedInfiniteAmmoSnapshot) &&
+		                                        decodedInfiniteAmmoSnapshot.Objects.front().EquippedDeviceMagazineRounds == -7;
 		const bool networkRoundTripPassed = WorldStateProtocol::EncodeSnapshot(networkSnapshot, 99, networkPacket) &&
 		                                   WorldStateProtocol::DecodeSnapshot(networkPacket, decodedSnapshot, &decodedSequence) &&
 			                                   decodedSequence == 99 && decodedSnapshot.Tick == networkSnapshot.Tick &&
@@ -570,11 +586,20 @@ namespace {
 		                                   decodedSnapshot.Objects.front().PositionX == networkActor.PositionX &&
 		                                   decodedSnapshot.Objects.front().Team == networkActor.Team && decodedSnapshot.Objects.front().Flags == networkActor.Flags &&
 		                                   decodedSnapshot.Objects.front().SpriteFrame == networkActor.SpriteFrame && decodedSnapshot.Objects.front().HFlipped == networkActor.HFlipped &&
+		                                   decodedSnapshot.Objects.front().HasEquippedDevice &&
+		                                   decodedSnapshot.Objects.front().EquippedDeviceClassName == networkActor.EquippedDeviceClassName &&
+		                                   decodedSnapshot.Objects.front().EquippedDeviceModuleName == networkActor.EquippedDeviceModuleName &&
+		                                   decodedSnapshot.Objects.front().EquippedDevicePresetName == networkActor.EquippedDevicePresetName &&
+		                                   decodedSnapshot.Objects.front().HasEquippedDeviceMagazine &&
+		                                   decodedSnapshot.Objects.front().EquippedDeviceMagazineClassName == networkActor.EquippedDeviceMagazineClassName &&
+		                                   decodedSnapshot.Objects.front().EquippedDeviceMagazineModuleName == networkActor.EquippedDeviceMagazineModuleName &&
+		                                   decodedSnapshot.Objects.front().EquippedDeviceMagazinePresetName == networkActor.EquippedDeviceMagazinePresetName &&
+		                                   decodedSnapshot.Objects.front().EquippedDeviceMagazineRounds == networkActor.EquippedDeviceMagazineRounds &&
 		                                   decodedSnapshot.Objects.back().PixelMaterialId == transientPixel.PixelMaterialId &&
 		                                   decodedSnapshot.Objects.back().PixelColorIndex == transientPixel.PixelColorIndex &&
 		                                   decodedSnapshot.Objects.back().PixelMass == transientPixel.PixelMass &&
 		                                   decodedSnapshot.Objects.back().PixelLifetime == transientPixel.PixelLifetime &&
-		                                   decodedSnapshot.Objects.back().PixelSharpness == transientPixel.PixelSharpness;
+		                                   decodedSnapshot.Objects.back().PixelSharpness == transientPixel.PixelSharpness && infiniteAmmoRoundTripPassed;
 		std::vector<std::uint8_t> truncatedNetworkPacket = networkPacket;
 		if (!truncatedNetworkPacket.empty()) truncatedNetworkPacket.pop_back();
 		std::vector<std::uint8_t> unsupportedVersionPacket = networkPacket;
@@ -586,13 +611,19 @@ namespace {
 		invalidTeamSnapshot.Objects.front().Team = 32767;
 		WorldStateProtocol::Snapshot invalidFlagsSnapshot = networkSnapshot;
 		invalidFlagsSnapshot.Objects.front().Flags = 3;
+		WorldStateProtocol::Snapshot invalidEquipmentSnapshot = networkSnapshot;
+		invalidEquipmentSnapshot.Objects.back().HasEquippedDevice = true;
+		invalidEquipmentSnapshot.Objects.back().EquippedDeviceClassName = "HDFirearm";
+		invalidEquipmentSnapshot.Objects.back().EquippedDevicePresetName = "Invalid non-actor equipment";
 		const bool malformedNetworkRejected = !networkPacket.empty() &&
 		                                     !WorldStateProtocol::DecodeSnapshot(truncatedNetworkPacket, decodedSnapshot) &&
 		                                     !WorldStateProtocol::DecodeSnapshot(unsupportedVersionPacket, decodedSnapshot) &&
 		                                     !WorldStateProtocol::EncodeSnapshot(duplicateIdSnapshot, 100, duplicateIdPacket) &&
 		                                     !WorldStateProtocol::EncodeSnapshot(invalidTeamSnapshot, 100, duplicateIdPacket) &&
-		                                     !WorldStateProtocol::EncodeSnapshot(invalidFlagsSnapshot, 100, duplicateIdPacket);
-		state.Log << "world_state_protocol_smoke=" << (networkRoundTripPassed && malformedNetworkRejected ? "passed" : "failed") << '\n' << std::flush;
+		                                     !WorldStateProtocol::EncodeSnapshot(invalidFlagsSnapshot, 100, duplicateIdPacket) &&
+		                                     !WorldStateProtocol::EncodeSnapshot(invalidEquipmentSnapshot, 100, duplicateIdPacket);
+		state.Log << "world_state_protocol_smoke=" << (networkRoundTripPassed && malformedNetworkRejected ? "passed" : "failed")
+		          << " infinite_ammo=" << (infiniteAmmoRoundTripPassed ? "passed" : "failed") << '\n' << std::flush;
 		if (!networkRoundTripPassed || !malformedNetworkRejected) {
 			return false;
 		}
@@ -1117,18 +1148,24 @@ namespace {
 		}
 		const WorldStateClientReplica::ApplyResult interpolationApply = replicaSmoke.Apply(interpolationTarget);
 		const std::uint32_t interpolatedObjectCount = replicaSmoke.AdvanceInterpolation();
+		const auto isHumanObject = [](const WorldStateProtocol::ObjectState& object) { return object.ClassName == "AHuman"; };
+		const std::uint32_t expectedHumanEquipmentStates = static_cast<std::uint32_t>(std::count_if(worldSnapshot.Objects.begin(), worldSnapshot.Objects.end(), isHumanObject));
 		const bool interpolationSmokePassed = !interpolationTarget.Objects.empty() && interpolationApply.MissingPresets == 0 &&
 		                                     interpolatedObjectCount == interpolationTarget.Objects.size() &&
 		                                     interpolationApply.RotationInterpolationsScheduled == interpolationTarget.Objects.size() &&
 		                                     std::abs(interpolationApply.MaxRotationInterpolationDeltaRadians - 0.2) < 0.01;
 		const bool replicaSmokePassed = firstApply.Updated + firstApply.Spawned == worldSnapshot.Objects.size() && firstApply.MissingPresets == 0 &&
+		                               firstApply.HumanEquipmentStatesApplied == expectedHumanEquipmentStates &&
 		                               removalApply.Removed == firstApply.Spawned && removalApply.Updated == 0 && removalApply.Spawned == 0 &&
 		                               restoredApply.Updated + restoredApply.Spawned == worldSnapshot.Objects.size() && restoredApply.MissingPresets == 0 &&
+		                               restoredApply.HumanEquipmentStatesApplied == expectedHumanEquipmentStates &&
 		                               repeatedApply.Updated == worldSnapshot.Objects.size() && repeatedApply.Spawned == 0 && repeatedApply.Removed == 0 && repeatedApply.MissingPresets == 0 &&
+		                               repeatedApply.HumanEquipmentStatesApplied == expectedHumanEquipmentStates &&
 		                               interpolationApply.Updated == worldSnapshot.Objects.size() && interpolationSmokePassed;
 		state.Log << "world_state_replica_smoke=" << (replicaSmokePassed ? "passed" : "failed") << " objects=" << worldSnapshot.Objects.size()
 		          << " first_updated=" << firstApply.Updated << " first_spawned=" << firstApply.Spawned << " removed=" << removalApply.Removed
-		          << " repeat_updated=" << repeatedApply.Updated << " interpolated=" << interpolatedObjectCount << '\n' << std::flush;
+		          << " repeat_updated=" << repeatedApply.Updated << " human_equipment=" << firstApply.HumanEquipmentStatesApplied << '/'
+		          << expectedHumanEquipmentStates << " interpolated=" << interpolatedObjectCount << '\n' << std::flush;
 		state.Log << "world_state_rotation_interpolation_smoke=" << (interpolationSmokePassed ? "passed" : "failed")
 		          << " scheduled=" << interpolationApply.RotationInterpolationsScheduled
 		          << " max_shortest_delta_rad=" << interpolationApply.MaxRotationInterpolationDeltaRadians << '\n' << std::flush;
@@ -1181,7 +1218,16 @@ namespace {
 		state.Log << "world_state_input_application_smoke=" << (networkInputApplicationPassed ? "passed" : "failed") << '\n' << std::flush;
 		std::vector<std::uint8_t> worldSnapshotPacket;
 		WorldStateProtocol::Snapshot decodedWorldSnapshot;
-		const bool worldSnapshotPassed = WorldStateProtocol::EncodeSnapshot(worldSnapshot, state.SimulationUpdates, worldSnapshotPacket) &&
+		const auto sameHumanEquipment = [](const WorldStateProtocol::ObjectState& left, const WorldStateProtocol::ObjectState& right) {
+			return left.HasEquippedDevice == right.HasEquippedDevice && left.EquippedDeviceClassName == right.EquippedDeviceClassName &&
+			       left.EquippedDeviceModuleName == right.EquippedDeviceModuleName && left.EquippedDevicePresetName == right.EquippedDevicePresetName &&
+			       left.HasEquippedDeviceMagazine == right.HasEquippedDeviceMagazine &&
+			       left.EquippedDeviceMagazineClassName == right.EquippedDeviceMagazineClassName &&
+			       left.EquippedDeviceMagazineModuleName == right.EquippedDeviceMagazineModuleName &&
+			       left.EquippedDeviceMagazinePresetName == right.EquippedDeviceMagazinePresetName &&
+			       left.EquippedDeviceMagazineRounds == right.EquippedDeviceMagazineRounds;
+		};
+		bool worldSnapshotPassed = WorldStateProtocol::EncodeSnapshot(worldSnapshot, state.SimulationUpdates, worldSnapshotPacket) &&
 		                                 WorldStateProtocol::DecodeSnapshot(worldSnapshotPacket, decodedWorldSnapshot) &&
 		                                 decodedWorldSnapshot.ActivityClassName == worldSnapshot.ActivityClassName &&
 		                                 decodedWorldSnapshot.ActivityPreset == worldSnapshot.ActivityPreset &&
@@ -1189,18 +1235,24 @@ namespace {
 		                                 decodedWorldSnapshot.SceneModuleName == worldSnapshot.SceneModuleName &&
 		                                 decodedWorldSnapshot.ScenePreset == worldSnapshot.ScenePreset &&
 		                                 decodedWorldSnapshot.Objects.size() == worldSnapshot.Objects.size();
+		for (std::size_t index = 0; worldSnapshotPassed && index < worldSnapshot.Objects.size(); ++index) {
+			worldSnapshotPassed = sameHumanEquipment(worldSnapshot.Objects[index], decodedWorldSnapshot.Objects[index]);
+		}
 		std::vector<std::uint8_t> snapshotWirePacket;
 		std::vector<std::uint8_t> decompressedWorldSnapshotPacket;
 		std::span<const std::uint8_t> decompressedWorldSnapshotView;
 		bool snapshotWasCompressed = false;
 		WorldStateProtocol::Snapshot compressedRoundTripSnapshot;
-		const bool snapshotCompressionPassed = worldSnapshotPassed &&
-		                                      WorldStateCompression::EncodeForWire(worldSnapshotPacket, snapshotWirePacket, snapshotWasCompressed) &&
-		                                      WorldStateCompression::DecodeFromWire(snapshotWirePacket, decompressedWorldSnapshotPacket, decompressedWorldSnapshotView) &&
-		                                      WorldStateProtocol::DecodeSnapshot(decompressedWorldSnapshotView, compressedRoundTripSnapshot) &&
-		                                      compressedRoundTripSnapshot.Objects.size() == worldSnapshot.Objects.size() &&
-		                                      compressedRoundTripSnapshot.ActivityPreset == worldSnapshot.ActivityPreset &&
-		                                      compressedRoundTripSnapshot.ScenePreset == worldSnapshot.ScenePreset;
+		bool snapshotCompressionPassed = worldSnapshotPassed &&
+		                                 WorldStateCompression::EncodeForWire(worldSnapshotPacket, snapshotWirePacket, snapshotWasCompressed) &&
+		                                 WorldStateCompression::DecodeFromWire(snapshotWirePacket, decompressedWorldSnapshotPacket, decompressedWorldSnapshotView) &&
+		                                 WorldStateProtocol::DecodeSnapshot(decompressedWorldSnapshotView, compressedRoundTripSnapshot) &&
+		                                 compressedRoundTripSnapshot.Objects.size() == worldSnapshot.Objects.size() &&
+		                                 compressedRoundTripSnapshot.ActivityPreset == worldSnapshot.ActivityPreset &&
+		                                 compressedRoundTripSnapshot.ScenePreset == worldSnapshot.ScenePreset;
+		for (std::size_t index = 0; snapshotCompressionPassed && index < worldSnapshot.Objects.size(); ++index) {
+			snapshotCompressionPassed = sameHumanEquipment(worldSnapshot.Objects[index], compressedRoundTripSnapshot.Objects[index]);
+		}
 		state.Log << "world_snapshot_compression_smoke=" << (snapshotCompressionPassed ? "passed" : "failed")
 		          << " compressed=" << (snapshotWasCompressed ? "yes" : "no") << " plain_bytes=" << worldSnapshotPacket.size()
 		          << " wire_bytes=" << snapshotWirePacket.size() << '\n' << std::flush;
@@ -1810,7 +1862,8 @@ void RunGameLoop() {
 					if (worldStateClientLog.is_open() &&
 					    (worldStateClientLastLoggedSnapshotCount == 0 || snapshotCount - worldStateClientLastLoggedSnapshotCount >= 20)) {
 						worldStateClientLog << "snapshot=" << snapshotCount << " updated=" << applied.Updated << " spawned=" << applied.Spawned << " removed=" << applied.Removed
-						                    << " missing_presets=" << applied.MissingPresets << " position_error_samples=" << applied.PositionErrorsMeasured
+						                    << " missing_presets=" << applied.MissingPresets << " human_equipment_applied=" << applied.HumanEquipmentStatesApplied
+						                    << " position_error_samples=" << applied.PositionErrorsMeasured
 						                    << " mean_position_error_before_correction_px=" << applied.MeanPositionErrorBeforeCorrection
 						                    << " max_position_error_before_correction_px=" << applied.MaxPositionErrorBeforeCorrection << '\n'
 						                    << std::flush;
