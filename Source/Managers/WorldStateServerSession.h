@@ -41,6 +41,7 @@ namespace RTE {
 	private:
 		void Log(const std::string& message);
 		void ProcessActivityVotes();
+		void RefreshClientAssignments(std::uint32_t simulationTick);
 		void QueueTerrainChanges(std::uint32_t sceneRevision);
 		void SendPendingTerrainPatches();
 
@@ -71,6 +72,8 @@ namespace RTE {
 		unsigned short m_ConnectedClients = 0;
 		std::unordered_map<std::string, std::uint32_t> m_LastInputSequenceByClient;
 		std::unordered_map<std::string, int> m_PlayerSlotByClient;
+		std::unordered_map<std::string, RakNet::SystemAddress> m_ClientAddresses;
+		std::unordered_map<std::string, int> m_ReportedPlayerSlots;
 		std::unordered_map<std::string, bool> m_ResetVotesByClient;
 		std::unordered_map<std::string, bool> m_RestartVotesByClient;
 		std::unordered_map<std::string, bool> m_PreviousResetInputByClient;

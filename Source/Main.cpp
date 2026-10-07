@@ -1882,7 +1882,8 @@ void RunGameLoop() {
 			g_PerformanceMan.StartPerformanceMeasurement(PerformanceMan::InputUpdate);
 			g_UInputMan.Update();
 			g_PerformanceMan.StopPerformanceMeasurement(PerformanceMan::InputUpdate);
-			if (worldStateClient && worldStateClient->IsConnected()) {
+			if (worldStateClient && worldStateClient->IsConnected() && worldStateClient->HasPlayerAssignment() &&
+			    worldStateClient->GetAssignedPlayerSlot() >= Players::PlayerOne) {
 				WorldStateProtocol::InputCommand inputCommand;
 				inputCommand.ClientTick = static_cast<std::uint32_t>(g_TimerMan.GetSimUpdateCount());
 				for (int element = 0; element < InputElements::INPUT_COUNT; ++element) {

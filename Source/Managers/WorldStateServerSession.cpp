@@ -49,6 +49,8 @@ bool WorldStateServerSession::Start(const std::string& bindAddress, unsigned sho
 	m_PendingTerrainPatches.clear();
 	m_LastInputSequenceByClient.clear();
 	m_PlayerSlotByClient.clear();
+	m_ClientAddresses.clear();
+	m_ReportedPlayerSlots.clear();
 	m_ResetVotesByClient.clear();
 	m_RestartVotesByClient.clear();
 	m_PreviousResetInputByClient.clear();
@@ -82,6 +84,8 @@ void WorldStateServerSession::Stop() {
 		g_UInputMan.ClearNetworkInputState(player);
 	}
 	m_PlayerSlotByClient.clear();
+	m_ClientAddresses.clear();
+	m_ReportedPlayerSlots.clear();
 	m_LastInputSequenceByClient.clear();
 	m_ResetVotesByClient.clear();
 	m_RestartVotesByClient.clear();
@@ -201,6 +205,37 @@ std::size_t WorldStateServerSession::ConfigureActivityPlayers(Activity& activity
 	return configuredPlayers;
 }
 
+void WorldStateServerSession::RefreshClientAssignments(std::uint32_t simulationTick) {
+	const Activity* activity = g_ActivityMan.GetActivity();
+	for (const auto& [clientAddress, peerAddress] : m_ClientAddresses) {
+		const auto reserved = m_PlayerSlotByClient.find(clientAddress);
+		int player = Players::NoPlayer;
+		if (reserved != m_PlayerSlotByClient.end() &&
+		    (m_DebugEmptyWorldSnapshotSmokeEnabled || (activity && activity->PlayerActive(reserved->second) && activity->PlayerHuman(reserved->second)))) {
+			player = reserved->second;
+		}
+		if (m_ReportedPlayerSlots.at(clientAddress) == player) {
+			continue;
+		}
+		WorldStateProtocol::ClientAssignment assignment;
+		assignment.PlayerSlot = static_cast<std::int8_t>(player);
+		if (!m_Transport.SendClientAssignment(peerAddress, assignment, simulationTick)) {
+			Log("ERROR: could not update client player-slot assignment for " + clientAddress);
+			continue;
+		}
+		m_ReportedPlayerSlots[clientAddress] = player;
+		m_ResetVotesByClient.erase(clientAddress);
+		m_RestartVotesByClient.erase(clientAddress);
+		m_PreviousResetInputByClient.erase(clientAddress);
+		m_PreviousRestartInputByClient.erase(clientAddress);
+		if (reserved != m_PlayerSlotByClient.end()) {
+			g_UInputMan.ClearNetworkInputState(reserved->second);
+		}
+		Log("INFO: client assignment updated for " + clientAddress + " to " +
+		    (player == Players::NoPlayer ? std::string("spectator") : "player slot " + std::to_string(player)));
+	}
+}
+
 void WorldStateServerSession::PollNetwork(std::uint32_t simulationTick) {
 	if (!m_Transport.IsStarted()) {
 		return;
@@ -230,7 +265,11 @@ void WorldStateServerSession::PollNetwork(std::uint32_t simulationTick) {
 				}
 			}
 			WorldStateProtocol::ClientAssignment assignment;
-			assignment.PlayerSlot = assignedPlayer == Players::NoPlayer ? -1 : static_cast<std::int8_t>(assignedPlayer);
+			// A reserved slot becomes playable only after the Activity activates it.
+			const int reportedPlayer = m_DebugEmptyWorldSnapshotSmokeEnabled ? assignedPlayer : Players::NoPlayer;
+			m_ClientAddresses[clientAddress] = packet.Sender;
+			m_ReportedPlayerSlots[clientAddress] = reportedPlayer;
+			assignment.PlayerSlot = static_cast<std::int8_t>(reportedPlayer);
 			if (!m_Transport.SendClientAssignment(packet.Sender, assignment, simulationTick)) {
 				Log("ERROR: could not send client player-slot assignment to " + clientAddress);
 			}
@@ -239,6 +278,8 @@ void WorldStateServerSession::PollNetwork(std::uint32_t simulationTick) {
 		} else if (packet.Identifier == ID_DISCONNECTION_NOTIFICATION || packet.Identifier == ID_CONNECTION_LOST) {
 			m_ConnectedClients = m_ConnectedClients > 0 ? static_cast<unsigned short>(m_ConnectedClients - 1) : 0;
 			const std::string clientAddress(packet.Sender.ToString(true));
+			m_ClientAddresses.erase(clientAddress);
+			m_ReportedPlayerSlots.erase(clientAddress);
 			m_LastInputSequenceByClient.erase(clientAddress);
 			m_ResetVotesByClient.erase(clientAddress);
 			m_RestartVotesByClient.erase(clientAddress);
@@ -277,6 +318,13 @@ void WorldStateServerSession::Update(std::uint32_t simulationTick) {
 			m_TerrainBaselinePending = false;
 		}
 	}
+	if (m_ConnectedClients > 0 && g_ActivityMan.IsInActivity() && g_ActivityMan.GetActivity()) {
+		const std::size_t configuredPlayers = ConfigureActivityPlayers(*g_ActivityMan.GetActivity(), false);
+		if (configuredPlayers > 0) {
+			Log("INFO: added " + std::to_string(configuredPlayers) + " connected client(s) to the running Activity");
+		}
+	}
+	RefreshClientAssignments(simulationTick);
 	while (!m_PendingInputPackets.empty()) {
 		WorldStateTransport::ReceivedPacket packet = std::move(m_PendingInputPackets.front());
 		m_PendingInputPackets.pop_front();
@@ -290,8 +338,8 @@ void WorldStateServerSession::Update(std::uint32_t simulationTick) {
 			continue;
 		}
 		auto playerSlot = m_PlayerSlotByClient.find(clientAddress);
-		if (playerSlot == m_PlayerSlotByClient.end()) {
-			Log("WARNING: rejected gameplay input from spectator " + clientAddress + " (no free player slot)");
+		const auto reportedSlot = m_ReportedPlayerSlots.find(clientAddress);
+		if (playerSlot == m_PlayerSlotByClient.end() || reportedSlot == m_ReportedPlayerSlots.end() || reportedSlot->second != playerSlot->second) {
 			continue;
 		}
 		m_LastInputSequenceByClient[clientAddress] = sequence;
@@ -322,12 +370,6 @@ void WorldStateServerSession::Update(std::uint32_t simulationTick) {
 		if (m_InputCommandCount == 1 || m_InputCommandCount % 120 == 0) {
 			Log("INFO: applied " + std::to_string(m_InputCommandCount) + " client input commands to player slot " +
 			    std::to_string(playerSlot->second) + "; latest held mask=" + std::to_string(command.HeldElements));
-		}
-	}
-	if (m_ConnectedClients > 0 && g_ActivityMan.IsInActivity() && g_ActivityMan.GetActivity()) {
-		const std::size_t configuredPlayers = ConfigureActivityPlayers(*g_ActivityMan.GetActivity(), false);
-		if (configuredPlayers > 0) {
-			Log("INFO: added " + std::to_string(configuredPlayers) + " connected client(s) to the running Activity");
 		}
 	}
 	ProcessActivityVotes();
@@ -553,13 +595,18 @@ void WorldStateServerSession::ProcessActivityVotes() {
 	if (m_LastActivityVoteAction != std::chrono::steady_clock::time_point{} && now - m_LastActivityVoteAction < std::chrono::seconds(3)) {
 		return;
 	}
-	const bool resetUnanimous = m_ResetVotesByClient.size() == m_PlayerSlotByClient.size() &&
-	    std::all_of(m_PlayerSlotByClient.begin(), m_PlayerSlotByClient.end(), [this](const auto& client) {
+	const bool hasPlayers = std::any_of(m_ReportedPlayerSlots.begin(), m_ReportedPlayerSlots.end(), [](const auto& client) {
+		return client.second != Players::NoPlayer;
+	});
+	const bool resetUnanimous = hasPlayers &&
+	    std::all_of(m_ReportedPlayerSlots.begin(), m_ReportedPlayerSlots.end(), [this](const auto& client) {
+		    if (client.second == Players::NoPlayer) return true;
 		    const auto vote = m_ResetVotesByClient.find(client.first);
 		    return vote != m_ResetVotesByClient.end() && vote->second;
 	    });
-	const bool restartUnanimous = m_RestartVotesByClient.size() == m_PlayerSlotByClient.size() &&
-	    std::all_of(m_PlayerSlotByClient.begin(), m_PlayerSlotByClient.end(), [this](const auto& client) {
+	const bool restartUnanimous = hasPlayers &&
+	    std::all_of(m_ReportedPlayerSlots.begin(), m_ReportedPlayerSlots.end(), [this](const auto& client) {
+		    if (client.second == Players::NoPlayer) return true;
 		    const auto vote = m_RestartVotesByClient.find(client.first);
 		    return vote != m_RestartVotesByClient.end() && vote->second;
 	    });
