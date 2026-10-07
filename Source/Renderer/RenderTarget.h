@@ -43,6 +43,7 @@ namespace RTE {
 		GLuint m_FBO{0};
 
 	private:
+		bool m_GPUBacked = true;
 		Texture2D m_Texture{};
 		Texture2D m_Depth{};
 		bool m_ColorTextureOwned{true};

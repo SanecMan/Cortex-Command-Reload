@@ -4,6 +4,7 @@
 #include "GLCheck.h"
 #include "raylib/rlgl.h"
 #include "WindowMan.h"
+#include "GLResourceMan.h"
 #include "Constants.h"
 
 #include "glm/glm.hpp"
@@ -14,6 +15,15 @@ using namespace RTE;
 RenderTarget::RenderTarget(const FloatRect& size, const FloatRect& defaultViewport, int bitDepth, Texture2D colorTexture, bool defaultFB0) {
 	m_Size = size;
 	m_Viewport = defaultViewport;
+	m_GPUBacked = g_GLResourceMan.IsGPUEnabled();
+	if (!m_GPUBacked) {
+		m_Texture.format = bitDepth == 8 ? PIXELFORMAT_UNCOMPRESSED_GRAYSCALE : PIXELFORMAT_UNCOMPRESSED_R8G8B8A8;
+		m_Depth.format = GL_DEPTH_COMPONENT;
+		m_Texture.width = m_Depth.width = static_cast<int>(size.w);
+		m_Texture.height = m_Depth.height = static_cast<int>(size.h);
+		m_ColorTextureOwned = false;
+		return;
+	}
 	if (!defaultFB0) {
 		if (colorTexture.id != 0) {
 			m_Texture = std::move(colorTexture);
@@ -47,6 +57,7 @@ RenderTarget::RenderTarget(const FloatRect& size, const FloatRect& defaultViewpo
 }
 
 RenderTarget::~RenderTarget() {
+	if (!m_GPUBacked) return;
 	if (m_FBO) {
 		rlUnloadFramebuffer(m_FBO);
 	}
@@ -57,6 +68,7 @@ RenderTarget::~RenderTarget() {
 }
 
 void RenderTarget::Begin(bool clear, float zoom) {
+	if (!m_GPUBacked) return;
 	rlDrawRenderBatchActive();
 	rlResetDrawDepth();
 	rlEnableFramebuffer(m_FBO);
@@ -81,6 +93,7 @@ void RenderTarget::Begin(bool clear, float zoom) {
 }
 
 void RenderTarget::End() {
+	if (!m_GPUBacked) return;
 	rlDrawRenderBatchActive();
 
 	rlDisableFramebuffer();

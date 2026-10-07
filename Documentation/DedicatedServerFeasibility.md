@@ -9,7 +9,7 @@ A dedicated server is technically feasible without replacing the simulation engi
 - In the legacy, currently unbuilt `NetworkServer` source, the server receives `MsgInput` and gates simulation on frame delivery/consumption. Its start path binds an IPv4 socket and hardcodes four connections (`Source/Managers/NetworkServer.cpp`, `Source/Managers/NetworkServer.h`).
 - That legacy server maintains per-client 8-bit game and GUI buffers, compression state, frame queues, terrain changes, and send threads. It sends frame setup and pixel-line/box messages (`NetworkServer::SendFrame`, `SendFrameSetupMsg`, `SendSceneData`).
 - The legacy `NetworkClient` reconstructs those images into `FrameMan` network buffers. It also applies scene setup and terrain updates (`Source/Managers/NetworkClient.cpp`). `Source/System/NetworkMessages.h` confirms that the legacy wire message set is frame/pixel-oriented; there are no replicated movable-object or actor-state messages.
-- The old protocol made the host process authoritative, but tied hosting to a regular graphical game instance. The current executables do not include that networking code, so there is no active multiplayer mode to reuse as a working dedicated server or world-state replication.
+- The old protocol made the host process authoritative, but tied hosting to a regular graphical game instance. The current executables do not include that obsolete framebuffer implementation. They now include the separate experimental WorldStateServerSession/WorldStateClientSession path, with server-owned objects, input assignments, terrain patches, interpolation and Activity phase replication; this still hosts from the graphical executable.
 - Multiplayer sources are commented out of `Source/Managers/meson.build` and `Source/Activities/meson.build`, and are also absent from the `ClCompile` items in `RTEA.vcxproj`. The framebuffer-based networking code is therefore a legacy implementation that is not built into either current client target; it cannot be treated as a working compatibility server without first restoring and validating it.
 - `Main.cpp` unconditionally calls `SDL_Init(SDL_INIT_VIDEO | ...)` before manager initialization. `WindowMan`, OpenGL resources, `FrameMan`, audio and input are global managers. A server mode therefore needs explicit client/server manager initialization, not just hiding the window.
 - `c_MaxClients` is 4 and affects shared arrays in activities, audio and networking. Raising the player count requires auditing all these fixed-size interfaces and content assumptions.
@@ -36,7 +36,7 @@ Keep one simulation and introduce a server-authoritative replication layer:
 
 ## Feasibility conclusion
 
-The preferred outcome is one shared simulation library used by the client and server, with separate client presentation and server hosting executables. A first deliverable can reuse the existing simulation and `.rte` loading while disabling presentation. The host session now accepts versioned client input and applies it to the four existing player slots before Activity updates. Gameplay reconciliation, explicit slot ownership and the presentation-free startup path remain to be built before a dedicated server can be claimed. Linux has a working Meson build for the current graphical client; that does not establish a Linux headless server target.
+The preferred outcome is one shared simulation library used by the client and server, with separate client presentation and server hosting executables. A first deliverable can reuse the existing simulation and `.rte` loading while disabling presentation. The host session now accepts versioned client input and applies it to the four existing player slots before Activity updates. Full gameplay reconciliation and the presentation-free simulation startup path remain incomplete. Slot assignments, remote movement/fire and basic player-view binding have Windows test coverage; they do not establish a completed dedicated server. Linux has a working Meson build for the current graphical client; that does not establish a Linux headless server target.
 
 ## Verified build status
 
@@ -44,7 +44,7 @@ Windows x64 (`Debug Minimal`) and Ubuntu 24.04 x86_64 Meson/Ninja builds both pa
 
 The versioned world-state codec, RakNet transport, host session, and client snapshot receiver compile on both platforms. Debug tests start the host session in the simulation process, connect four local client sessions, validate received snapshots, verify that empty hosts skip snapshot broadcasts, disconnect all clients, and confirm that the host remains alive. Server object IDs are monotonically assigned for each live object within a session. This proves local multi-peer session wiring. Snapshot replication and client-side application are now implemented for top-level actors, items and particles, with transient MOPixel support; separate Linux host/client processes have also been exercised.
 
-The `-world-state-server` mode currently starts the simulation inside the normal graphical client executable. It still initializes SDL video, `WindowMan`, OpenGL and render managers. Clients apply replicated top-level object snapshots, but they also continue local simulation. The host now accepts and applies client controls; Linux loopback tests exercised this with both four in-process clients and separate host/client processes. Terrain, inventories/equipment, full Activity/Lua state, reconnect/session negotiation, interpolation, explicit player-slot acknowledgement and a GPU-free dedicated-server executable are absent. The old framebuffer multiplayer sources remain excluded from both build systems. Reaching a playable authoritative multiplayer mode requires separating client startup from simulation and implementing lifecycle-aware state application without breaking existing mod objects or Lua behavior.
+The `-world-state-server` mode still starts simulation inside the graphical client executable and initializes SDL video, WindowMan, OpenGL and render managers. The experimental world-state client skips local MovableMan simulation and applies authoritative object, terrain, equipment and Activity-phase snapshots. Windows smoke tests cover remote movement/fire, assigned player presentation and scene transitions. They do not prove complete Activity-specific Lua/HUD synchronization, reconnect or production gameplay compatibility. Linux evidence predates these protocol changes; current Linux operation remains unverified while the test host is unavailable. A GPU-free dedicated executable and independent server simulation startup are still required.
 
 ## Completion checks
 
@@ -53,3 +53,33 @@ The `-world-state-server` mode currently starts the simulation inside the normal
 - Two independent clients connect to the server; simulation continues after either client disconnects.
 - Actor, inventory, terrain and Activity changes converge from server snapshots.
 - Existing single-player and host/client content continues to load, including representative legacy `.rte` modules and Lua Activities.
+## CPU graphics resource foundation (October 7)
+
+`GLResourceMan::Initialize(false)` selects a mode without GPU resource creation.
+It preserves CPU bitmap data and size/format metadata but returns zero texture,
+program, framebuffer and upload-buffer IDs. `RenderTarget` records its selected
+backend at construction and avoids GPU allocation, Begin/End commands and GPU
+destruction in this mode. `BigTexture` retains bitmap dimensions and pixels
+without querying maximum GL texture size, allocating tile textures or uploading.
+This is an initialization-time choice, not a supported runtime renderer switch
+or a software renderer.
+
+Windows x64 Final compiled and passed
+`-debug-run 60 -debug-run-cpu-graphics-preflight -debug-run-output CPUGraphicsFoundation`
+with `SDL_VIDEODRIVER=invalid-driver-for-headless-test`. The probe initializes only
+SDL core, constructs default managers needed by FrameMan, selects GPU-disabled
+resources, initializes CPU frame buffers and palette assets, and creates a
+bitmap SceneLayer, RenderTarget and BigTexture. It checks zero GPU IDs, retained
+dimensions and pixel value 42 after upload/draw calls. The report says
+`cpu_graphics_preflight=passed video_initialized=0 gpu_enabled=0`, exit code 0.
+
+The full game still initializes SDL video, WindowMan, UI and the renderer.
+This foundation does not load an authoritative headless Activity, create a
+dedicated binary or prove a Linux server build. The next required boundary is
+server manager startup and a simulation loop that does not call client rendering
+or loading-screen drawing. CPU collision bitmap loading must remain available.
+
+Normal GPU startup also passed a Windows Final 60-update diagnostic run
+(CPUGraphicsClientRegression, exit code 0). Its final screenshot was inspected:
+scene terrain, actor sprites, HUD and the UTF-8 diagnostic text rendered.
+This is a short startup/render regression check, not a multiplayer gameplay test.

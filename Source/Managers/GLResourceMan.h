@@ -29,7 +29,9 @@ namespace RTE {
 		GLResourceMan();
 		~GLResourceMan();
 
-		void Initialize();
+		/// Select once at startup; CPU bitmap data remains usable when GPU is disabled.
+		void Initialize(bool enableGPU = true);
+		bool IsGPUEnabled() const { return m_GPUEnabled; }
 		void Destroy();
 		void Clear();
 
@@ -51,6 +53,7 @@ namespace RTE {
 
 
 	private:
+		bool m_GPUEnabled = true;
 		std::vector<std::unique_ptr<GLBitmapInfo>> m_StaticTextures;
 		std::vector<GLuint> m_DynamicBitmapUploadBuffers;
 		std::unordered_map<std::string, std::pair<ShaderType, GLuint>> m_ShaderCache;

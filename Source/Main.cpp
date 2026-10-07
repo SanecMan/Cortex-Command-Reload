@@ -48,6 +48,9 @@
 #include "MetaMan.h"
 #include "WindowMan.h"
 #include "GLResourceMan.h"
+#include "RenderTarget.h"
+#include "BigTexture.h"
+#include "SceneLayer.h"
 #include "CameraMan.h"
 #include "ActivityMan.h"
 #include "MovableMan.h"
@@ -222,6 +225,7 @@ namespace {
 		bool HostSessionTestPassed = true;
 		bool OverlayCaptureEnabled = false;
 		bool PreflightOnly = false;
+		bool CPUGraphicsPreflight = false;
 		std::string ErrorProbe;
 		bool LoadAllOptionalModules = false;
 		bool RequestHostWorldStateTransition = false;
@@ -340,6 +344,7 @@ namespace {
 			const std::string_view argument(argv[i]);
 			if (argument == "-debug-overlay") state.OverlayCaptureEnabled = true;
 			if (argument == "-debug-run-preflight-only") state.PreflightOnly = true;
+			if (argument == "-debug-run-cpu-graphics-preflight") { state.CPUGraphicsPreflight = true; state.PreflightOnly = true; }
 			if (argument == "-debug-run-error-probe" && i + 1 < argc) state.ErrorProbe = argv[++i];
 			if (argument == "-debug-run-all-mods") state.LoadAllOptionalModules = true;
 			if (argument == "-debug-run-world-state-transition") state.RequestHostWorldStateTransition = true;
@@ -2365,6 +2370,47 @@ int main(int argc, char** argv) {
 		return EXIT_FAILURE;
 	}
 	if (debugRun && GetDebugRunState().PreflightOnly) {
+		if (GetDebugRunState().CPUGraphicsPreflight) {
+			const bool coreInitialized = SDL_Init(0);
+			TimerMan::Construct();
+			PresetMan::Construct();
+			SettingsMan::Construct();
+			WindowMan::Construct();
+			GLResourceMan::Construct();
+			ConsoleMan::Construct();
+			FrameMan::Construct();
+			g_TimerMan.Initialize();
+			g_GLResourceMan.Initialize(false);
+			const bool frameInitialized = g_FrameMan.Initialize() == 0;
+			bool cpuResourcesPassed = false;
+			{
+				RenderTarget target(FloatRect(0, 0, 23, 41), FloatRect(0, 0, 23, 41));
+				target.Begin();
+				target.End();
+				SceneLayer layer;
+				BITMAP* bitmap = create_bitmap_ex(8, 65, 33);
+				layer.Create(bitmap, true, Vector(), false, false, Vector(1, 1));
+				putpixel(layer.GetBitmap(), 7, 9, 42);
+				const auto texture = g_GLResourceMan.GetStaticTextureFromBitmap(layer.GetBitmap());
+				BigTexture tiles(layer.GetBitmap());
+				tiles.Update(Box(Vector(), 65, 33));
+				tiles.Draw(Rectangle{0, 0, 65, 33}, Rectangle{0, 0, 65, 33});
+				cpuResourcesPassed = texture.id == 0 && texture.width == 65 && texture.height == 33 &&
+				    target.GetFramebuffer() == 0 && target.GetColorTexture().id == 0 && target.GetDepthTexture().id == 0 &&
+				    target.GetColorTexture().width == 23 && target.GetColorTexture().height == 41 &&
+				    tiles.m_Textures.empty() && getpixel(layer.GetBitmap(), 7, 9) == 42 &&
+				    g_GLResourceMan.UpdateDynamicBitmap(layer.GetBitmap(), true) == 0 &&
+				    g_GLResourceMan.GetDynamicUploadBuffer(layer.GetBitmap()) == 0 && g_FrameMan.GetBackBuffer8();
+			}
+			const bool noVideo = SDL_WasInit(SDL_INIT_VIDEO) == 0 && !g_WindowMan.GetWindow();
+			g_FrameMan.Destroy();
+			g_GLResourceMan.Destroy();
+			SDL_Quit();
+			const bool passed = coreInitialized && frameInitialized && cpuResourcesPassed && noVideo;
+			GetDebugRunState().Log << "cpu_graphics_preflight=" << (passed ? "passed" : "failed")
+			    << " video_initialized=" << !noVideo << " gpu_enabled=" << g_GLResourceMan.IsGPUEnabled() << '\n' << std::flush;
+			if (!passed) return EXIT_FAILURE;
+		}
 		const std::string& probe = GetDebugRunState().ErrorProbe;
 		if (probe == "assert") RTEError::AssertFunc("Diagnostic failure probe: Привет", std::source_location::current());
 		else if (probe == "abort") RTEError::AbortFunc("Diagnostic failure probe: Привет", std::source_location::current());

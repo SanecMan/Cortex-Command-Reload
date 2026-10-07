@@ -6,6 +6,7 @@ struct BITMAP;
 namespace RTE {
 	/// BigTexture for big BITMAPS
 	struct BigTexture {
+		bool m_GPUBacked = true;
 		/// Constructs a BigTexture from a bitmap, generating extra textures as needed.
 		BigTexture(BITMAP* bitmap);
 		

@@ -20,6 +20,13 @@ GLResourceMan::GLResourceMan() = default;
 GLResourceMan::~GLResourceMan() = default;
 
 void GLResourceMan::Clear() {
+	if (!m_GPUEnabled) {
+		m_StaticTextures.clear();
+		m_DynamicBitmapUploadBuffers.clear();
+		m_ShaderCache.clear();
+		m_Shaders.clear();
+		return;
+	}
 	for (auto prog: m_Shaders) {
 		GL_CHECK(glDeleteProgram(prog));
 	}
@@ -32,13 +39,14 @@ void GLResourceMan::Clear() {
 }
 
 void GLResourceMan::Destroy() { Clear(); }
-void GLResourceMan::Initialize() { Clear(); }
+void GLResourceMan::Initialize(bool enableGPU) { Clear(); m_GPUEnabled = enableGPU; }
 
 GLuint GLResourceMan::CompileShader(const std::string& filename, ShaderType type) {
 	return 0;
 }
 
 GLuint GLResourceMan::MakeGLProgram() {
+	if (!m_GPUEnabled) return 0;
 	return glCreateProgram();
 }
 
@@ -68,6 +76,7 @@ GLBitmapInfo* GLResourceMan::MakeBitmapInfo() {
 }
 
 Texture2D GLResourceMan::GetStaticTextureFromBitmap(BITMAP* bitmap) {
+	if (!m_GPUEnabled) return {0, bitmap->w, bitmap->h, 0, bitmap_color_depth(bitmap) == 8 ? PIXELFORMAT_UNCOMPRESSED_GRAYSCALE : PIXELFORMAT_UNCOMPRESSED_R8G8B8A8};
 	if (!bitmap->extra) {
 		m_StaticTextures.emplace_back(new GLBitmapInfo);
 		m_StaticTextures.back()->m_ID = m_StaticTextures.size();
@@ -94,6 +103,7 @@ Texture2D GLResourceMan::GetStaticTextureFromBitmap(BITMAP* bitmap) {
 
 
 GLuint GLResourceMan::GetDynamicUploadBuffer(BITMAP* bitmap) {
+	if (!m_GPUEnabled) return 0;
 	if (!bitmap->extra) {
 		GetStaticTextureFromBitmap(bitmap);
 	}
@@ -111,6 +121,7 @@ GLuint GLResourceMan::GetDynamicUploadBuffer(BITMAP* bitmap) {
 }
 
 GLuint GLResourceMan::UpdateDynamicBitmap(BITMAP* bitmap, bool updated, const std::vector<Box>& updateRegions) {
+	if (!m_GPUEnabled) return 0;
 	ZoneScopedN("Bitmap Upload");
 	GLuint texture = GetStaticTextureFromBitmap(bitmap).id;
 	if (updated) {

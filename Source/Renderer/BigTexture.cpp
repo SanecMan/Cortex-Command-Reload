@@ -11,6 +11,13 @@ using namespace RTE;
 int BigTexture::s_MaxGLTextureSize{0};
 
 BigTexture::BigTexture(BITMAP* bitmap) {
+	m_GPUBacked = g_GLResourceMan.IsGPUEnabled();
+	if (!m_GPUBacked) {
+		m_Bitmap = bitmap;
+		m_Width = bitmap->w;
+		m_Height = bitmap->h;
+		return;
+	}
 	if (!s_MaxGLTextureSize) {
 		glGetIntegerv(GL_MAX_TEXTURE_SIZE, &s_MaxGLTextureSize);
 		s_MaxGLTextureSize /= 2;
@@ -59,6 +66,7 @@ BigTexture::~BigTexture() {
 }
 
 void BigTexture::Draw(Rectangle source, Rectangle dest) {
+	if (!m_GPUBacked) return;
 	ZoneScoped;
 	TracyGpuZone("BigTexture::Draw");
 	float scaleX = dest.width / source.width;
@@ -98,6 +106,7 @@ void BigTexture::Draw(Rectangle source, Rectangle dest) {
 }
 
 void BigTexture::Update(const Box& updateRegion) {
+	if (!m_GPUBacked) return;
 	ZoneScoped;
 	TracyGpuZone("BigTexture Upload");
 	if (!m_Bitmap->extra) {
