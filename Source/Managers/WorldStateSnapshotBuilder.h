@@ -13,8 +13,10 @@ namespace RTE {
 	class WorldStateSnapshotBuilder {
 	public:
 		WorldStateProtocol::Snapshot Capture(std::uint32_t tick);
+		std::uint32_t RefreshSceneRevision() { return CaptureIdentity().SceneRevision; }
 
 	private:
+		WorldStateProtocol::Snapshot CaptureIdentity();
 		std::uint32_t m_SceneRevision = 0;
 		std::uintptr_t m_LastActivityAddress = 0;
 		std::uintptr_t m_LastSceneAddress = 0;

@@ -24,9 +24,8 @@ using namespace RTE;
 static_assert(Activity::NoActivity == WorldStateProtocol::c_NoActivity && Activity::Over == WorldStateProtocol::c_MaxActivityState);
 static_assert(Activity::MaxTeamCount == WorldStateProtocol::c_TeamCount);
 
-WorldStateProtocol::Snapshot WorldStateSnapshotBuilder::Capture(std::uint32_t tick) {
+WorldStateProtocol::Snapshot WorldStateSnapshotBuilder::CaptureIdentity() {
 	WorldStateProtocol::Snapshot snapshot;
-	snapshot.Tick = tick;
 	Activity* activity = g_ActivityMan.GetActivity();
 	const Scene* scene = g_SceneMan.GetScene();
 	if (activity) {
@@ -59,6 +58,13 @@ WorldStateProtocol::Snapshot WorldStateSnapshotBuilder::Capture(std::uint32_t ti
 		m_LastSceneModuleName = snapshot.SceneModuleName;
 	}
 	snapshot.SceneRevision = m_SceneRevision;
+	return snapshot;
+}
+
+WorldStateProtocol::Snapshot WorldStateSnapshotBuilder::Capture(std::uint32_t tick) {
+	WorldStateProtocol::Snapshot snapshot = CaptureIdentity();
+	snapshot.Tick = tick;
+	Activity* activity = g_ActivityMan.GetActivity();
 
 	std::list<SceneObject*> objects;
 	g_MovableMan.GetAllActors(false, objects);

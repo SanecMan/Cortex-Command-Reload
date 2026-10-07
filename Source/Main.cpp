@@ -75,6 +75,7 @@
 #include "System/WorldStateProtocol.h"
 #include "System/WorldStateTerrainTest.h"
 #include "System/DeliveryValidationTest.h"
+#include "System/WorldStatePurchaseTest.h"
 #include "WorldStateCompression.h"
 #include "WorldStateTransport.h"
 #include "WorldStateSnapshotBuilder.h"
@@ -234,6 +235,8 @@ namespace {
 		bool HeadlessSimulationPreflight = false;
 		bool HeadlessServerPreflight = false;
 		bool DeliveryValidationTest = false;
+		bool RequestPurchaseTest = false;
+		WorldStatePurchaseTest PurchaseTest;
 		ServerConfiguration HeadlessConfig{.ListenAddress = "127.0.0.1", .Port = 0};
 		std::string ErrorProbe;
 		bool LoadAllOptionalModules = false;
@@ -354,6 +357,7 @@ namespace {
 			const std::string_view argument(argv[i]);
 			if (argument == "-debug-overlay") state.OverlayCaptureEnabled = true;
 			if (argument == "-debug-run-preflight-only") state.PreflightOnly = true;
+			if (argument == "-debug-run-world-state-purchase") state.RequestPurchaseTest = true;
 			if (argument == "-debug-run-cpu-graphics-preflight") { state.CPUGraphicsPreflight = true; state.PreflightOnly = true; }
 			if (argument == "-debug-run-headless-content") { state.HeadlessContentPreflight = true; state.CPUGraphicsPreflight = true; state.PreflightOnly = true; }
 			if (argument == "-debug-run-headless-simulation") { state.HeadlessSimulationPreflight = true; state.HeadlessContentPreflight = true; state.CPUGraphicsPreflight = true; state.PreflightOnly = true; }
@@ -450,6 +454,9 @@ namespace {
 			return false;
 		}
 		const std::string utf8Probe = "Aя🙂";
+		const bool purchaseCodecPassed=TestPurchaseCodec();
+		state.Log << "world_state_purchase_codec=" << (purchaseCodecPassed ? "passed" : "failed") << '\n' << std::flush;
+		if (!purchaseCodecPassed) return false;
 		std::string utf8EncodedProbe;
 		UTF8::AppendCodepoint(utf8EncodedProbe, 0x1F642);
 		std::uint32_t decodedEmoji = 0;
@@ -1575,6 +1582,12 @@ namespace {
 		          state.HostSessionTestPassed && worldIdentityStable && replicaSmokePassed && transientPixelReplicaPassed && terrainPatchApplyPassed &&
 		          networkInputApplicationPassed && worldSnapshotPassed && snapshotCompressionPassed && liveSnapshotTransportPassed;
 		const double elapsedSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - state.StartTime).count();
+		if (state.RequestPurchaseTest) {
+			const bool passed=state.PurchaseTest.Passed && !state.PurchaseTest.Failed;
+			state.Log << "world_state_purchase=" << (passed ? "passed" : "failed") << " spectator=" << state.PurchaseTest.Spectator
+			    << " stage=" << state.PurchaseTest.Stage << " saw_craft=" << state.PurchaseTest.SawCraft << '\n' << std::flush;
+			success=success && passed;
+		}
 		const double simulationSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - state.SimulationStartTime).count();
 		state.Log << "result=" << (success ? "passed" : "failed") << "\nupdates_done=" << state.SimulationUpdates
 		          << "\nrendered_frames=" << state.RenderedFrames << "\nelapsed_seconds=" << elapsedSeconds
@@ -2125,6 +2138,8 @@ void RunGameLoop() {
 		// step is paused or an Activity is sitting in an editor-only state. Gameplay
 		// commands and world snapshots are still applied only on simulation ticks.
 		if (worldStateClient) worldStateClient->Update();
+		if (worldStateClient && System::IsDebugRun() && GetDebugRunState().RequestPurchaseTest)
+			GetDebugRunState().PurchaseTest.Update(*worldStateClient, GetDebugRunState().Log);
 		if (worldStateServer && worldStateServer->IsStarted()) worldStateServer->PollNetwork(worldStateServerSimulationTick);
 		CheckDebugRunClientDisconnectWhilePaused();
 

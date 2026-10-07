@@ -18,7 +18,7 @@
 namespace RTE::WorldStateProtocol {
 
 inline constexpr std::uint32_t c_Magic = 0x31524343; // "CCR1" on the wire.
-inline constexpr std::uint16_t c_Version = 10;
+inline constexpr std::uint16_t c_Version = 11;
 inline constexpr std::size_t c_TeamCount = 4;
 inline constexpr std::int8_t c_NoActivity = -1;
 inline constexpr std::int8_t c_MaxActivityState = 6;
@@ -45,7 +45,9 @@ enum class MessageType : std::uint8_t {
 	WorldSnapshot = 3,
 	Disconnect = 4,
 	ClientAssignment = 5,
-	TerrainPatch = 6
+	TerrainPatch = 6,
+	PurchaseRequest = 7,
+	PurchaseResult = 8
 };
 
 enum class TerrainLayer : std::uint8_t {

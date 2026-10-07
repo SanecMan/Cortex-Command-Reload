@@ -22,6 +22,8 @@ public:
 		void Disconnect();
 	void Update();
 	bool SendInputCommand(const WorldStateProtocol::InputCommand& command);
+	bool SendPurchaseRequest(const WorldStateProtocol::PurchaseRequest& request) { return m_Connected && m_Transport.SendPurchaseRequest(request); }
+	std::vector<WorldStateProtocol::PurchaseResult> DrainPurchaseResults();
 	int GetAssignedPlayerSlot() const { return m_AssignedPlayerSlot; }
 	bool HasPlayerAssignment() const { return m_HasPlayerAssignment; }
 		bool IsConnected() const { return m_Connected; }
@@ -33,6 +35,7 @@ public:
 	private:
 		WorldStateTransport m_Transport;
 	WorldStateProtocol::Snapshot m_LatestSnapshot;
+	std::deque<WorldStateProtocol::PurchaseResult> m_PurchaseResults;
 	std::deque<ReceivedTerrainPatch> m_TerrainPatches;
 	std::uint32_t m_LastSequence = 0;
 	std::uint32_t m_LastTerrainSequence = 0;

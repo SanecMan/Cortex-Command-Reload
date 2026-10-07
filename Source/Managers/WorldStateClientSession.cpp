@@ -20,6 +20,7 @@ void WorldStateClientSession::Disconnect() {
 	m_LastSequence = 0;
 	m_LastTerrainSequence = 0;
 	m_TerrainPatches.clear();
+	m_PurchaseResults.clear();
 	m_ReceivedSnapshotCount = 0;
 	m_InputCommandSequence = 0;
 	m_AssignedPlayerSlot = -1;
@@ -29,6 +30,15 @@ void WorldStateClientSession::Disconnect() {
 
 bool WorldStateClientSession::SendInputCommand(const WorldStateProtocol::InputCommand& command) {
 	return m_Connected && m_Transport.SendInputCommand(command, ++m_InputCommandSequence);
+}
+
+std::vector<WorldStateProtocol::PurchaseResult> WorldStateClientSession::DrainPurchaseResults() {
+	std::vector<WorldStateProtocol::PurchaseResult> results;
+	while (!m_PurchaseResults.empty()) {
+		results.push_back(std::move(m_PurchaseResults.front()));
+		m_PurchaseResults.pop_front();
+	}
+	return results;
 }
 
 std::vector<WorldStateClientSession::ReceivedTerrainPatch> WorldStateClientSession::DrainTerrainPatches(std::uint32_t sceneRevision) {
@@ -67,6 +77,12 @@ void WorldStateClientSession::Update() {
 			continue;
 		}
 		WorldStateProtocol::TerrainPatch terrainPatch;
+		WorldStateProtocol::PurchaseResult purchase;
+		if (WorldStateProtocol::DecodePurchaseResult(packet.Payload, purchase)) {
+			if (m_PurchaseResults.size() >= 64) m_PurchaseResults.pop_front();
+			m_PurchaseResults.push_back(std::move(purchase));
+			continue;
+		}
 		std::uint32_t terrainSequence = 0;
 		if (WorldStateProtocol::DecodeTerrainPatch(packet.Payload, terrainPatch, &terrainSequence)) {
 			if (m_LastTerrainSequence == 0 || static_cast<std::int32_t>(terrainSequence - m_LastTerrainSequence) > 0) {

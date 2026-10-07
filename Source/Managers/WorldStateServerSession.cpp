@@ -5,6 +5,9 @@
 #include "Activity.h"
 #include "ActivityMan.h"
 #include "GameActivity.h"
+#include "ACraft.h"
+#include "PresetMan.h"
+#include "ThreadMan.h"
 #include "NetworkMessages.h"
 #include "SceneMan.h"
 #include "SLTerrain.h"
@@ -48,6 +51,8 @@ bool WorldStateServerSession::Start(const std::string& bindAddress, unsigned sho
 	m_TerrainPatchBroadcastCount = 0;
 	m_PendingTerrainPatches.clear();
 	m_LastInputSequenceByClient.clear();
+	m_LastPurchaseByClient.clear();
+	m_LastPurchaseTimeByClient.clear();
 	m_PlayerSlotByClient.clear();
 	m_ClientAddresses.clear();
 	m_ReportedPlayerSlots.clear();
@@ -252,6 +257,8 @@ void WorldStateServerSession::PollNetwork(std::uint32_t simulationTick) {
 			m_TerrainBaselinePending = true;
 			const std::string clientAddress(packet.Sender.ToString(true));
 			m_LastInputSequenceByClient.erase(clientAddress);
+			m_LastPurchaseByClient.erase(clientAddress);
+			m_LastPurchaseTimeByClient.erase(clientAddress);
 			m_ResetVotesByClient.erase(clientAddress);
 			m_RestartVotesByClient.erase(clientAddress);
 			m_PreviousResetInputByClient.erase(clientAddress);
@@ -280,6 +287,8 @@ void WorldStateServerSession::PollNetwork(std::uint32_t simulationTick) {
 			m_ConnectedClients = m_ConnectedClients > 0 ? static_cast<unsigned short>(m_ConnectedClients - 1) : 0;
 			const std::string clientAddress(packet.Sender.ToString(true));
 			m_ClientAddresses.erase(clientAddress);
+			m_LastPurchaseByClient.erase(clientAddress);
+			m_LastPurchaseTimeByClient.erase(clientAddress);
 			m_ReportedPlayerSlots.erase(clientAddress);
 			m_LastInputSequenceByClient.erase(clientAddress);
 			m_ResetVotesByClient.erase(clientAddress);
@@ -303,6 +312,57 @@ void WorldStateServerSession::PollNetwork(std::uint32_t simulationTick) {
 			m_PendingInputPackets.push_back(packet);
 		}
 	}
+}
+
+void WorldStateServerSession::ProcessPurchase(const WorldStateTransport::ReceivedPacket& packet, const WorldStateProtocol::PurchaseRequest& request) {
+	const std::string client(packet.Sender.ToString(true));
+	if (!m_ClientAddresses.contains(client)) return;
+	const auto previous = m_LastPurchaseByClient.find(client);
+	if (previous != m_LastPurchaseByClient.end() && request.RequestId == previous->second.RequestId) {
+		m_Transport.SendPurchaseResult(packet.Sender, previous->second);
+		Log("INFO: purchase replay id=" + std::to_string(request.RequestId) + " client=" + client);
+		return;
+	}
+	WorldStateProtocol::PurchaseResult result;
+	result.RequestId = request.RequestId;
+	result.SceneRevision = m_SnapshotBuilder.RefreshSceneRevision();
+	if (previous != m_LastPurchaseByClient.end() && request.RequestId < previous->second.RequestId) {
+		result.Reason = "stale_request";
+		m_Transport.SendPurchaseResult(packet.Sender, result);
+		return;
+	}
+	const auto now = std::chrono::steady_clock::now();
+	const auto lastTime = m_LastPurchaseTimeByClient.find(client);
+	const auto slot = m_ReportedPlayerSlots.find(client);
+	auto* activity = dynamic_cast<GameActivity*>(g_ActivityMan.GetActivity());
+	if (lastTime != m_LastPurchaseTimeByClient.end() && now - lastTime->second < std::chrono::milliseconds(250)) result.Reason = "rate_limit";
+	else if (slot == m_ReportedPlayerSlots.end() || slot->second < 0) result.Reason = "spectator";
+	else if (request.SceneRevision != result.SceneRevision) result.Reason = "stale_scene";
+	else if (!activity) result.Reason = "delivery_unavailable";
+	else {
+		auto resolve = [](const WorldStateProtocol::PurchasePreset& identity) -> const SceneObject* {
+			const int module = g_PresetMan.GetModuleID(identity.ModuleName);
+			if (module < 0) return nullptr;
+			const auto* preset = dynamic_cast<const SceneObject*>(g_PresetMan.GetEntityPreset(identity.ClassName, identity.PresetName, module));
+			return preset && preset->GetModuleName() == identity.ModuleName && preset->GetClassName() == identity.ClassName ? preset : nullptr;
+		};
+		const auto* craft = dynamic_cast<const ACraft*>(resolve(request.Craft));
+		std::vector<const SceneObject*> cargo;
+		cargo.reserve(request.Cargo.size());
+		for (const auto& identity : request.Cargo) cargo.push_back(resolve(identity));
+		if (!craft || std::find(cargo.begin(), cargo.end(), nullptr) != cargo.end()) result.Reason = "invalid_preset";
+		else {
+			// Native cloning can load Lua scripts; complete the asynchronous GC before entering that path.
+			g_ThreadMan.GetPriorityThreadPool().wait_for_tasks();
+			result.Accepted = activity->CreateValidatedDelivery(slot->second, craft, cargo, Vector(request.LandingX, request.LandingY),
+			    request.AIMode, result.ChargedCost, result.Reason);
+		}
+	}
+	if (lastTime == m_LastPurchaseTimeByClient.end() || now - lastTime->second >= std::chrono::milliseconds(250)) m_LastPurchaseTimeByClient[client] = now;
+	m_LastPurchaseByClient[client] = result;
+	if (!m_Transport.SendPurchaseResult(packet.Sender, result)) Log("ERROR: purchase result send failed client=" + client);
+	Log("INFO: purchase id=" + std::to_string(result.RequestId) + " accepted=" + std::to_string(result.Accepted) + " charged=" +
+	    std::to_string(result.ChargedCost) + " reason=" + result.Reason + " client=" + client);
 }
 
 void WorldStateServerSession::Update(std::uint32_t simulationTick) {
@@ -332,6 +392,11 @@ void WorldStateServerSession::Update(std::uint32_t simulationTick) {
 		WorldStateProtocol::InputCommand command;
 		std::uint32_t sequence = 0;
 		const std::string clientAddress(packet.Sender.ToString(true));
+		WorldStateProtocol::PurchaseRequest purchase;
+		if (WorldStateProtocol::DecodePurchaseRequest(packet.Payload, purchase)) {
+			ProcessPurchase(packet, purchase);
+			continue;
+		}
 		auto previous = m_LastInputSequenceByClient.find(clientAddress);
 		if (!WorldStateProtocol::DecodeInputCommand(packet.Payload, command, &sequence) ||
 		    (previous != m_LastInputSequenceByClient.end() && static_cast<std::int32_t>(sequence - previous->second) <= 0)) {

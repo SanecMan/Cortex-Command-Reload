@@ -8,6 +8,7 @@
 
 #include "RakNetTypes.h"
 #include "WorldStateProtocol.h"
+#include "WorldStatePurchaseProtocol.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -53,6 +54,8 @@ namespace RTE {
 		bool SendInputCommand(const WorldStateProtocol::InputCommand& command, std::uint32_t sequence);
 		bool SendClientAssignment(const RakNet::AddressOrGUID& target, const WorldStateProtocol::ClientAssignment& assignment, std::uint32_t sequence);
 		void Poll(std::vector<ReceivedPacket>& packets);
+		bool SendPurchaseRequest(const WorldStateProtocol::PurchaseRequest& request);
+		bool SendPurchaseResult(const RakNet::AddressOrGUID& target, const WorldStateProtocol::PurchaseResult& result);
 
 	private:
 		bool Send(const RakNet::AddressOrGUID& target, std::span<const std::uint8_t> packet, bool broadcast, PacketReliability reliability = RELIABLE_ORDERED);

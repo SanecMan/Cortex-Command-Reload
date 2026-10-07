@@ -1,5 +1,14 @@
 # Automated debug run
 
+For the v11 purchase RPC, run `Tools/RunDedicatedServerSmoke.ps1 -CheckPurchases`.
+It launches a real headless server and two clients. One player exercises request
+validation, purchase, replay and stale ID rejection; the spectator must be
+rejected. Client `-debug-run-world-state-purchase` enables this explicit fixture.
+Reports include `world_state_purchase_codec`, `purchase_reply` and
+`world_state_purchase`. This fixture is specific to Tutorial's static landing
+zone and uses console funding, not a visible buy menu. Repeated runs replace
+their previous diagnostic artifacts.
+
 The explicit delivery/economy fixture runs headless:
 
 ```powershell

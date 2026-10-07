@@ -212,9 +212,8 @@ nesting, craft AI, delivery delay, stock consumption and native/foreign economy
 modifiers. A pending Lua override order is preserved. Existing Lua delivery calls
 continue to use their established rules, including deliberate overspending.
 
-This entry point is not yet connected to a network purchase message or a remote
-buy menu. Scene revision, request sequence/replay checks and result messages must
-be added at that boundary. A server must call it serially with simulation updates;
+The v11 RPC described below now calls this entry point; the remote buy menu remains
+unconnected. A server must call it serially with simulation updates;
 the method does not add locking around the global managers. A fatal allocation
 failure during cloning is not a recoverable purchase rollback.
 
@@ -239,3 +238,46 @@ were rebuilt. The subsequent two-client dedicated-server regression with funds
 checks passed in 46.10 seconds (`ValidatedDeliveryDedicated`), continued 65
 updates after disconnection and shut down cleanly with code 0. That network
 regression checks session behavior, not purchase messages.
+
+## Network purchases (v11)
+
+The world-state sessions now carry client purchase requests and server results.
+The server owns preset lookup, player assignment, scene revision and charging.
+It returns the last result on a retry of the same ID, rejects older IDs, checks
+spectator status and limits new requests to one per 250 ms. Native craft/cargo
+cloning waits for the priority task pool's asynchronous Lua GC to finish.
+The client API is available but has not yet been connected to the visible buy UI.
+See [WorldStateProtocol.md](WorldStateProtocol.md) for the wire layout and retry
+semantics. Rebuild both client and server: v10 peers cannot exchange v11 messages.
+
+`Tools/RunDedicatedServerSmoke.ps1 -CheckPurchases` runs an active player and a
+spectator through real separate processes. The active fixture tests stale scene,
+missing preset, acceptance, a changed-payload duplicate ID and an old ID. It
+requires exactly one new dropship in snapshots and a single 500-unit deduction.
+The spectator must receive a rejection. Use a different run from `-CheckTeamFunds`
+because that fixture changes balances administratively.
+
+Windows Final v11 purchase verification passed in 41.14 seconds with two separate
+clients (`ScreenShots/PurchaseRpcDedicated-*`). The Tutorial fixture is funded to
+10000 through the server console before connection. The active player received
+`stale_scene` and `invalid_preset`, then an accepted 500-unit order. A retry with
+a different payload and the same ID returned the identical accepted result,
+without another purchase. The older ID returned `stale_request`. The client
+observed exactly one dropship and 9500 funds in authoritative snapshots. The
+other client received `spectator`. The server continued 65 updates after both
+disconnected and quit with code 0.
+
+Initial fixture runs correctly rejected a landing point outside Tutorial's team
+area and a purchase with Tutorial's zero starting balance. The fixture now picks
+the map's static LZ and receives explicit console funding; server validation was
+retained. These tests do not cover dynamic scripted landing-area replication or
+the remote buy UI. Codec and shared delivery regression checks also passed.
+
+After the final server relink, the purchase regression passed again in 60.48
+seconds and the separate funds regression passed in 61.30 seconds; both continued
+65 updates after disconnection and shut down with code 0. They ran concurrently,
+so these durations are test elapsed times, not performance measurements. The
+v11 Control scenario (movement, firing and scene transition) passed in 79.23
+seconds. The purchase client's final screenshot was inspected and displayed
+Funds: 9500. Complete inventory replication and the visible remote BuyMenu remain
+outside this completed RPC step.
