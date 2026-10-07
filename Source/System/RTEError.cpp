@@ -50,10 +50,10 @@ namespace {
 		try {
 			if (!diagnosticOutputDirectory.empty()) {
 				const auto directory = UTF8::PathFromString(diagnosticOutputDirectory);
-				std::ofstream failure(directory / "DebugFailure.log", std::ios::trunc);
+				std::ofstream failure(directory / (System::IsHeadlessServer() ? "ServerFailure.log" : "DebugFailure.log"), std::ios::trunc);
 				failure << message << '\n';
 				failure.close();
-				std::ofstream report(directory / "DebugRun.log", std::ios::app);
+				std::ofstream report(directory / (System::IsHeadlessServer() ? "Server.log" : "DebugRun.log"), std::ios::app);
 				report << "\nfatal_error=true\nresult=failed\n";
 				report.close();
 			}
@@ -340,7 +340,7 @@ bool RTEError::ShowAssertMessageBox(const std::string& message) {
 }
 
 void RTEError::UnhandledExceptionFunc(const std::string& description, const std::string& callstack) {
-	if (System::IsDebugRun()) ExitDiagnosticRun("Unhandled exception: " + description + "\n" + callstack);
+	if (System::IsDebugRun() || System::IsHeadlessServer()) ExitDiagnosticRun("Unhandled exception: " + description + "\n" + callstack);
 	s_CurrentlyAborting = true;
 
 	std::string exceptionMessage = "Runtime Error due to unhandled exception!\n\n" + description;
@@ -393,7 +393,7 @@ void RTEError::UnhandledExceptionFunc(const std::string& description, const std:
 }
 
 void RTEError::AbortFunc(const std::string& description, const std::source_location& srcLocation) {
-	if (System::IsDebugRun()) ExitDiagnosticRun("Abort: " + description + "\n" + srcLocation.file_name() + ":" + std::to_string(srcLocation.line()));
+	if (System::IsDebugRun() || System::IsHeadlessServer()) ExitDiagnosticRun("Abort: " + description + "\n" + srcLocation.file_name() + ":" + std::to_string(srcLocation.line()));
 	s_CurrentlyAborting = true;
 
 	if (!System::IsInExternalModuleValidationMode()) {
@@ -463,7 +463,7 @@ void RTEError::AbortFunc(const std::string& description, const std::source_locat
 }
 
 void RTEError::AssertFunc(const std::string& description, const std::source_location& srcLocation) {
-	if (System::IsDebugRun()) ExitDiagnosticRun("Assertion: " + description + "\n" + srcLocation.file_name() + ":" + std::to_string(srcLocation.line()));
+	if (System::IsDebugRun() || System::IsHeadlessServer()) ExitDiagnosticRun("Assertion: " + description + "\n" + srcLocation.file_name() + ":" + std::to_string(srcLocation.line()));
 	if (System::IsInExternalModuleValidationMode()) {
 		AbortFunc(description, srcLocation);
 	}

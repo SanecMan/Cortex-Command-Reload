@@ -213,3 +213,7 @@ Example: `Cortex Command.exe -debug-run 3600 -debug-run-headless-server --config
 Windows Final configuration evidence: a BOM UTF-8 `сервер.ini` containing the name `Тестовый сервер` was read; explicit CLI values overrode config address/port/player limit to loopback, an automatic port and 4 connections. The two-client wrapper passed in 70.30 seconds. Seven invalid CLI cases (negative/oversized port, zero/oversized player limit, invalid boolean, unknown option and missing scene value) exited with code 1 and a server_configuration error. The selected Skirmish Defense/Ketanot Hills Activity also loaded and executed 60 physics updates without video; no actors were present, so this is a startup/scene-selection check rather than an active multiplayer battle.
 
 `RunHeadlessWorldStateSmoke.ps1 -ServerConfigPath <path> -PlayerLimit 4` exercises config loading and explicit overrides. The wrapper always overrides listen address and port to loopback/automatic for isolated tests. The command-line parser is shared code intended for the future persistent server entry point.
+
+## Persistent dedicated server
+
+The separate Windows console binary and the client's --server mode use the same headless content/step functions as the diagnostics. The persistent mode does not run debug fixtures or require clients to exit successfully; it runs until console/signal shutdown. See DedicatedServer.md for build, CLI/configuration, runtime limits and the real two-client console-server verification. After the extraction, RunHeadlessWorldStateSmoke also passed again in 70.66 seconds.

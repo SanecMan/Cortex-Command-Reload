@@ -17,6 +17,15 @@ You can get mods from our [mod portal](https://cccp.mod.io).
 # How To Make Your Voice Heard #
 So you want to take part in the project? A good start would be going to the discord where the project is discussed. You can find a link [here](https://discord.gg/TSU6StNQUG). All our releases are available under the releases area and all of our bugs, changes, and ideas are tracked in GitHub issues. Feel free to play and suggest changes or point out any problems.
 
+## Cortex Command Reload dedicated server (Windows x64)
+
+The fork provides a persistent headless world-state server. Build it with
+`powershell -ExecutionPolicy Bypass -File Tools/BuildDedicatedServer.ps1`, then run
+`CortexCommandServer.exe --config Server.example.ini`. It shares the existing
+simulation code and requires the game's content and runtime DLLs. See
+[Dedicated server setup, verification and current limits](Documentation/DedicatedServer.md).
+Linux operation is not yet verified.
+
 # How To Make Issues #
 Please feel free to add issues and bugs. It's as simple as going to the issues tab and clicking a button. Once you do that, you'll see an easy to follow template to fill in. Try to put in the appropriate category for the issue and it'll be handled from there.
 

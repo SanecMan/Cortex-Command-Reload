@@ -18,6 +18,7 @@ struct ServerConfiguration {
 	std::string ActivityPreset = "Tutorial Mission";
 	std::string ScenePreset = "Tutorial Bunker";
 	bool IncludeMods = false;
+	std::string LogDirectory = "ServerLogs";
 
 	static std::string_view Trim(std::string_view text) {
 		const auto first = text.find_first_not_of(" \t\r\n");
@@ -47,6 +48,7 @@ struct ServerConfiguration {
 		else if (key == "ActivityClass") ActivityClass = value;
 		else if (key == "Activity") ActivityPreset = value;
 		else if (key == "Scene") ScenePreset = value;
+		else if (key == "LogDirectory") LogDirectory = value;
 		else if (key == "IncludeMods") {
 			if (value != "true" && value != "false" && value != "1" && value != "0") {
 				error = "IncludeMods must be true or false";
@@ -104,6 +106,8 @@ struct ServerConfiguration {
 			else if (option == "--activity") key = "Activity";
 			else if (option == "--scene") key = "Scene";
 			else if (option == "--mods") key = "IncludeMods";
+			else if (option == "--log-directory") key = "LogDirectory";
+			else if (option == "--server") continue;
 			else if (option.starts_with("--")) { error = "Unknown server option: " + std::string(option); return false; }
 			else continue; // Existing single-dash diagnostic options belong to Main.
 			if (i + 1 >= argc) { error = std::string(option) + " requires a value"; return false; }

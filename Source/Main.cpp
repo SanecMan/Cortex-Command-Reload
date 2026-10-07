@@ -35,6 +35,7 @@
 #include "LoadingScreen.h"
 #include "MOPixel.h"
 #include "System/ServerConfiguration.h"
+#include "System/ServerConsole.h"
 
 #include "MenuMan.h"
 #include "ConsoleMan.h"
@@ -1674,6 +1675,104 @@ void ConstructManagers() {
 	LoadingScreen::Construct();
 }
 
+bool InitializeHeadlessContent(const ServerConfiguration& config, const std::string& loadingLog, bool includeOptional = false) {
+	g_ThreadMan.Initialize();
+	g_LuaMan.Initialize();
+	g_PerformanceMan.Initialize();
+	g_SceneMan.Initialize();
+	g_MovableMan.Initialize();
+	return g_LoadingScreen.CreateLogOnly(loadingLog) && g_PresetMan.LoadAllDataModules(config.IncludeMods || includeOptional);
+}
+
+void StepHeadlessSimulation(WorldStateServerSession* server, std::uint32_t tick) {
+	g_PerformanceMan.NewPerformanceSample();
+	g_PerformanceMan.UpdateMSPSU();
+	g_PerformanceMan.StartPerformanceMeasurement(PerformanceMan::SimTotal);
+	if (server) server->Update(tick);
+	g_LuaMan.Update();
+	g_FrameMan.Update();
+	g_MovableMan.CompleteQueuedMOIDDrawings();
+	g_ActivityMan.Update();
+	g_SceneMan.GetScene()->Update();
+	g_MovableMan.Update(false);
+	g_ActivityMan.LateUpdateGlobalScripts();
+	g_PerformanceMan.StopPerformanceMeasurement(PerformanceMan::SimTotal);
+}
+
+int RunPersistentHeadlessServer(const ServerConfiguration& config) {
+	const auto logDirectory = UTF8::PathFromString(config.LogDirectory);
+	std::error_code error;
+	std::filesystem::create_directories(logDirectory, error);
+	if (error) { std::cerr << "[SERVER][ERROR] Cannot create log directory: " << error.message() << '\n'; return EXIT_FAILURE; }
+	std::ofstream serverLog(logDirectory / "Server.log", std::ios::app);
+	if (!serverLog) { std::cerr << "[SERVER][ERROR] Cannot open Server.log\n"; return EXIT_FAILURE; }
+	RTEError::SetDiagnosticOutputDirectory(UTF8::PathToString(logDirectory));
+	auto log = [&](const std::string& message) {
+		const auto seconds = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+		serverLog << '[' << seconds << "][SERVER] " << message << '\n' << std::flush;
+		std::cout << "[SERVER] " << message << '\n' << std::flush;
+	};
+	ServerConsole console;
+	log("INFO starting name=" + config.Name);
+	if (!SDL_Init(0)) { log("ERROR SDL core initialization failed"); return EXIT_FAILURE; }
+	ConstructManagers();
+	g_TimerMan.Initialize();
+	g_GLResourceMan.Initialize(false);
+	const bool frameReady = g_FrameMan.Initialize() == 0;
+	bool success = frameReady && InitializeHeadlessContent(config, UTF8::PathToString(logDirectory / "LogLoading.txt"));
+	WorldStateServerSession session;
+	if (success) {
+		worldStateServerActivityClass = config.ActivityClass;
+		worldStateServerActivityPreset = config.ActivityPreset;
+		worldStateServerScenePreset = config.ScenePreset;
+		std::string activityError;
+		success = ConfigureWorldStateHostActivity(activityError) && g_ActivityMan.RestartActivity();
+		if (!activityError.empty()) log("ERROR " + activityError);
+		if (success) {
+			g_ActivityMan.ResumeActivity();
+			success = session.Start(config.ListenAddress, config.Port, config.Players, UTF8::PathToString(logDirectory / "WorldStateServer.log"), false, false);
+		}
+	}
+	std::uint32_t tick = 0;
+	if (success) log("INFO ready port=" + std::to_string(session.GetBoundPort()) + " video_initialized=" + std::to_string(SDL_WasInit(SDL_INIT_VIDEO) != 0));
+	else log("ERROR startup failed");
+	while (success && !ServerConsole::StopRequested.load() && !System::IsSetToQuit()) {
+		for (const std::string& command : console.Poll()) {
+			if (command == "quit" || command == "exit" || command == "stop") ServerConsole::StopRequested.store(true);
+			else if (command == "status") log("INFO status tick=" + std::to_string(tick) + " clients=" + std::to_string(session.GetConnectedClientCount()) + " actors=" + std::to_string(g_MovableMan.GetActorCount()));
+			else if (command == "help") log("INFO commands: status, help, quit");
+			else log("WARNING unknown console command: " + command);
+		}
+		session.PollNetwork(tick);
+		if (g_ActivityMan.ActivitySetToRestart()) {
+			success = g_ActivityMan.RestartActivity();
+			if (success) g_ActivityMan.ResumeActivity();
+			else break;
+		}
+		g_TimerMan.Update();
+		if (!g_TimerMan.TimeForSimUpdate()) { std::this_thread::sleep_for(std::chrono::milliseconds(1)); continue; }
+		g_TimerMan.UpdateSim();
+		StepHeadlessSimulation(&session, ++tick);
+	}
+	session.Stop();
+	g_ThreadMan.GetPriorityThreadPool().wait_for_tasks();
+	g_ThreadMan.GetBackgroundThreadPool().wait_for_tasks();
+	g_ConsoleMan.SaveAllText(UTF8::PathToString(logDirectory / "LogConsole.txt"));
+	g_MovableMan.Destroy();
+	g_SceneMan.Destroy();
+	g_ActivityMan.Destroy();
+	g_PresetMan.Destroy();
+	g_LuaMan.Destroy();
+	g_LoadingScreen.Destroy();
+	g_FrameMan.Destroy();
+	ContentFile::FreeAllLoaded();
+	g_GLResourceMan.Destroy();
+	g_WindowMan.Destroy();
+	SDL_Quit();
+	log("INFO stopped tick=" + std::to_string(tick) + " success=" + std::to_string(success));
+	return success ? EXIT_SUCCESS : EXIT_FAILURE;
+}
+
 void InitializeManagers() {
 	auto logDebugInitializationStage = [](const char* stage) {
 		if (System::IsDebugRun()) {
@@ -2370,7 +2469,9 @@ static const bool RTESetExceptionHandlers = []() {
 /// Implementation of the main function.
 /// </summary>
 int main(int argc, char** argv) {
-	const bool debugRun = ParseDebugRunArguments(argc, argv);
+	const bool serverMode = std::any_of(argv + 1, argv + argc, [](const char* arg) { return std::string_view(arg) == "--server"; });
+	const bool debugRun = !serverMode && ParseDebugRunArguments(argc, argv);
+	System::SetHeadlessServer(serverMode);
 	System::SetDebugRun(debugRun);
 	install_allegro(SYSTEM_NONE, &errno, std::atexit);
 	loadpng_init();
@@ -2387,6 +2488,19 @@ int main(int argc, char** argv) {
 	// Just use it anyway until some dumb edge case pops up and it becomes a problem.
 	System::Initialize(argv[0]);
 	SeedRNG();
+	if (serverMode) {
+		if (std::any_of(argv + 1, argv + argc, [](const char* arg) { return std::string_view(arg) == "--help"; })) {
+			std::cout << "Cortex Command Reload server\n--config FILE --listen ADDRESS --port PORT --players CONNECTION_LIMIT\n--name NAME --activity-class CLASS --activity PRESET --scene PRESET\n--mods true|false --log-directory DIRECTORY\nConsole: status, help, quit. Ctrl+C or SIGTERM stops the server.\n";
+			allegro_exit();
+			return EXIT_SUCCESS;
+		}
+		ServerConfiguration config;
+		std::string configError;
+		if (!config.ParseArguments(argc, argv, configError)) { std::cerr << "[SERVER][ERROR] " << configError << '\n'; allegro_exit(); return EXIT_FAILURE; }
+		const int result = RunPersistentHeadlessServer(config);
+		allegro_exit();
+		return result;
+	}
 
 	if (!StartDebugRun()) {
 		allegro_exit();
@@ -2440,14 +2554,8 @@ int main(int argc, char** argv) {
 			const bool noVideo = SDL_WasInit(SDL_INIT_VIDEO) == 0 && !g_WindowMan.GetWindow();
 			bool contentPassed = true;
 			if (GetDebugRunState().HeadlessContentPreflight) {
-				g_ThreadMan.Initialize();
-				g_LuaMan.Initialize();
-				g_PerformanceMan.Initialize();
-				g_SceneMan.Initialize();
-				g_MovableMan.Initialize();
 				const std::string loadingLog = UTF8::PathToString(GetDebugRunState().OutputDirectory / "LogLoading.txt");
-				contentPassed = g_LoadingScreen.CreateLogOnly(loadingLog);
-				if (contentPassed) contentPassed = g_PresetMan.LoadAllDataModules(GetDebugRunState().LoadAllOptionalModules || GetDebugRunState().HeadlessConfig.IncludeMods);
+				contentPassed = InitializeHeadlessContent(GetDebugRunState().HeadlessConfig, loadingLog, GetDebugRunState().LoadAllOptionalModules);
 				contentPassed = contentPassed && g_PresetMan.GetOfficialModuleCount() > 0 &&
 				    g_PresetMan.GetEntityPreset("Scene", "Tutorial Bunker", "Missions.rte") != nullptr &&
 				    SDL_WasInit(SDL_INIT_VIDEO) == 0 && !g_WindowMan.GetWindow();
@@ -2505,14 +2613,7 @@ int main(int argc, char** argv) {
 							continue;
 						}
 						g_TimerMan.UpdateSim();
-						if (headlessServer) headlessServer->Update(static_cast<std::uint32_t>(updates + 1));
-						g_LuaMan.Update();
-						g_FrameMan.Update();
-						g_MovableMan.CompleteQueuedMOIDDrawings();
-						g_ActivityMan.Update();
-						g_SceneMan.GetScene()->Update();
-						g_MovableMan.Update(false);
-						g_ActivityMan.LateUpdateGlobalScripts();
+						StepHeadlessSimulation(headlessServer.get(), static_cast<std::uint32_t>(updates + 1));
 						if (probeParticle && g_MovableMan.ValidMO(probeParticle)) {
 							particleMoved = particleMoved || (probeParticle->GetPos() - initialPosition).GetMagnitude() > 1.0F;
 						}

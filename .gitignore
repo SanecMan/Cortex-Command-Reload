@@ -19,6 +19,7 @@ compile_commands.json
 
 
 **/build*
+!Tools/BuildDedicatedServer.ps1
 
 /enc_temp_folder
 
@@ -108,3 +109,4 @@ LogConsole.txt
 Console.dump.log
 Console.input.log
 imgui.ini
+ServerLogs/
