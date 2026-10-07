@@ -4,6 +4,7 @@ param(
     [string]$ClientExecutablePath,
     [ValidatePattern('^[A-Za-z0-9_-]{1,48}$')]
     [string]$OutputPrefix = 'DedicatedServerSmoke',
+    [switch]$CheckTeamFunds,
     [ValidateRange(60, 600)]
     [int]$TimeoutSeconds = 360
 )
@@ -65,9 +66,23 @@ try {
         $processes.Add($client)
         $clients.Add($client)
     }
+    $fundsChanged = $false
     while (@($clients | Where-Object { !$_.HasExited }).Count -gt 0) {
         Check-Time
         if ($server.HasExited) { throw 'Server stopped while clients were running.' }
+        if ($CheckTeamFunds -and !$fundsChanged) {
+            $clientsReady = $true
+            foreach ($index in 1..2) {
+                $networkPath = Join-Path (Split-Path -Parent $clientBinary) "ScreenShots\$OutputPrefix-Client$index\WorldStateClient.log"
+                $clientsReady = $clientsReady -and (Read-Report $networkPath) -match '(?m)^snapshot='
+            }
+            if ($clientsReady) {
+                $server.StandardInput.WriteLine('funds 0 12345.25')
+                $server.StandardInput.WriteLine('funds 1 -17.5')
+                $server.StandardInput.Flush()
+                $fundsChanged = $true
+            }
+        }
         Start-Sleep -Milliseconds 500
     }
     foreach ($client in $clients) {
@@ -104,6 +119,8 @@ try {
         $clientNetwork = Read-Report (Join-Path $clientDirectory 'WorldStateClient.log')
         if ($clientReport -notmatch '(?m)^result=passed' -or $clientNetwork -notmatch '(?m)^client_local_simulation_ticks=0' -or
             $clientNetwork -notmatch '(?m)^snapshot=\d+.*missing_presets=0' -or $clientNetwork -match 'missing_presets=[1-9]') { throw 'Client replica checks failed.' }
+        if ($CheckTeamFunds -and (!$fundsChanged -or $clientReport -notmatch '(?m)^world_state_team_funds_presentation=passed' -or
+            $clientNetwork -notmatch 'funds_team0=12345\.250000 funds_team1=-17\.500000')) { throw 'Client team funds replication failed.' }
     }
     [pscustomobject]@{ Result='passed'; Clients=2; UpdatesAfterDisconnect=($latestTick-$baselineTick); Port=$port; ServerBinary=$serverBinary; ElapsedSeconds=[Math]::Round($timer.Elapsed.TotalSeconds,2) }
 } finally {

@@ -22,6 +22,7 @@
 
 using namespace RTE;
 static_assert(Activity::NoActivity == WorldStateProtocol::c_NoActivity && Activity::Over == WorldStateProtocol::c_MaxActivityState);
+static_assert(Activity::MaxTeamCount == WorldStateProtocol::c_TeamCount);
 
 WorldStateProtocol::Snapshot WorldStateSnapshotBuilder::Capture(std::uint32_t tick) {
 	WorldStateProtocol::Snapshot snapshot;
@@ -30,6 +31,7 @@ WorldStateProtocol::Snapshot WorldStateSnapshotBuilder::Capture(std::uint32_t ti
 	const Scene* scene = g_SceneMan.GetScene();
 	if (activity) {
 		snapshot.ActivityState = static_cast<std::int8_t>(activity->GetActivityState());
+		for (int team = 0; team < Activity::MaxTeamCount; ++team) snapshot.TeamFunds[team] = activity->GetTeamFunds(team);
 		snapshot.ActivityClassName = activity->GetClass().GetName();
 		snapshot.ActivityPreset = activity->GetPresetName();
 		snapshot.ActivityModuleName = activity->GetModuleName();

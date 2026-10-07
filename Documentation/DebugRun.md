@@ -217,3 +217,13 @@ Windows Final configuration evidence: a BOM UTF-8 `сервер.ini` containing 
 ## Persistent dedicated server
 
 The separate Windows console binary and the client's --server mode use the same headless content/step functions as the diagnostics. The persistent mode does not run debug fixtures or require clients to exit successfully; it runs until console/signal shutdown. See DedicatedServer.md for build, CLI/configuration, runtime limits and the real two-client console-server verification. After the extraction, RunHeadlessWorldStateSmoke also passed again in 70.66 seconds.
+
+## Team-funds replication checks
+
+Protocol v10 adds four authoritative team balances. Preflight reports
+world_state_team_funds_codec=passed after finite-value round trips and invalid
+float rejection. Connected diagnostic clients check every applied snapshot
+against Activity::GetTeamFunds and report world_state_team_funds_presentation.
+RunDedicatedServerSmoke.ps1 -CheckTeamFunds waits for both clients' initial
+snapshots, sends two console balance changes and requires both exact values
+in both clients' network logs, in addition to the existing lifecycle checks.

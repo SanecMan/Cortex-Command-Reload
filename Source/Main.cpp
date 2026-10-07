@@ -247,6 +247,7 @@ namespace {
 		bool ClientControlPassed = false;
 		bool ReplicaWorldExact = true;
 		bool ReplicaActivityStateExact = true;
+		bool ReplicaTeamFundsExact = true;
 		AHuman* ControlTestActor = nullptr;
 		float ControlStartX = 0;
 		int ControlStartRounds = 0;
@@ -674,6 +675,27 @@ namespace {
 		if (invalidStatePacket.size() > WorldStateProtocol::c_HeaderSize + 8) invalidStatePacket[WorldStateProtocol::c_HeaderSize + 8] = 127;
 		activityStateCodecPassed = activityStateCodecPassed && !WorldStateProtocol::DecodeSnapshot(invalidStatePacket, decodedSnapshot);
 		state.Log << "world_state_activity_state_codec=" << (activityStateCodecPassed ? "passed" : "failed") << '\n' << std::flush;
+		WorldStateProtocol::Snapshot fundsProbe = networkSnapshot;
+		fundsProbe.TeamFunds = {12345.25F, -17.5F, 0.0F, 1000000.0F};
+		std::vector<std::uint8_t> fundsPacket;
+		WorldStateProtocol::Snapshot decodedFunds;
+		bool fundsCodecPassed = WorldStateProtocol::EncodeSnapshot(fundsProbe, 1, fundsPacket) &&
+		    WorldStateProtocol::DecodeSnapshot(fundsPacket, decodedFunds) && decodedFunds.TeamFunds == fundsProbe.TeamFunds;
+		for (std::size_t team = 0; team < WorldStateProtocol::c_TeamCount; ++team) {
+			for (float invalidFunds : {std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity()}) {
+				WorldStateProtocol::Snapshot invalidFundsProbe = fundsProbe;
+				invalidFundsProbe.TeamFunds[team] = invalidFunds;
+				std::vector<std::uint8_t> invalidFundsPacket;
+				fundsCodecPassed = fundsCodecPassed && !WorldStateProtocol::EncodeSnapshot(invalidFundsProbe, 1, invalidFundsPacket);
+				invalidFundsPacket = fundsPacket;
+				std::vector<std::uint8_t> invalidFloatBytes;
+				WorldStateProtocol::Detail::WriteFloat(invalidFloatBytes, invalidFunds);
+				const std::size_t fundsOffset = WorldStateProtocol::c_HeaderSize + 9 + team * sizeof(float);
+				if (invalidFundsPacket.size() >= fundsOffset + sizeof(float)) std::copy(invalidFloatBytes.begin(), invalidFloatBytes.end(), invalidFundsPacket.begin() + fundsOffset);
+				fundsCodecPassed = fundsCodecPassed && !WorldStateProtocol::DecodeSnapshot(invalidFundsPacket, decodedFunds);
+			}
+		}
+		state.Log << "world_state_team_funds_codec=" << (fundsCodecPassed ? "passed" : "failed") << '\n' << std::flush;
 		if (!truncatedNetworkPacket.empty()) truncatedNetworkPacket.pop_back();
 		std::vector<std::uint8_t> unsupportedVersionPacket = networkPacket;
 		if (unsupportedVersionPacket.size() > 4) unsupportedVersionPacket[4] = static_cast<std::uint8_t>(WorldStateProtocol::c_Version + 1);
@@ -692,7 +714,7 @@ namespace {
 		invalidEquipmentSnapshot.Objects.back().HasEquippedDevice = true;
 		invalidEquipmentSnapshot.Objects.back().EquippedDeviceClassName = "HDFirearm";
 		invalidEquipmentSnapshot.Objects.back().EquippedDevicePresetName = "Invalid non-actor equipment";
-		const bool malformedNetworkRejected = activityStateCodecPassed && !networkPacket.empty() &&
+		const bool malformedNetworkRejected = activityStateCodecPassed && fundsCodecPassed && !networkPacket.empty() &&
 		                                     !WorldStateProtocol::DecodeSnapshot(truncatedNetworkPacket, decodedSnapshot) &&
 		                                     !WorldStateProtocol::DecodeSnapshot(unsupportedVersionPacket, decodedSnapshot) &&
 		                                     !WorldStateProtocol::EncodeSnapshot(duplicateIdSnapshot, 100, duplicateIdPacket) &&
@@ -1528,6 +1550,8 @@ namespace {
 		if (worldStateClient) {
 			state.Log << "world_state_replica_membership=" << (state.ReplicaWorldExact ? "passed" : "failed") << '\n' << std::flush;
 			state.Log << "world_state_activity_presentation=" << (state.ReplicaActivityStateExact ? "passed" : "failed") << '\n' << std::flush;
+			state.Log << "world_state_team_funds_presentation=" << (state.ReplicaTeamFundsExact ? "passed" : "failed") << '\n' << std::flush;
+			success = success && state.ReplicaTeamFundsExact;
 			success = success && state.ReplicaActivityStateExact;
 			success = success && state.ReplicaWorldExact;
 		}
@@ -1741,6 +1765,16 @@ int RunPersistentHeadlessServer(const ServerConfiguration& config) {
 			if (command == "quit" || command == "exit" || command == "stop") ServerConsole::StopRequested.store(true);
 			else if (command == "status") log("INFO status tick=" + std::to_string(tick) + " clients=" + std::to_string(session.GetConnectedClientCount()) + " actors=" + std::to_string(g_MovableMan.GetActorCount()));
 			else if (command == "help") log("INFO commands: status, help, quit");
+			else if (command.starts_with("funds ")) {
+				std::istringstream input(command.substr(6));
+				int team = -1;
+				float funds = 0;
+				std::string trailing;
+				if (input >> team >> funds && !(input >> trailing) && team >= 0 && team < Activity::MaxTeamCount && std::isfinite(funds)) {
+					g_ActivityMan.GetActivity()->SetTeamFunds(funds, team);
+					log("INFO funds team=" + std::to_string(team) + " value=" + std::to_string(funds));
+				} else log("WARNING usage: funds TEAM(0..3) FINITE_VALUE");
+			}
 			else log("WARNING unknown console command: " + command);
 		}
 		session.PollNetwork(tick);
@@ -2255,6 +2289,8 @@ void RunGameLoop() {
 						Activity* activity = g_ActivityMan.GetActivity();
 						debugRunState.ReplicaActivityStateExact = debugRunState.ReplicaActivityStateExact && activity &&
 						    activity->GetActivityState() == receivedSnapshot.ActivityState;
+						for (int team = 0; team < Activity::MaxTeamCount; ++team) debugRunState.ReplicaTeamFundsExact = debugRunState.ReplicaTeamFundsExact &&
+						    activity && activity->GetTeamFunds(team) == receivedSnapshot.TeamFunds[team];
 					}
 					const int liveReplicaObjects = g_MovableMan.GetMovableObjectCount();
 					if (debugRunState.Enabled && applied.MissingPresets == 0 &&
@@ -2270,6 +2306,8 @@ void RunGameLoop() {
 						worldStateClientLog << "snapshot=" << snapshotCount << " updated=" << applied.Updated << " spawned=" << applied.Spawned << " removed=" << applied.Removed
 						                    << " live_objects=" << liveReplicaObjects << " expected_objects=" << receivedSnapshot.Objects.size()
 						                    << " activity_state=" << static_cast<int>(receivedSnapshot.ActivityState)
+						                    << " funds_team0=" << std::to_string(receivedSnapshot.TeamFunds[0])
+						                    << " funds_team1=" << std::to_string(receivedSnapshot.TeamFunds[1])
 						                    << " missing_presets=" << applied.MissingPresets << " human_equipment_applied=" << applied.HumanEquipmentStatesApplied
 						                    << " position_error_samples=" << applied.PositionErrorsMeasured
 						                    << " mean_position_error_before_correction_px=" << applied.MeanPositionErrorBeforeCorrection

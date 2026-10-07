@@ -102,7 +102,7 @@ Invalid CLI/config returns a nonzero code and prints an error to stderr.
 ```
 
 Replace address/port with the server's endpoint. Both sides must use compatible
-content and the current world-state protocol (v9). No server browser or general
+content and the current world-state protocol (v10). No server browser or general
 reconnect workflow is provided. LAN/WAN behavior was not validated by the local
 tests below.
 
@@ -130,7 +130,7 @@ profile warning; no fatal error occurred.
 
 This is a working Windows headless host foundation. A complete gameplay release
 still needs remote purchase/deployment flows, full Activity-specific state and
-HUD/funds synchronization, reconnect, broader mod/runtime regression coverage,
+HUD synchronization, reconnect, broader mod/runtime regression coverage,
 long-running soak and LAN tests. The two-client Tutorial test proves simultaneous
 connections and replication, not two active Tutorial players. Rendering/audio
 dependencies are still linked, although startup avoids those devices. Linux
@@ -141,3 +141,25 @@ A malformed temporary .rte module also exercised the real Reader abort path:
 exit code 1, ServerFailure.log with the module/line error, no game dialog.
 The temporary module was removed. The shared diagnostic headless two-client
 regression passed again in 70.66 seconds after the common-step extraction.
+
+## Team funds (protocol v10)
+
+Snapshots now carry all four team balances as finite IEEE-754 float values after
+the Activity-state byte. Clients apply the authoritative balances directly;
+fractional and negative values are preserved for existing economy semantics.
+NaN and infinities are rejected by both encoder and decoder. Protocol v9 clients
+are rejected and must be rebuilt together with the server.
+
+The server console accepts funds TEAM VALUE (TEAM 0..3). This sets an
+administrative balance; it does not emulate a purchase or delivery. Use
+RunDedicatedServerSmoke.ps1 -CheckTeamFunds to change teams 0 and 1 while two
+clients are connected and verify exact replicated balances and presentation.
+
+Windows Final v10 funds verification passed with two separate clients in
+40.28 seconds. Console changes to team 0 (12345.25) and team 1 (-17.5)
+appeared in both clients' snapshots and matched their Activity balances for
+every applied snapshot. The first client's final screenshot showed Funds: 12345,
+the existing integer HUD display. The server continued 64 further updates after
+disconnection and quit with code 0. Preflight round-trip tests cover all four
+balances, fractional/negative values, and rejection of NaN and both infinities
+in each team's wire field.
