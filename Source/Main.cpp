@@ -235,6 +235,7 @@ namespace {
 		int HostControlPassedUpdate = 0;
 		bool ClientControlPassed = false;
 		bool ReplicaWorldExact = true;
+		bool ReplicaActivityStateExact = true;
 		AHuman* ControlTestActor = nullptr;
 		float ControlStartX = 0;
 		int ControlStartRounds = 0;
@@ -551,6 +552,7 @@ namespace {
 		WorldStateProtocol::Snapshot networkSnapshot;
 		networkSnapshot.Tick = 1234;
 		networkSnapshot.SceneRevision = 7;
+		networkSnapshot.ActivityState = Activity::Editing;
 		networkSnapshot.ActivityClassName = "GATutorial";
 		networkSnapshot.ActivityPreset = "Tutorial Mission";
 		networkSnapshot.ActivityModuleName = "Base.rte";
@@ -609,6 +611,7 @@ namespace {
 		const bool networkRoundTripPassed = WorldStateProtocol::EncodeSnapshot(networkSnapshot, 99, networkPacket) &&
 		                                   WorldStateProtocol::DecodeSnapshot(networkPacket, decodedSnapshot, &decodedSequence) &&
 		                                   decodedSnapshot.Players == networkSnapshot.Players &&
+		                                   decodedSnapshot.ActivityState == networkSnapshot.ActivityState &&
 			                                   decodedSequence == 99 && decodedSnapshot.Tick == networkSnapshot.Tick &&
 			                                   decodedSnapshot.SceneRevision == networkSnapshot.SceneRevision && decodedSnapshot.Objects.size() == 2 &&
 			                                   decodedSnapshot.ActivityClassName == networkSnapshot.ActivityClassName &&
@@ -636,6 +639,23 @@ namespace {
 		                                   decodedSnapshot.Objects.back().PixelLifetime == transientPixel.PixelLifetime &&
 		                                   decodedSnapshot.Objects.back().PixelSharpness == transientPixel.PixelSharpness && infiniteAmmoRoundTripPassed;
 		std::vector<std::uint8_t> truncatedNetworkPacket = networkPacket;
+		bool activityStateCodecPassed = true;
+		for (int activityState = WorldStateProtocol::c_NoActivity; activityState <= WorldStateProtocol::c_MaxActivityState; ++activityState) {
+			auto stateProbe = networkSnapshot;
+			stateProbe.ActivityState = static_cast<std::int8_t>(activityState);
+			std::vector<std::uint8_t> statePacket;
+			WorldStateProtocol::Snapshot decodedState;
+			activityStateCodecPassed = activityStateCodecPassed && WorldStateProtocol::EncodeSnapshot(stateProbe, 1, statePacket) &&
+			    WorldStateProtocol::DecodeSnapshot(statePacket, decodedState) && decodedState.ActivityState == activityState;
+		}
+		auto invalidState = networkSnapshot;
+		invalidState.ActivityState = 127;
+		std::vector<std::uint8_t> invalidStatePacket;
+		activityStateCodecPassed = activityStateCodecPassed && !WorldStateProtocol::EncodeSnapshot(invalidState, 1, invalidStatePacket);
+		invalidStatePacket = networkPacket;
+		if (invalidStatePacket.size() > WorldStateProtocol::c_HeaderSize + 8) invalidStatePacket[WorldStateProtocol::c_HeaderSize + 8] = 127;
+		activityStateCodecPassed = activityStateCodecPassed && !WorldStateProtocol::DecodeSnapshot(invalidStatePacket, decodedSnapshot);
+		state.Log << "world_state_activity_state_codec=" << (activityStateCodecPassed ? "passed" : "failed") << '\n' << std::flush;
 		if (!truncatedNetworkPacket.empty()) truncatedNetworkPacket.pop_back();
 		std::vector<std::uint8_t> unsupportedVersionPacket = networkPacket;
 		if (unsupportedVersionPacket.size() > 4) unsupportedVersionPacket[4] = static_cast<std::uint8_t>(WorldStateProtocol::c_Version + 1);
@@ -654,7 +674,7 @@ namespace {
 		invalidEquipmentSnapshot.Objects.back().HasEquippedDevice = true;
 		invalidEquipmentSnapshot.Objects.back().EquippedDeviceClassName = "HDFirearm";
 		invalidEquipmentSnapshot.Objects.back().EquippedDevicePresetName = "Invalid non-actor equipment";
-		const bool malformedNetworkRejected = !networkPacket.empty() &&
+		const bool malformedNetworkRejected = activityStateCodecPassed && !networkPacket.empty() &&
 		                                     !WorldStateProtocol::DecodeSnapshot(truncatedNetworkPacket, decodedSnapshot) &&
 		                                     !WorldStateProtocol::DecodeSnapshot(unsupportedVersionPacket, decodedSnapshot) &&
 		                                     !WorldStateProtocol::EncodeSnapshot(duplicateIdSnapshot, 100, duplicateIdPacket) &&
@@ -1395,6 +1415,7 @@ namespace {
 		                                 WorldStateProtocol::DecodeSnapshot(worldSnapshotPacket, decodedWorldSnapshot) &&
 		                                 decodedWorldSnapshot.ActivityClassName == worldSnapshot.ActivityClassName &&
 		                                 decodedWorldSnapshot.ActivityPreset == worldSnapshot.ActivityPreset &&
+		                                 decodedWorldSnapshot.ActivityState == worldSnapshot.ActivityState &&
 		                                 decodedWorldSnapshot.ActivityModuleName == worldSnapshot.ActivityModuleName &&
 		                                 decodedWorldSnapshot.SceneModuleName == worldSnapshot.SceneModuleName &&
 		                                 decodedWorldSnapshot.ScenePreset == worldSnapshot.ScenePreset &&
@@ -1481,6 +1502,8 @@ namespace {
 		success = success && state.LuaFilesystemProbePassed;
 		if (worldStateClient) {
 			state.Log << "world_state_replica_membership=" << (state.ReplicaWorldExact ? "passed" : "failed") << '\n' << std::flush;
+			state.Log << "world_state_activity_presentation=" << (state.ReplicaActivityStateExact ? "passed" : "failed") << '\n' << std::flush;
+			success = success && state.ReplicaActivityStateExact;
 			success = success && state.ReplicaWorldExact;
 		}
 		if (state.HostControlSmoke || state.ClientControlSmoke) {
@@ -2101,6 +2124,11 @@ void RunGameLoop() {
 					}
 					const WorldStateClientReplica::ApplyResult applied = worldStateClientReplica.Apply(receivedSnapshot, true);
 					g_MovableMan.CommitPendingAdditions();
+					if (debugRunState.Enabled) {
+						Activity* activity = g_ActivityMan.GetActivity();
+						debugRunState.ReplicaActivityStateExact = debugRunState.ReplicaActivityStateExact && activity &&
+						    activity->GetActivityState() == receivedSnapshot.ActivityState;
+					}
 					const int liveReplicaObjects = g_MovableMan.GetMovableObjectCount();
 					if (debugRunState.Enabled && applied.MissingPresets == 0 &&
 					    static_cast<std::size_t>(liveReplicaObjects) != receivedSnapshot.Objects.size()) {
@@ -2114,6 +2142,7 @@ void RunGameLoop() {
 					    (worldStateClientLastLoggedSnapshotCount == 0 || snapshotCount - worldStateClientLastLoggedSnapshotCount >= 20)) {
 						worldStateClientLog << "snapshot=" << snapshotCount << " updated=" << applied.Updated << " spawned=" << applied.Spawned << " removed=" << applied.Removed
 						                    << " live_objects=" << liveReplicaObjects << " expected_objects=" << receivedSnapshot.Objects.size()
+						                    << " activity_state=" << static_cast<int>(receivedSnapshot.ActivityState)
 						                    << " missing_presets=" << applied.MissingPresets << " human_equipment_applied=" << applied.HumanEquipmentStatesApplied
 						                    << " position_error_samples=" << applied.PositionErrorsMeasured
 						                    << " mean_position_error_before_correction_px=" << applied.MeanPositionErrorBeforeCorrection

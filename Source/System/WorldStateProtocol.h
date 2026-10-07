@@ -18,7 +18,9 @@
 namespace RTE::WorldStateProtocol {
 
 inline constexpr std::uint32_t c_Magic = 0x31524343; // "CCR1" on the wire.
-inline constexpr std::uint16_t c_Version = 8;
+inline constexpr std::uint16_t c_Version = 9;
+inline constexpr std::int8_t c_NoActivity = -1;
+inline constexpr std::int8_t c_MaxActivityState = 6;
 inline constexpr std::size_t c_HeaderSize = 16;
 inline constexpr std::size_t c_MaxPacketSize = 4 * 1024 * 1024;
 inline constexpr std::size_t c_MaxObjects = 65535;
@@ -95,6 +97,7 @@ struct PlayerState {
 struct Snapshot {
 	std::uint32_t Tick = 0;
 	std::uint32_t SceneRevision = 0;
+	std::int8_t ActivityState = c_NoActivity;
 	std::string ActivityClassName;
 	std::string ActivityPreset;
 	std::string ActivityModuleName;
@@ -404,7 +407,8 @@ inline bool EncodeSnapshot(const Snapshot& snapshot, std::uint32_t sequence, std
 	packet.clear();
 	// Transport callers retain this scratch vector so its storage can be reused between snapshots.
 	networkIds.clear();
-	if (snapshot.Objects.size() > c_MaxObjects || snapshot.ActivityClassName.size() > c_MaxStringBytes || snapshot.ActivityPreset.size() > c_MaxStringBytes ||
+	if (snapshot.ActivityState < c_NoActivity || snapshot.ActivityState > c_MaxActivityState ||
+	    snapshot.Objects.size() > c_MaxObjects || snapshot.ActivityClassName.size() > c_MaxStringBytes || snapshot.ActivityPreset.size() > c_MaxStringBytes ||
 	    snapshot.ActivityModuleName.size() > c_MaxStringBytes || snapshot.SceneModuleName.size() > c_MaxStringBytes || snapshot.ScenePreset.size() > c_MaxStringBytes ||
 	    !UTF8::IsValid(snapshot.ActivityClassName) || !UTF8::IsValid(snapshot.ActivityPreset) || !UTF8::IsValid(snapshot.ActivityModuleName) ||
 	    !UTF8::IsValid(snapshot.SceneModuleName) || !UTF8::IsValid(snapshot.ScenePreset)) {
@@ -416,6 +420,7 @@ inline bool EncodeSnapshot(const Snapshot& snapshot, std::uint32_t sequence, std
 	packet.resize(c_HeaderSize, 0);
 	Detail::WriteUnsigned(packet, snapshot.Tick, sizeof(snapshot.Tick));
 	Detail::WriteUnsigned(packet, snapshot.SceneRevision, sizeof(snapshot.SceneRevision));
+	Detail::WriteUnsigned(packet, std::bit_cast<std::uint8_t>(snapshot.ActivityState), sizeof(snapshot.ActivityState));
 	if (!Detail::WriteString(packet, snapshot.ActivityClassName) || !Detail::WriteString(packet, snapshot.ActivityPreset) ||
 	    !Detail::WriteString(packet, snapshot.ActivityModuleName) || !Detail::WriteString(packet, snapshot.SceneModuleName) ||
 	    !Detail::WriteString(packet, snapshot.ScenePreset)) {
@@ -529,6 +534,9 @@ inline bool DecodeSnapshot(std::span<const std::uint8_t> packet, Snapshot& snaps
 	decoded.Tick = static_cast<std::uint32_t>(value);
 	if (!Detail::ReadUnsigned(packet, offset, sizeof(decoded.SceneRevision), value)) return false;
 	decoded.SceneRevision = static_cast<std::uint32_t>(value);
+	if (!Detail::ReadUnsigned(packet, offset, sizeof(decoded.ActivityState), value)) return false;
+	decoded.ActivityState = std::bit_cast<std::int8_t>(static_cast<std::uint8_t>(value));
+	if (decoded.ActivityState < c_NoActivity || decoded.ActivityState > c_MaxActivityState) return false;
 	if (!Detail::ReadString(packet, offset, decoded.ActivityClassName) || !Detail::ReadString(packet, offset, decoded.ActivityPreset) ||
 	    !Detail::ReadString(packet, offset, decoded.ActivityModuleName) || !Detail::ReadString(packet, offset, decoded.SceneModuleName) ||
 	    !Detail::ReadString(packet, offset, decoded.ScenePreset) ||

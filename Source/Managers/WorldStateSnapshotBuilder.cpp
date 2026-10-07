@@ -21,6 +21,7 @@
 #include <unordered_set>
 
 using namespace RTE;
+static_assert(Activity::NoActivity == WorldStateProtocol::c_NoActivity && Activity::Over == WorldStateProtocol::c_MaxActivityState);
 
 WorldStateProtocol::Snapshot WorldStateSnapshotBuilder::Capture(std::uint32_t tick) {
 	WorldStateProtocol::Snapshot snapshot;
@@ -28,6 +29,7 @@ WorldStateProtocol::Snapshot WorldStateSnapshotBuilder::Capture(std::uint32_t ti
 	Activity* activity = g_ActivityMan.GetActivity();
 	const Scene* scene = g_SceneMan.GetScene();
 	if (activity) {
+		snapshot.ActivityState = static_cast<std::int8_t>(activity->GetActivityState());
 		snapshot.ActivityClassName = activity->GetClass().GetName();
 		snapshot.ActivityPreset = activity->GetPresetName();
 		snapshot.ActivityModuleName = activity->GetModuleName();

@@ -381,6 +381,8 @@ WorldStateClientReplica::ApplyResult WorldStateClientReplica::Apply(const WorldS
 		}
 	}
 	if (authoritativeWorld) {
+		if (Activity* activity = g_ActivityMan.GetActivity())
+			activity->SetActivityState(static_cast<Activity::ActivityState>(snapshot.ActivityState));
 		// Local Activity startup can spawn objects independently. A full server
 		// snapshot is the only world authority for this client, including absence.
 		for (MovableObject* object : activeObjects) {

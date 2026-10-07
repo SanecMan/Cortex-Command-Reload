@@ -1,14 +1,14 @@
 # World-state protocol
 
-The experimental world-state path serializes data explicitly instead of sending C++ structs or framebuffer pixels. Protocol version 8 carries a server tick, scene revision, UTF-8 Activity class/preset/module and Scene module/preset identity, then top-level actors, items and particles and four player-view records. Each object has a stable host-assigned network ID, class/module/preset identity, transform, velocity, health, sprite frame, horizontal flip, team and category. `AHuman` actor records also carry foreground equipped-device identity and, for an `HDFirearm`, inserted magazine identity and round count. Clients switch or clone those devices from locally installed `.rte` presets and apply the authoritative magazine count. Dynamic `MOPixel` objects without a preset carry material, color, mass, lifetime and sharpness so clients can recreate common transient particles. Version 8 also defines a bounded terrain-patch frame with scene revision, pixel rectangle, material/foreground/background layer and indexed pixel bytes.
+The experimental world-state path serializes data explicitly instead of sending C++ structs or framebuffer pixels. Protocol version 9 carries a server tick, scene revision, signed Activity state, UTF-8 Activity class/preset/module and Scene module/preset identity, then top-level actors, items and particles and four player-view records. Each object has a stable host-assigned network ID, class/module/preset identity, transform, velocity, health, sprite frame, horizontal flip, team and category. `AHuman` actor records also carry foreground equipped-device identity and, for an `HDFirearm`, inserted magazine identity and round count. Clients switch or clone those devices from locally installed `.rte` presets and apply the authoritative magazine count. Dynamic `MOPixel` objects without a preset carry material, color, mass, lifetime and sharpness so clients can recreate common transient particles. Version 9 retains the bounded terrain-patch frame with scene revision, pixel rectangle, material/foreground/background layer and indexed pixel bytes.
 
-The decoded packet starts with a 16-byte header: `CCR1` magic, version, message type, reserved byte, sequence and payload length, all little-endian. The decoder rejects unknown versions/types, malformed UTF-8, non-finite numeric data, duplicate or zero IDs, invalid team/category/equipment fields, invalid terrain layer/dimensions, truncated/oversized packets and counts beyond fixed bounds. Version 8 peers are required; earlier peers cannot exchange v8 frames. Each fixed player-view record contains the controlled actor's network ID (zero for no actor), a finite camera position, team and active-human flag. Nonzero actor references must resolve to an actor in the same snapshot, and inactive players cannot reference a controlled actor. Assigned clients follow their server-selected view, using the replica actor's interpolated position to smooth the camera between snapshots. The local Activity player view now binds to the selected replica actor for existing HUD identification; visual and remote-control gameplay validation remain outstanding.
+The decoded packet starts with a 16-byte header: `CCR1` magic, version, message type, reserved byte, sequence and payload length, all little-endian. The decoder rejects unknown versions/types, malformed UTF-8, non-finite numeric data, duplicate or zero IDs, invalid team/category/equipment fields, invalid terrain layer/dimensions, truncated/oversized packets and counts beyond fixed bounds. Version 9 peers are required; earlier peers cannot exchange v9 frames. Each fixed player-view record contains the controlled actor's network ID (zero for no actor), a finite camera position, team and active-human flag. Nonzero actor references must resolve to an actor in the same snapshot, and inactive players cannot reference a controlled actor. Assigned clients follow their server-selected view, using the replica actor's interpolated position to smooth the camera between snapshots. The local Activity player view now binds to the selected replica actor for existing HUD identification; visual and remote-control gameplay validation remain outstanding.
 
 On 2026-10-07, Windows x64 Debug Minimal rebuilt for v8. The preflight passed player-view round-trip and rejected a non-actor control reference and a non-finite camera coordinate. A 60-update gameplay smoke passed with 292 replicated objects and 22 human equipment records. Its camera check resolved the actor, rejected the removed actor, restored it, and applied the expected 20-pixel interpolation correction (`x=300`, `y=240` from an authoritative camera probe of `320,240`). The four-client assignment/input/disconnect test also passed. Artifacts are under `ScreenShots/V8ViewPreflight/` and `ScreenShots/V8ViewGameplay/`. A separate-process visual check of camera following and the player HUD remains outstanding.
 
 Windows x64 Final subsequently rebuilt successfully and passed a separate-process v8 Activity/Scene transition through `Tools/RunWorldStateSmoke.ps1`. Both host and client returned exit code 0 and `result=passed`, including their replica camera checks. Reusing the same output prefix also passed after removing reliance on Windows log modification timestamps. Reports are under `ScreenShots/V8FinalPair-Host/` and `ScreenShots/V8FinalPair-Client/`. This confirms the Final protocol and automated lifecycle path; the test's target Skirmish scene enters editing with no controlled actor, so it does not prove camera following of a remote player-controlled actor.
 
-For network snapshots, the RakNet adapter wraps an LZ4 block in an 8-byte `CCRZ` header containing the uncompressed byte count. It sends the wrapper only when it is smaller than the original packet. The receiver also accepts an uncompressed v8 packet. Decompression validates the advertised size against the 4 MiB protocol limit before allocating. Replaceable snapshots are sent with RakNet `UNRELIABLE_SEQUENCED`; a newer complete snapshot supersedes a delayed or lost one.
+For network snapshots, the RakNet adapter wraps an LZ4 block in an 8-byte `CCRZ` header containing the uncompressed byte count. It sends the wrapper only when it is smaller than the original packet. The receiver also accepts an uncompressed v9 packet. Decompression validates the advertised size against the 4 MiB protocol limit before allocating. Replaceable snapshots are sent with RakNet `UNRELIABLE_SEQUENCED`; a newer complete snapshot supersedes a delayed or lost one.
 
 Clients send 32-byte `InputCommand` payloads through RakNet reliable ordered delivery. Each command includes a client tick, held input-element mask, relative mouse movement, wheel and mouse buttons, signed 16-bit analog move/aim axes, and activity vote flags. On connection, the host sends a reliable `ClientAssignment` control frame identifying the assigned player slot or spectator status. The host validates each input packet and sequence, then applies controls to `UInputMan` on the simulation thread before the Activity update. Mouse impulses are cleared after one simulation step. In graphical host mode `PlayerOne` stays local, leaving three remote gameplay slots; other connected peers can observe snapshots. Assigned remote players can vote to restart or end the current Activity; votes latch on key-down, require unanimity among assigned remote players, exclude the multiplayer lobby, and are rate-limited to one action per three seconds. Spectators do not vote. The host logs a completed vote and queues the transition through the normal Activity restart path.
 
@@ -159,3 +159,32 @@ client membership checks passed. Logged client counts included 7/7, 50/50 and
 screenshot was inspected: bodies and preset limbs render on terrain, and the
 selected actor shows its 10-round ammo counter and health. These checks do not
 extend to the remaining pose/fog/Activity-state gaps described above.
+### Version 9 Activity presentation
+
+Version 9 adds one signed byte immediately after the snapshot scene revision.
+It carries the existing engine ActivityState values: NoActivity (-1), NotStarted
+(0), Starting (1), Editing (2), PreGame (3), Running (4), HasError (5), Over (6).
+The encoder and decoder reject values outside this range, and the snapshot
+builder checks the enum bounds at compile time. Both peers must use v9; this
+changes only the experimental world-state protocol, not `.rte` data, Lua APIs
+or the legacy framebuffer multiplayer path.
+
+The authoritative replica applies the state with the existing non-virtual
+`SetActivityState` setter. It does not call Activity lifecycle functions, Lua
+callbacks or local simulation. Pause is separate from ActivityState and is not
+carried by this field; paused-host updates still need their own synchronization.
+Team funds, winning team and full Activity-specific HUD data also remain separate
+work.
+
+Windows x64 Final compiled successfully. `ScreenShots/ActivityStateV9Preflight/`
+passed a codec round-trip of every enum value, encoder rejection of an invalid
+value and decoder rejection of an invalid state byte in an otherwise valid
+packet. The separate-process Control pair under `ActivityStateV9Pair-Host/` and
+`ActivityStateV9Pair-Client/` passed in 54.14 seconds, both with exit code 0.
+The client checked local Activity state against every applied snapshot and
+reported `world_state_activity_presentation=passed`; logged snapshots of Tutorial
+and Skirmish both carried Running (4). Movement/fire, object membership and
+player-view checks also passed. The final client frame was inspected and showed
+rendered actors and the selected actor's ammo/health counters. Editing and Over
+have codec coverage, but their live UI transitions were not exercised by this
+fixture.
