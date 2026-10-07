@@ -122,3 +122,44 @@ only codec or input-manager state. It does not validate all weapons, reloading,
 actor switching, inventory, player death/reconnect or mod activities. The final
 client screenshot contains terrain and HUD markers, but complete actor visual
 presentation and authoritative visibility/fog remain unverified.
+## Non-interactive diagnostic failures
+
+In `-debug-run`, RTE assertions, explicit aborts and the unhandled-exception
+handler write `DebugFailure.log` in the selected run directory, append
+`fatal_error=true` and `result=failed` to `DebugRun.log`, report to stderr and
+exit with code 1. They do not open an error dialog or offer restart/ignore.
+Normal interactive gameplay retains its existing dialogs.
+
+Fatal state may hold engine/Lua locks or contain damaged objects. This path does
+not call the renderer, save the Activity, or run shutdown destructors. Initial,
+stress and final screenshots already captured by the run remain available; it
+does not attempt a fresh screenshot at the failure point. Report writing is
+best effort if storage is unavailable. Platform crash-dump generation remains
+separate from this handler behavior.
+
+Run the deterministic handler checks with Windows PowerShell 5.1 or later:
+
+```powershell
+.\Tools\RunDebugFailureSmoke.ps1
+```
+
+The tool starts three preflight-only probes (`assert`, `abort`, `exception`),
+expects target exit code 1, validates the UTF-8 failure message and failed result,
+and verifies that the exception handler preserves its supplied callstack. No
+game window is initialized by these probes. A timeout fails the tool and stops
+only its own process. Optional `-ExecutablePath`, `-OutputPrefix` and
+`-TimeoutSeconds` parameters select the binary, report prefix and timeout.
+The engine flag `-debug-run-error-probe <assert|abort|exception>` is used together
+with `-debug-run-preflight-only`; these are direct handler tests, not deliberate
+memory corruption or a test of OS exception dispatch.
+
+Windows x64 Final rebuilt and all three probes passed with expected code 1 and
+the Cyrillic message preserved under `ScreenShots/DebugFailureSmoke-*/`.
+`ScreenShots/DebugFailureCleanup/` verified that an assertion creates the failure
+report and a subsequent successful preflight in the same directory removes it
+and exits with code 0. The full 60-update Final gameplay stress run under
+`ScreenShots/NonInteractiveHealthy/` exited with code 0 and `result=passed`,
+including UTF-8 glyph and replica-player-view tests. The wrapper retains the
+original process handle through `System.Diagnostics.Process`, avoiding missing
+`ExitCode` from rapidly exiting redirected `Start-Process -PassThru` processes
+on Windows PowerShell 5.1.

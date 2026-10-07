@@ -18,6 +18,9 @@
 #include <regex>
 #include <utility>
 #include <vector>
+#include <fstream>
+#include <cstdlib>
+#include <cstdio>
 
 #ifdef _MSC_VER
 #include <intrin.h>
@@ -37,6 +40,36 @@
 
 
 using namespace RTE;
+
+namespace {
+	std::string diagnosticOutputDirectory;
+
+	[[noreturn]] void ExitDiagnosticRun(const std::string& message) {
+		// Fatal state may hold engine/Lua locks. Do not save the Activity, call
+		// renderer/managers, invoke destructors or open a dialog from this path.
+		try {
+			if (!diagnosticOutputDirectory.empty()) {
+				const auto directory = UTF8::PathFromString(diagnosticOutputDirectory);
+				std::ofstream failure(directory / "DebugFailure.log", std::ios::trunc);
+				failure << message << '\n';
+				failure.close();
+				std::ofstream report(directory / "DebugRun.log", std::ios::app);
+				report << "\nfatal_error=true\nresult=failed\n";
+				report.close();
+			}
+		} catch (...) {
+			// Still terminate if the diagnostic disk is unavailable.
+		}
+		std::fputs(message.c_str(), stderr);
+		std::fputc('\n', stderr);
+		std::fflush(stderr);
+		std::_Exit(EXIT_FAILURE);
+	}
+}
+
+void RTEError::SetDiagnosticOutputDirectory(const std::string& directory) {
+	diagnosticOutputDirectory = directory;
+}
 
 bool RTEError::s_CurrentlyAborting = false;
 bool RTEError::s_IgnoreAllAsserts = false;
@@ -307,6 +340,7 @@ bool RTEError::ShowAssertMessageBox(const std::string& message) {
 }
 
 void RTEError::UnhandledExceptionFunc(const std::string& description, const std::string& callstack) {
+	if (System::IsDebugRun()) ExitDiagnosticRun("Unhandled exception: " + description + "\n" + callstack);
 	s_CurrentlyAborting = true;
 
 	std::string exceptionMessage = "Runtime Error due to unhandled exception!\n\n" + description;
@@ -359,6 +393,7 @@ void RTEError::UnhandledExceptionFunc(const std::string& description, const std:
 }
 
 void RTEError::AbortFunc(const std::string& description, const std::source_location& srcLocation) {
+	if (System::IsDebugRun()) ExitDiagnosticRun("Abort: " + description + "\n" + srcLocation.file_name() + ":" + std::to_string(srcLocation.line()));
 	s_CurrentlyAborting = true;
 
 	if (!System::IsInExternalModuleValidationMode()) {
@@ -428,6 +463,7 @@ void RTEError::AbortFunc(const std::string& description, const std::source_locat
 }
 
 void RTEError::AssertFunc(const std::string& description, const std::source_location& srcLocation) {
+	if (System::IsDebugRun()) ExitDiagnosticRun("Assertion: " + description + "\n" + srcLocation.file_name() + ":" + std::to_string(srcLocation.line()));
 	if (System::IsInExternalModuleValidationMode()) {
 		AbortFunc(description, srcLocation);
 	}

@@ -22,8 +22,9 @@ namespace RTE {
 
 	/// Class for runtime error handling.
 	class RTEError {
-
 	public:
+		/// Destination already validated/created by the automated run launcher.
+		static void SetDiagnosticOutputDirectory(const std::string& directory);
 		static bool s_CurrentlyAborting; //!< Flag to prevent a potential recursive fault while attempting to save the game when aborting.
 		static bool s_IgnoreAllAsserts; //!< Whether to skip the assert dialog and just let everything burn at whatever point that happens.
 		static std::string s_LastIgnoredAssertDescription; //!< The last ignored assert message.

@@ -222,6 +222,7 @@ namespace {
 		bool HostSessionTestPassed = true;
 		bool OverlayCaptureEnabled = false;
 		bool PreflightOnly = false;
+		std::string ErrorProbe;
 		bool LoadAllOptionalModules = false;
 		bool RequestHostWorldStateTransition = false;
 		bool RequireWorldStateTransition = false;
@@ -338,6 +339,7 @@ namespace {
 			const std::string_view argument(argv[i]);
 			if (argument == "-debug-overlay") state.OverlayCaptureEnabled = true;
 			if (argument == "-debug-run-preflight-only") state.PreflightOnly = true;
+			if (argument == "-debug-run-error-probe" && i + 1 < argc) state.ErrorProbe = argv[++i];
 			if (argument == "-debug-run-all-mods") state.LoadAllOptionalModules = true;
 			if (argument == "-debug-run-world-state-transition") state.RequestHostWorldStateTransition = true;
 			if (argument == "-debug-run-require-world-state-transition") state.RequireWorldStateTransition = true;
@@ -408,7 +410,7 @@ namespace {
 				break;
 			}
 			const std::string name = UTF8::PathToString(entry.path().filename());
-			const bool isDebugArtifact = name == "DebugRun.log" || name == "LogLoading.txt" || name == "LogLoadingWarning.txt" || name == "LogConsole.txt" || name.starts_with("debug-run-");
+			const bool isDebugArtifact = name == "DebugFailure.log" || name == "DebugRun.log" || name == "LogLoading.txt" || name == "LogLoadingWarning.txt" || name == "LogConsole.txt" || name.starts_with("debug-run-");
 			if (isDebugArtifact && (entry.is_regular_file(filesystemError) || entry.is_symlink(filesystemError))) {
 				filesystemError.clear();
 				std::filesystem::remove(entry.path(), filesystemError);
@@ -416,6 +418,7 @@ namespace {
 			filesystemError.clear();
 		}
 		state.Log.open(state.OutputDirectory / "DebugRun.log", std::ios::out | std::ios::trunc);
+		RTEError::SetDiagnosticOutputDirectory(UTF8::PathToString(state.OutputDirectory));
 		if (!state.Log) {
 			std::cerr << "Unable to open DebugRun.log for writing.\n";
 			return false;
@@ -2333,6 +2336,11 @@ int main(int argc, char** argv) {
 		return EXIT_FAILURE;
 	}
 	if (debugRun && GetDebugRunState().PreflightOnly) {
+		const std::string& probe = GetDebugRunState().ErrorProbe;
+		if (probe == "assert") RTEError::AssertFunc("Diagnostic failure probe: Привет", std::source_location::current());
+		else if (probe == "abort") RTEError::AbortFunc("Diagnostic failure probe: Привет", std::source_location::current());
+		else if (probe == "exception") RTEError::UnhandledExceptionFunc("Diagnostic failure probe: Привет", "diagnostic-probe-callstack");
+		else if (!probe.empty()) return EXIT_FAILURE;
 		DebugRunState& state = GetDebugRunState();
 		state.Passed = true;
 		state.Log << "result=passed\n" << std::flush;
