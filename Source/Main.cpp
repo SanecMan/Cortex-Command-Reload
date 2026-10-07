@@ -2601,6 +2601,26 @@ int main(int argc, char** argv) {
 				    << " modules=" << g_PresetMan.GetTotalModuleCount() << " official_modules=" << g_PresetMan.GetOfficialModuleCount()
 				    << " video_initialized=" << (SDL_WasInit(SDL_INIT_VIDEO) != 0) << '\n' << std::flush;
 				if (contentPassed && GetDebugRunState().HeadlessSimulationPreflight) {
+					// A remote slot can exist before its presentation menus are initialized.
+					// Reject such deliveries and hostile indices without reading player/team arrays.
+					bool deliveryGuardsPassed = true;
+					{
+						GameActivity unstartedActivity;
+						unstartedActivity.SetTeamOfPlayer(Players::PlayerOne, Activity::Teams::TeamOne);
+						deliveryGuardsPassed = !unstartedActivity.CreateDelivery(Players::PlayerOne);
+						for (int invalidPlayer : {-1, static_cast<int>(Players::MaxPlayerCount), std::numeric_limits<int>::min(), std::numeric_limits<int>::max()}) {
+							unstartedActivity.ClearOverridePurchase(invalidPlayer);
+							deliveryGuardsPassed = deliveryGuardsPassed && !unstartedActivity.CreateDelivery(invalidPlayer) &&
+							    !unstartedActivity.GetBuyGUI(static_cast<unsigned int>(invalidPlayer)) &&
+							    unstartedActivity.SetOverridePurchaseList(static_cast<const Loadout*>(nullptr), invalidPlayer) == 0 &&
+							    unstartedActivity.SetOverridePurchaseList("Default", invalidPlayer) == 0;
+						}
+						for (int invalidTeam : {-1, static_cast<int>(Activity::Teams::MaxTeamCount), std::numeric_limits<int>::min(), std::numeric_limits<int>::max()}) {
+							deliveryGuardsPassed = deliveryGuardsPassed && unstartedActivity.GetDeliveryCount(invalidTeam) == 0;
+						}
+					}
+					GetDebugRunState().Log << "delivery_prerequisite_guards=" << (deliveryGuardsPassed ? "passed" : "failed") << '\n' << std::flush;
+					contentPassed = contentPassed && deliveryGuardsPassed;
 					const ServerConfiguration& serverConfig = GetDebugRunState().HeadlessConfig;
 					worldStateServerActivityClass = serverConfig.ActivityClass;
 					worldStateServerActivityPreset = serverConfig.ActivityPreset;

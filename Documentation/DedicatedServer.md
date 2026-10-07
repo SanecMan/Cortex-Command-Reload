@@ -163,3 +163,34 @@ the existing integer HUD display. The server continued 64 further updates after
 disconnection and quit with code 0. Preflight round-trip tests cover all four
 balances, fractional/negative values, and rejection of NaN and both infinities
 in each team's wire field.
+
+## Delivery prerequisites
+
+The shared GameActivity delivery path rejects invalid player/team indices,
+missing BuyMenu state, a missing selected craft, and a player whose established
+brain has been lost. Craft clones remain owned by the function until they enter
+the delivery queue, so stock-policy rejection does not leak the cloned craft.
+The headless simulation diagnostic checks out-of-range indices (including signed
+integer extremes) and a valid player whose menu has not been initialized.
+
+Windows Final verification: `-debug-run 60 -debug-run-headless-simulation
+-debug-run-output DeliveryGuardsHeadless` exited with code 0, reported
+`delivery_prerequisite_guards=passed`, loaded all 10 official modules, and ran
+60 simulation updates with 17 actors and a moving particle. Both
+`video_initialized=0` and `gpu_enabled=0` were checked using an invalid SDL video
+driver. This test checks rejection prerequisites, not successful remote orders.
+The rebuilt client also passed the 60-update gameplay stress run in
+`ScreenShots/DeliveryGuardsGameplay/`, with actor/particle batches, three
+screenshots, UTF-8 glyph rendering and live snapshot transport checks. The final
+screenshot was inspected. Timing from this run is not a performance comparison:
+the server linker was running concurrently.
+After linking finished, `RunDedicatedServerSmoke.ps1 -OutputPrefix
+DeliveryGuardsDedicated -CheckTeamFunds` passed with two separate clients in
+41.69 seconds. Both clients applied the exact authoritative balances, the
+server continued for 66 updates after their disconnection, and console shutdown
+returned code 0. The server reported no SDL video initialization.
+
+These checks prepare the existing delivery implementation for server use. They
+do not expose a network purchase command or add an affordability rule to trusted
+Lua override purchases. A remote purchase still needs server-side preset/policy,
+stock, price and funds validation, request replay protection, and client buy UI.

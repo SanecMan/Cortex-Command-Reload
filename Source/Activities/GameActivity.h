@@ -153,7 +153,7 @@ namespace RTE {
 		/// Gets the an in-game GUI Object for a specific player.
 		/// @param which Which player to get the GUI for. (default: 0)
 		/// @return A pointer to a BuyMenuGUI. Ownership is NOT transferred!
-		BuyMenuGUI* GetBuyGUI(unsigned int which = 0) const { return m_pBuyGUI[which]; }
+		BuyMenuGUI* GetBuyGUI(unsigned int which = 0) const { return which < Players::MaxPlayerCount ? m_pBuyGUI[which] : nullptr; }
 
 		/// Checks if the in-game GUI Object is visible for a specific player.
 		/// @param which Which player to check the GUI for. -1 will check all players.
@@ -271,7 +271,7 @@ namespace RTE {
 
 		/// Clears all items from a specific player's override purchase list.
 		/// @param m_PurchaseOverride[player].clear( Which player's override purchase list to clear.
-		void ClearOverridePurchase(int player) { m_PurchaseOverride[player].clear(); }
+		void ClearOverridePurchase(int player) { if (player >= Players::PlayerOne && player < Players::MaxPlayerCount) m_PurchaseOverride[player].clear(); }
 
 		/// Takes the current order out of a player's buy GUI, creates a Delivery
 		/// based off it, and stuffs it into that player's delivery queue.
@@ -309,7 +309,7 @@ namespace RTE {
 		/// Shows how many deliveries this team has pending.
 		/// @param m_Deliveries[team].size( Which team to check the delivery count for.
 		/// @return The number of deliveries this team has coming.
-		int GetDeliveryCount(int team) { return m_Deliveries[team].size(); }
+		int GetDeliveryCount(int team) { return team >= Teams::TeamOne && team < Teams::MaxTeamCount ? static_cast<int>(m_Deliveries[team].size()) : 0; }
 
 		/// Precalculates the player-to-screen index map, counts the number of
 		/// active players etc.

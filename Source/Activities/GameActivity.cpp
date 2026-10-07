@@ -438,6 +438,7 @@ int GameActivity::AddOverridePurchase(const SceneObject* pPurchase, int player) 
 }
 
 int GameActivity::SetOverridePurchaseList(const Loadout* pLoadout, int player) {
+	if (player < Players::PlayerOne || player >= Players::MaxPlayerCount) return 0;
 	// First clear out the list
 	ClearOverridePurchase(player);
 
@@ -478,6 +479,7 @@ int GameActivity::SetOverridePurchaseList(const Loadout* pLoadout, int player) {
 }
 
 int GameActivity::SetOverridePurchaseList(const std::string& loadoutName, int player) {
+	if (player < Players::PlayerOne || player >= Players::MaxPlayerCount) return 0;
 	// Find out the native module of this player
 	int nativeModule = 0;
 	MetaPlayer* pMetaPlayer = g_MetaMan.GetMetaPlayerOfInGamePlayer(player);
@@ -495,15 +497,17 @@ int GameActivity::SetOverridePurchaseList(const std::string& loadoutName, int pl
 }
 
 bool GameActivity::CreateDelivery(int player, int mode, Vector& waypoint, Actor* pTargetMO) {
+	if (player < Players::PlayerOne || player >= Players::MaxPlayerCount) return false;
 	int team = m_Team[player];
-	if (team == Teams::NoTeam)
+	if (team < Teams::TeamOne || team >= Teams::MaxTeamCount || !m_pBuyGUI[player] || (m_HadBrain[player] && !m_Brain[player]))
 		return false;
 
 	// Prepare the Craft, stuff everything into it and add it to the queue
 	// Retrieve the ordered craft and its inventory
 	std::list<const SceneObject*> purchaseList;
 
-	ACraft* pDeliveryCraft = 0;
+	// Retain ownership until the delivery queue accepts the craft, including all rejection paths.
+	std::unique_ptr<ACraft> pDeliveryCraft;
 	// If we have a list to purchase that overrides the buy GUI, then use it and clear it
 	if (!m_PurchaseOverride[player].empty()) {
 		const ACraft* pCraftPreset = 0;
@@ -511,15 +515,16 @@ bool GameActivity::CreateDelivery(int player, int mode, Vector& waypoint, Actor*
 			// Find the first craft to use as the delivery craft
 			pCraftPreset = dynamic_cast<const ACraft*>(*itr);
 			if (!pDeliveryCraft && pCraftPreset)
-				pDeliveryCraft = dynamic_cast<ACraft*>((*itr)->Clone());
+				pDeliveryCraft.reset(dynamic_cast<ACraft*>((*itr)->Clone()));
 			else
 				purchaseList.push_back(*itr);
 		}
 	}
 	// Otherwise, use what's set in the buy GUI as usual
 	else {
+		if (!m_pBuyGUI[player]->GetDeliveryCraftPreset()) return false;
 		m_pBuyGUI[player]->GetOrderList(purchaseList);
-		pDeliveryCraft = dynamic_cast<ACraft*>(m_pBuyGUI[player]->GetDeliveryCraftPreset()->Clone());
+		pDeliveryCraft.reset(dynamic_cast<ACraft*>(m_pBuyGUI[player]->GetDeliveryCraftPreset()->Clone()));
 		// If we don't have any loadout presets in the menu, save the current config for later
 		if (m_pBuyGUI[player]->GetLoadoutPresets().empty())
 			m_pBuyGUI[player]->SaveCurrentLoadout();
@@ -623,7 +628,7 @@ bool GameActivity::CreateDelivery(int player, int mode, Vector& waypoint, Actor*
 		// Prepare the Delivery struct and stuff the ready to go craft in there
 		Delivery newDelivery;
 		// Pass ownership of the craft to the new Delivery struct
-		newDelivery.pCraft = pDeliveryCraft;
+		newDelivery.pCraft = pDeliveryCraft.get();
 		newDelivery.orderedByPlayer = player;
 		newDelivery.landingZone = m_LandingZone[player];
 		newDelivery.multiOrderYOffset = 0;
@@ -633,7 +638,7 @@ bool GameActivity::CreateDelivery(int player, int mode, Vector& waypoint, Actor*
 		// Add the new Delivery to the queue
 		m_Deliveries[team].push_back(newDelivery);
 
-		pDeliveryCraft = 0;
+		pDeliveryCraft.release();
 		pLastPassenger = 0;
 
 		// Deduct cost from team's funds
