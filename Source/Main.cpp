@@ -34,6 +34,7 @@
 #include "TitleScreen.h"
 #include "LoadingScreen.h"
 #include "MOPixel.h"
+#include "System/ServerConfiguration.h"
 
 #include "MenuMan.h"
 #include "ConsoleMan.h"
@@ -230,7 +231,7 @@ namespace {
 		bool HeadlessContentPreflight = false;
 		bool HeadlessSimulationPreflight = false;
 		bool HeadlessServerPreflight = false;
-		unsigned short HeadlessServerPort = 0;
+		ServerConfiguration HeadlessConfig{.ListenAddress = "127.0.0.1", .Port = 0};
 		std::string ErrorProbe;
 		bool LoadAllOptionalModules = false;
 		bool RequestHostWorldStateTransition = false;
@@ -2392,6 +2393,14 @@ int main(int argc, char** argv) {
 		return EXIT_FAILURE;
 	}
 	if (debugRun && GetDebugRunState().PreflightOnly) {
+		if (GetDebugRunState().HeadlessSimulationPreflight) {
+			std::string configError;
+			if (!GetDebugRunState().HeadlessConfig.ParseArguments(argc, argv, configError)) {
+				GetDebugRunState().Log << "result=failed reason=server_configuration error=" << configError << '\n' << std::flush;
+				allegro_exit();
+				return EXIT_FAILURE;
+			}
+		}
 		if (GetDebugRunState().CPUGraphicsPreflight) {
 			const bool coreInitialized = SDL_Init(0);
 			if (GetDebugRunState().HeadlessContentPreflight) {
@@ -2438,7 +2447,7 @@ int main(int argc, char** argv) {
 				g_MovableMan.Initialize();
 				const std::string loadingLog = UTF8::PathToString(GetDebugRunState().OutputDirectory / "LogLoading.txt");
 				contentPassed = g_LoadingScreen.CreateLogOnly(loadingLog);
-				if (contentPassed) contentPassed = g_PresetMan.LoadAllDataModules(GetDebugRunState().LoadAllOptionalModules);
+				if (contentPassed) contentPassed = g_PresetMan.LoadAllDataModules(GetDebugRunState().LoadAllOptionalModules || GetDebugRunState().HeadlessConfig.IncludeMods);
 				contentPassed = contentPassed && g_PresetMan.GetOfficialModuleCount() > 0 &&
 				    g_PresetMan.GetEntityPreset("Scene", "Tutorial Bunker", "Missions.rte") != nullptr &&
 				    SDL_WasInit(SDL_INIT_VIDEO) == 0 && !g_WindowMan.GetWindow();
@@ -2446,8 +2455,13 @@ int main(int argc, char** argv) {
 				    << " modules=" << g_PresetMan.GetTotalModuleCount() << " official_modules=" << g_PresetMan.GetOfficialModuleCount()
 				    << " video_initialized=" << (SDL_WasInit(SDL_INIT_VIDEO) != 0) << '\n' << std::flush;
 				if (contentPassed && GetDebugRunState().HeadlessSimulationPreflight) {
-					g_ActivityMan.SetStartTutorialActivity();
-					const bool started = g_ActivityMan.RestartActivity();
+					const ServerConfiguration& serverConfig = GetDebugRunState().HeadlessConfig;
+					worldStateServerActivityClass = serverConfig.ActivityClass;
+					worldStateServerActivityPreset = serverConfig.ActivityPreset;
+					worldStateServerScenePreset = serverConfig.ScenePreset;
+					std::string activityError;
+					const bool started = ConfigureWorldStateHostActivity(activityError) && g_ActivityMan.RestartActivity();
+					if (!activityError.empty()) GetDebugRunState().Log << "headless_activity_error=" << activityError << '\n' << std::flush;
 					GetDebugRunState().Log << "headless_activity_started=" << started << '\n' << std::flush;
 					MOPixel* probeParticle = nullptr;
 					if (started) {
@@ -2469,8 +2483,11 @@ int main(int argc, char** argv) {
 					int disconnectUpdate = -1;
 					if (started && GetDebugRunState().HeadlessServerPreflight) {
 						headlessServer = std::make_unique<WorldStateServerSession>();
-						serverStarted = headlessServer->Start("127.0.0.1", GetDebugRunState().HeadlessServerPort, 8,
+						serverStarted = headlessServer->Start(serverConfig.ListenAddress, serverConfig.Port, serverConfig.Players,
 						    UTF8::PathToString(GetDebugRunState().OutputDirectory / "WorldStateServer.log"), true, false);
+						GetDebugRunState().Log << "headless_server_config name=" << serverConfig.Name << " listen=" << serverConfig.ListenAddress
+						    << " players=" << serverConfig.Players << " activity=" << serverConfig.ActivityClass << '/' << serverConfig.ActivityPreset
+						    << " scene=" << serverConfig.ScenePreset << '\n' << std::flush;
 						GetDebugRunState().Log << "headless_server_ready=" << serverStarted << " port=" << headlessServer->GetBoundPort() << '\n' << std::flush;
 					}
 					int updates = 0;

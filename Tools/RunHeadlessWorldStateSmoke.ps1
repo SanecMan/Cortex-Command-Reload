@@ -7,6 +7,9 @@ param(
     [int]$Clients = 2,
     [ValidateRange(600, 18000)]
     [int]$HostUpdates = 3600,
+    [string]$ServerConfigPath,
+    [ValidateRange(1, 64)]
+    [int]$PlayerLimit = 8,
     [ValidateRange(60, 600)]
     [int]$TimeoutSeconds = 360
 )
@@ -48,6 +51,12 @@ try {
     $hostProcess.StartInfo.FileName = $executable
     $hostProcess.StartInfo.WorkingDirectory = $gameDirectory
     $hostProcess.StartInfo.Arguments = "-debug-run $HostUpdates -debug-run-headless-server -debug-run-output $hostOutput"
+    if ($ServerConfigPath) {
+        $configPath = (Resolve-Path -LiteralPath $ServerConfigPath).Path
+        $hostProcess.StartInfo.Arguments += ' --config "' + $configPath + '"'
+    }
+    # Keep automated connections local and let the OS allocate an unused port.
+    $hostProcess.StartInfo.Arguments += " --listen 127.0.0.1 --port 0 --players $PlayerLimit"
     $hostProcess.StartInfo.UseShellExecute = $false
     $hostProcess.StartInfo.CreateNoWindow = $true
     $hostProcess.StartInfo.EnvironmentVariables['SDL_VIDEODRIVER'] = 'invalid-driver-for-headless-test'
