@@ -3,6 +3,7 @@
 #include "Activity.h"
 #include "ActivityMan.h"
 #include "Actor.h"
+#include "CameraMan.h"
 #include "AHuman.h"
 #include "HDFirearm.h"
 #include "HeldDevice.h"
@@ -24,7 +25,7 @@ using namespace RTE;
 WorldStateProtocol::Snapshot WorldStateSnapshotBuilder::Capture(std::uint32_t tick) {
 	WorldStateProtocol::Snapshot snapshot;
 	snapshot.Tick = tick;
-	const Activity* activity = g_ActivityMan.GetActivity();
+	Activity* activity = g_ActivityMan.GetActivity();
 	const Scene* scene = g_SceneMan.GetScene();
 	if (activity) {
 		snapshot.ActivityClassName = activity->GetClass().GetName();
@@ -62,6 +63,7 @@ WorldStateProtocol::Snapshot WorldStateSnapshotBuilder::Capture(std::uint32_t ti
 	std::unordered_set<std::uint64_t> includedObjectIds;
 	includedObjectIds.reserve(objects.size());
 	std::unordered_set<long> liveRuntimeIds;
+	std::unordered_map<const Actor*, std::uint64_t> actorNetworkIds;
 	liveRuntimeIds.reserve(objects.size());
 	snapshot.Objects.reserve(objects.size());
 	for (const SceneObject* sceneObject : objects) {
@@ -102,6 +104,7 @@ WorldStateProtocol::Snapshot WorldStateSnapshotBuilder::Capture(std::uint32_t ti
 			object.HFlipped = sprite->IsHFlipped();
 		}
 		if (const auto* actor = dynamic_cast<const Actor*>(movableObject)) {
+			actorNetworkIds.emplace(actor, networkId);
 			object.Health = actor->GetHealth();
 			object.Flags = WorldStateProtocol::c_ObjectFlagActor;
 			if (const auto* human = dynamic_cast<const AHuman*>(actor)) {
@@ -135,6 +138,27 @@ WorldStateProtocol::Snapshot WorldStateSnapshotBuilder::Capture(std::uint32_t ti
 		}
 		object.Team = static_cast<std::int16_t>(movableObject->GetTeam());
 		snapshot.Objects.push_back(std::move(object));
+	}
+	if (activity) {
+		for (int slot = Players::PlayerOne; slot < Players::MaxPlayerCount; ++slot) {
+			auto& player = snapshot.Players[slot];
+			player.ActiveHuman = activity->PlayerActive(slot) && activity->PlayerHuman(slot);
+			if (!player.ActiveHuman) continue;
+			player.Team = static_cast<std::int16_t>(activity->GetTeamOfPlayer(slot));
+			// Resolve through the actors captured above instead of dereferencing an
+			// Activity pointer that may outlive its removed actor during a restart.
+			const auto controlled = actorNetworkIds.find(activity->GetControlledActor(slot));
+			Vector camera;
+			if (controlled != actorNetworkIds.end()) {
+				player.ControlledActorId = controlled->second;
+				camera = controlled->first->GetViewPoint();
+			} else {
+				const int screen = activity->ScreenOfPlayer(slot);
+				if (screen >= 0 && screen < Players::MaxPlayerCount) camera = g_CameraMan.GetScrollTarget(screen);
+			}
+			player.CameraX = camera.GetX();
+			player.CameraY = camera.GetY();
+		}
 	}
 	for (auto networkIdEntry = m_NetworkIdsByRuntimeId.begin(); networkIdEntry != m_NetworkIdsByRuntimeId.end();) {
 		if (!liveRuntimeIds.contains(networkIdEntry->first)) {

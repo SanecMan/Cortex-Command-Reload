@@ -180,6 +180,13 @@ namespace {
 	}
 } // namespace
 
+bool WorldStateClientReplica::AdjustCameraForInterpolation(std::uint64_t networkId, Vector& camera) const {
+	const auto replica = m_Objects.find(networkId);
+	if (replica == m_Objects.end() || !dynamic_cast<Actor*>(replica->second.Object)) return false;
+	camera += g_SceneMan.ShortestDistance(Vector(replica->second.AuthoritativeX, replica->second.AuthoritativeY), replica->second.Object->GetPos());
+	return true;
+}
+
 WorldStateClientReplica::ApplyResult WorldStateClientReplica::Apply(const WorldStateProtocol::Snapshot& snapshot) {
 	ApplyResult result;
 	std::uint32_t interpolationDurationTicks = 3;
@@ -314,6 +321,8 @@ WorldStateClientReplica::ApplyResult WorldStateClientReplica::Apply(const WorldS
 		Replica& replica = m_Objects[state.NetworkId];
 		replica.Object = object;
 		replica.ClientOwned = clientOwned;
+		replica.AuthoritativeX = state.PositionX;
+		replica.AuthoritativeY = state.PositionY;
 		if (wasTrackedReplica) {
 			replica.InterpolationStartX = object->GetPos().GetX();
 			replica.InterpolationStartY = object->GetPos().GetY();

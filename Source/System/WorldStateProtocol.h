@@ -18,7 +18,7 @@
 namespace RTE::WorldStateProtocol {
 
 inline constexpr std::uint32_t c_Magic = 0x31524343; // "CCR1" on the wire.
-inline constexpr std::uint16_t c_Version = 7;
+inline constexpr std::uint16_t c_Version = 8;
 inline constexpr std::size_t c_HeaderSize = 16;
 inline constexpr std::size_t c_MaxPacketSize = 4 * 1024 * 1024;
 inline constexpr std::size_t c_MaxObjects = 65535;
@@ -83,6 +83,15 @@ struct ObjectState {
 	std::int32_t EquippedDeviceMagazineRounds = 0;
 };
 
+struct PlayerState {
+	std::uint64_t ControlledActorId = 0;
+	float CameraX = 0.0F;
+	float CameraY = 0.0F;
+	std::int16_t Team = c_NoTeam;
+	bool ActiveHuman = false;
+	bool operator==(const PlayerState&) const = default;
+};
+
 struct Snapshot {
 	std::uint32_t Tick = 0;
 	std::uint32_t SceneRevision = 0;
@@ -92,6 +101,7 @@ struct Snapshot {
 	std::string SceneModuleName;
 	std::string ScenePreset;
 	std::vector<ObjectState> Objects;
+	std::array<PlayerState, c_PlayerSlotCount> Players{};
 };
 
 struct InputCommand {
@@ -464,6 +474,19 @@ inline bool EncodeSnapshot(const Snapshot& snapshot, std::uint32_t sequence, std
 	if (std::adjacent_find(networkIds.begin(), networkIds.end()) != networkIds.end()) {
 		return false;
 	}
+	for (const PlayerState& player : snapshot.Players) {
+		if (!std::isfinite(player.CameraX) || !std::isfinite(player.CameraY) || player.Team < c_NoTeam || player.Team >= c_MaxTeamCount ||
+		    (!player.ActiveHuman && player.ControlledActorId != 0)) return false;
+		if (player.ControlledActorId != 0 && std::none_of(snapshot.Objects.begin(), snapshot.Objects.end(), [&player](const ObjectState& object) {
+			return object.NetworkId == player.ControlledActorId && object.Flags == c_ObjectFlagActor;
+		})) return false;
+		Detail::WriteUnsigned(packet, player.ControlledActorId, sizeof(player.ControlledActorId));
+		Detail::WriteFloat(packet, player.CameraX);
+		Detail::WriteFloat(packet, player.CameraY);
+		Detail::WriteUnsigned(packet, static_cast<std::uint16_t>(player.Team), sizeof(player.Team));
+		Detail::WriteUnsigned(packet, player.ActiveHuman ? 1 : 0, sizeof(std::uint8_t));
+	}
+	if (packet.size() > c_MaxPacketSize) return false;
 
 	std::size_t headerOffset = 0;
 	auto WriteHeaderUnsigned = [&](std::uint64_t value, std::size_t byteCount) {
@@ -563,6 +586,20 @@ inline bool DecodeSnapshot(std::span<const std::uint8_t> packet, Snapshot& snaps
 		}
 		if (!Detail::ValidObject(object) || !networkIds.insert(object.NetworkId).second) return false;
 		decoded.Objects.push_back(std::move(object));
+	}
+	for (PlayerState& player : decoded.Players) {
+		if (!Detail::ReadUnsigned(packet, offset, sizeof(player.ControlledActorId), value)) return false;
+		player.ControlledActorId = value;
+		if (!Detail::ReadFloat(packet, offset, player.CameraX) || !Detail::ReadFloat(packet, offset, player.CameraY) ||
+		    !Detail::ReadUnsigned(packet, offset, sizeof(player.Team), value)) return false;
+		player.Team = std::bit_cast<std::int16_t>(static_cast<std::uint16_t>(value));
+		if (player.Team < c_NoTeam || player.Team >= c_MaxTeamCount ||
+		    !Detail::ReadUnsigned(packet, offset, sizeof(std::uint8_t), value) || value > 1) return false;
+		player.ActiveHuman = value != 0;
+		if (!player.ActiveHuman && player.ControlledActorId != 0) return false;
+		if (player.ControlledActorId != 0 && std::none_of(decoded.Objects.begin(), decoded.Objects.end(), [&player](const ObjectState& object) {
+			return object.NetworkId == player.ControlledActorId && object.Flags == c_ObjectFlagActor;
+		})) return false;
 	}
 	if (offset != packet.size()) {
 		return false;

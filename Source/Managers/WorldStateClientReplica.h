@@ -30,6 +30,7 @@ namespace RTE {
 
 		ApplyResult Apply(const WorldStateProtocol::Snapshot& snapshot);
 		std::uint32_t AdvanceInterpolation();
+		bool AdjustCameraForInterpolation(std::uint64_t networkId, class Vector& camera) const;
 		bool ApplyTerrainPatch(const WorldStateProtocol::TerrainPatch& patch);
 		void Forget() { m_Objects.clear(); m_LastSnapshotTick = 0; }
 
@@ -37,6 +38,8 @@ namespace RTE {
 		struct Replica {
 			class MovableObject* Object = nullptr;
 			bool ClientOwned = false;
+			float AuthoritativeX = 0.0F;
+			float AuthoritativeY = 0.0F;
 			float InterpolationStartX = 0.0F;
 			float InterpolationStartY = 0.0F;
 			float InterpolationDeltaX = 0.0F;

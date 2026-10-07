@@ -579,6 +579,7 @@ namespace {
 		transientPixel.PixelSharpness = 0.8F;
 		transientPixel.Flags = WorldStateProtocol::c_ObjectFlagTransientPixel;
 		networkSnapshot.Objects.push_back(transientPixel);
+		networkSnapshot.Players[1] = {networkActor.NetworkId, 320.5F, 128.0F, networkActor.Team, true};
 		std::vector<std::uint8_t> networkPacket;
 		WorldStateProtocol::Snapshot decodedSnapshot;
 		std::uint32_t decodedSequence = 0;
@@ -591,6 +592,7 @@ namespace {
 		                                        decodedInfiniteAmmoSnapshot.Objects.front().EquippedDeviceMagazineRounds == -7;
 		const bool networkRoundTripPassed = WorldStateProtocol::EncodeSnapshot(networkSnapshot, 99, networkPacket) &&
 		                                   WorldStateProtocol::DecodeSnapshot(networkPacket, decodedSnapshot, &decodedSequence) &&
+		                                   decodedSnapshot.Players == networkSnapshot.Players &&
 			                                   decodedSequence == 99 && decodedSnapshot.Tick == networkSnapshot.Tick &&
 			                                   decodedSnapshot.SceneRevision == networkSnapshot.SceneRevision && decodedSnapshot.Objects.size() == 2 &&
 			                                   decodedSnapshot.ActivityClassName == networkSnapshot.ActivityClassName &&
@@ -629,6 +631,10 @@ namespace {
 		WorldStateProtocol::Snapshot invalidFlagsSnapshot = networkSnapshot;
 		invalidFlagsSnapshot.Objects.front().Flags = 3;
 		WorldStateProtocol::Snapshot invalidEquipmentSnapshot = networkSnapshot;
+		WorldStateProtocol::Snapshot invalidPlayerSnapshot = networkSnapshot;
+		invalidPlayerSnapshot.Players[1].ControlledActorId = transientPixel.NetworkId;
+		WorldStateProtocol::Snapshot invalidCameraSnapshot = networkSnapshot;
+		invalidCameraSnapshot.Players[1].CameraX = std::numeric_limits<float>::quiet_NaN();
 		invalidEquipmentSnapshot.Objects.back().HasEquippedDevice = true;
 		invalidEquipmentSnapshot.Objects.back().EquippedDeviceClassName = "HDFirearm";
 		invalidEquipmentSnapshot.Objects.back().EquippedDevicePresetName = "Invalid non-actor equipment";
@@ -638,7 +644,9 @@ namespace {
 		                                     !WorldStateProtocol::EncodeSnapshot(duplicateIdSnapshot, 100, duplicateIdPacket) &&
 		                                     !WorldStateProtocol::EncodeSnapshot(invalidTeamSnapshot, 100, duplicateIdPacket) &&
 		                                     !WorldStateProtocol::EncodeSnapshot(invalidFlagsSnapshot, 100, duplicateIdPacket) &&
-		                                     !WorldStateProtocol::EncodeSnapshot(invalidEquipmentSnapshot, 100, duplicateIdPacket);
+		                                     !WorldStateProtocol::EncodeSnapshot(invalidEquipmentSnapshot, 100, duplicateIdPacket) &&
+		                                     !WorldStateProtocol::EncodeSnapshot(invalidPlayerSnapshot, 100, duplicateIdPacket) &&
+		                                     !WorldStateProtocol::EncodeSnapshot(invalidCameraSnapshot, 100, duplicateIdPacket);
 		state.Log << "world_state_protocol_smoke=" << (networkRoundTripPassed && malformedNetworkRejected ? "passed" : "failed")
 		          << " infinite_ammo=" << (infiniteAmmoRoundTripPassed ? "passed" : "failed") << '\n' << std::flush;
 		if (!networkRoundTripPassed || !malformedNetworkRejected) {
@@ -1192,9 +1200,13 @@ namespace {
 		state.Log << "world_state_terrain_patch_apply_smoke=" << (terrainPatchApplyPassed ? "passed" : "unavailable-or-failed") << '\n' << std::flush;
 		WorldStateClientReplica replicaSmoke;
 		const WorldStateClientReplica::ApplyResult firstApply = replicaSmoke.Apply(worldSnapshot);
+		Vector cameraProbe(320.0F, 240.0F);
+		const std::uint64_t cameraActorId = worldSnapshot.Objects.empty() ? 0 : worldSnapshot.Objects.front().NetworkId;
+		const bool cameraInitiallyResolved = replicaSmoke.AdjustCameraForInterpolation(cameraActorId, cameraProbe);
 		WorldStateProtocol::Snapshot emptyReplicaSnapshot = worldSnapshot;
 		emptyReplicaSnapshot.Objects.clear();
 		const WorldStateClientReplica::ApplyResult removalApply = replicaSmoke.Apply(emptyReplicaSnapshot);
+		const bool cameraRemoved = !replicaSmoke.AdjustCameraForInterpolation(cameraActorId, cameraProbe);
 		const WorldStateClientReplica::ApplyResult restoredApply = replicaSmoke.Apply(worldSnapshot);
 		const WorldStateClientReplica::ApplyResult repeatedApply = replicaSmoke.Apply(worldSnapshot);
 		WorldStateProtocol::Snapshot interpolationTarget = worldSnapshot;
@@ -1205,6 +1217,12 @@ namespace {
 		}
 		const WorldStateClientReplica::ApplyResult interpolationApply = replicaSmoke.Apply(interpolationTarget);
 		const std::uint32_t interpolatedObjectCount = replicaSmoke.AdvanceInterpolation();
+		cameraProbe = Vector(320.0F, 240.0F);
+		const bool cameraInterpolationPassed = cameraInitiallyResolved && cameraRemoved &&
+		    replicaSmoke.AdjustCameraForInterpolation(cameraActorId, cameraProbe) &&
+		    std::abs(cameraProbe.GetX() - 300.0F) < 0.01F && std::abs(cameraProbe.GetY() - 240.0F) < 0.01F;
+		state.Log << "world_state_camera_replica_smoke=" << (cameraInterpolationPassed ? "passed" : "failed")
+		          << " lifecycle=" << (cameraInitiallyResolved && cameraRemoved) << " x=" << cameraProbe.GetX() << " y=" << cameraProbe.GetY() << '\n' << std::flush;
 		const auto isHumanObject = [](const WorldStateProtocol::ObjectState& object) { return object.ClassName == "AHuman"; };
 		const std::uint32_t expectedHumanEquipmentStates = static_cast<std::uint32_t>(std::count_if(worldSnapshot.Objects.begin(), worldSnapshot.Objects.end(), isHumanObject));
 		const bool interpolationSmokePassed = !interpolationTarget.Objects.empty() && interpolationApply.MissingPresets == 0 &&
@@ -1218,7 +1236,7 @@ namespace {
 		                               restoredApply.HumanEquipmentStatesApplied == expectedHumanEquipmentStates &&
 		                               repeatedApply.Updated == worldSnapshot.Objects.size() && repeatedApply.Spawned == 0 && repeatedApply.Removed == 0 && repeatedApply.MissingPresets == 0 &&
 		                               repeatedApply.HumanEquipmentStatesApplied == expectedHumanEquipmentStates &&
-		                               interpolationApply.Updated == worldSnapshot.Objects.size() && interpolationSmokePassed;
+		                               interpolationApply.Updated == worldSnapshot.Objects.size() && interpolationSmokePassed && cameraInterpolationPassed;
 		state.Log << "world_state_replica_smoke=" << (replicaSmokePassed ? "passed" : "failed") << " objects=" << worldSnapshot.Objects.size()
 		          << " first_updated=" << firstApply.Updated << " first_spawned=" << firstApply.Spawned << " removed=" << removalApply.Removed
 		          << " repeat_updated=" << repeatedApply.Updated << " human_equipment=" << firstApply.HumanEquipmentStatesApplied << '/'
@@ -1291,6 +1309,7 @@ namespace {
 		                                 decodedWorldSnapshot.ActivityModuleName == worldSnapshot.ActivityModuleName &&
 		                                 decodedWorldSnapshot.SceneModuleName == worldSnapshot.SceneModuleName &&
 		                                 decodedWorldSnapshot.ScenePreset == worldSnapshot.ScenePreset &&
+		                                 decodedWorldSnapshot.Players == worldSnapshot.Players &&
 		                                 decodedWorldSnapshot.Objects.size() == worldSnapshot.Objects.size();
 		for (std::size_t index = 0; worldSnapshotPassed && index < worldSnapshot.Objects.size(); ++index) {
 			worldSnapshotPassed = sameHumanEquipment(worldSnapshot.Objects[index], decodedWorldSnapshot.Objects[index]);
@@ -1967,6 +1986,16 @@ void RunGameLoop() {
 			}
 			if (worldStateReplicaClient && !worldStateSceneTransitionQueued) {
 				worldStateClientReplica.AdvanceInterpolation();
+				const int slot = worldStateClient->GetAssignedPlayerSlot();
+				if (slot >= Players::PlayerOne && slot < Players::MaxPlayerCount) {
+					const auto& snapshot = worldStateClient->GetLatestSnapshot();
+					const auto& player = snapshot.Players[slot];
+					if (player.ActiveHuman) {
+						Vector camera(player.CameraX, player.CameraY);
+						worldStateClientReplica.AdjustCameraForInterpolation(player.ControlledActorId, camera);
+						g_CameraMan.SetScrollTarget(camera, 0.1F, 0);
+					}
+				}
 			}
 
 			g_ConsoleMan.Update();
