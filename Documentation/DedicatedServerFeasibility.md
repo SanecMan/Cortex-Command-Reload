@@ -87,3 +87,7 @@ This is a short startup/render regression check, not a multiplayer gameplay test
 ## Headless content initialization (October 7)
 
 The Windows Final executable now passes the headless content probe documented in DebugRun.md: all 10 official modules load through PresetMan with SDL video uninitialized and an invalid video driver. Common manager construction is shared with client startup; the probe initializes Lua and CPU simulation resources, uses LoadingScreen's log-only path and skips shader compilation in CPU mode. It resolves the Tutorial Bunker scene preset and tears down loaded content without a window. This advances the content boundary; an Activity simulation loop, dedicated executable and live headless client/server test remain required. Linux execution of this path is not yet verified.
+
+## Headless Activity simulation (October 7)
+
+Windows Final now starts the real Tutorial Mission/Tutorial Bunker without SDL video and runs 60 updates through Lua, Activity, scene, movable physics and late global scripts. The headless probe observes a moving Gold Particle and 17 actors; it passes with an unavailable video driver and no window. MovableMan exposes an optional color-layer draw flag, preserving MOID drawing for collision queries. Activity-owned CPU UI state is retained. This establishes a short simulation foundation, not a completed dedicated server: standalone startup, live headless host/client integration, session lifecycle and Linux verification remain required.

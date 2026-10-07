@@ -465,7 +465,7 @@ namespace RTE {
 		bool IsMOSubtractionEnabled() { return m_MOSubtractionEnabled; }
 
 		/// Updates the state of this MovableMan. Supposed to be done every frame.
-		void Update();
+		void Update(bool drawColorLayer = true);
 
 		/// Moves newly-added objects into active lists without advancing simulation.
 		/// Snapshot-driven clients use this to publish server-owned objects for rendering.

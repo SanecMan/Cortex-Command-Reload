@@ -179,3 +179,13 @@ The Windows Final check passed with an invalid process-local `SDL_VIDEODRIVER`, 
 The probe stops before loading scene terrain into a running Activity, before physics updates and before an external client connection. It is a content-startup check, not a dedicated server. CPU collision images still load through the normal content path to preserve content definitions and physics compatibility.
 
 The installed-content Windows check also passed with the same invalid video driver: 43 modules total, 10 official, exit code 0. A first attempt was stopped by the test wrapper at its 180-second limit during module loading; the retry with a 600-second limit completed. Existing mod-version warnings remain. No mod Activity or runtime script behavior is validated by this loading-only check. The ordinary GPU client also passed 60 simulation updates and its final terrain/actor/HUD/UTF-8 screenshot was inspected.
+
+## Headless simulation probe
+
+Run `Cortex Command.exe -debug-run 60 -debug-run-headless-simulation -debug-run-output HeadlessSimulation` to load official content, start the real Tutorial Mission on Tutorial Bunker and execute 60 simulation updates without SDL video or a window. This includes Lua manager updates, Activity updates, scene/terrain updates, movable-object physics and late global scripts. A cloned Gold Particle starts with nonzero velocity; the test requires observed movement and advancing simulation ticks. It keeps CPU MOID collision drawing but calls MovableMan::Update(false) to skip the color-layer presentation draw. The existing client Update() behavior is unchanged.
+
+The Windows Final probe passed with `SDL_VIDEODRIVER=invalid-driver-for-headless-test`: `headless_activity_started=1`, `headless_simulation_preflight=passed updates=60 particle_moved=1 actors=17 video_initialized=0`, exit code 0. No ERROR or WARNING entries were found in its saved console log. This verifies a short real simulation run; it does not verify every Activity or mod's runtime callbacks. Activity-owned CPU UI state still exists for compatibility. No graphical screenshots are created by this probe.
+
+This path remains a diagnostic entry point inside the client executable. A standalone server target, remote-client acceptance during this simulation, long-running sessions and Linux execution are not yet verified.
+
+The same headless simulation check also passed at 600 updates with the invalid video driver, 17 actors, observed particle movement, exit code 0 and zero console errors/warnings. The existing output directory was reused. Ordinary client regression passed 60 updates and its final screenshot was visually inspected.

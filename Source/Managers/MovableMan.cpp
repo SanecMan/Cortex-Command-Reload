@@ -1359,7 +1359,7 @@ void MovableMan::CommitPendingAdditions() {
 	}
 }
 
-void MovableMan::Update() {
+void MovableMan::Update(bool drawColorLayer) {
 	ZoneScoped;
 
 	// Don't update if paused
@@ -1777,7 +1777,7 @@ void MovableMan::Update() {
 	////////////////////////////////////////////////////////////////////
 	// Draw the MO colors ONLY if this is a drawn update!
 
-	if (g_TimerMan.DrawnSimUpdate()) {
+	if (drawColorLayer && g_TimerMan.DrawnSimUpdate()) {
 		Draw(g_SceneMan.GetMOColorBitmap());
 	}
 
