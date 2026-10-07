@@ -228,6 +228,16 @@ namespace {
 		bool RequestHostTerrainMutationSmoke = false;
 		bool RequireRemoteTerrainMutationSmoke = false;
 		bool RequestHostEquipmentMutationSmoke = false;
+		bool HostControlSmoke = false;
+		bool ClientControlSmoke = false;
+		bool HostControlPassed = false;
+		int HostControlPassedUpdate = 0;
+		bool ClientControlPassed = false;
+		AHuman* ControlTestActor = nullptr;
+		float ControlStartX = 0;
+		int ControlStartRounds = 0;
+		std::uint64_t ControlBaselineId = 0;
+		int ControlInputTicks = 0;
 		bool RequireRemoteEquipmentMutationSmoke = false;
 		bool HostEquipmentMutationApplied = false;
 		bool RemoteEquipmentMutationObserved = false;
@@ -343,6 +353,8 @@ namespace {
 			if (argument == "-debug-run-world-state-terrain-mutation") state.RequestHostTerrainMutationSmoke = true;
 			if (argument == "-debug-run-require-world-state-terrain-mutation") state.RequireRemoteTerrainMutationSmoke = true;
 			if (argument == "-debug-run-world-state-equipment-mutation") state.RequestHostEquipmentMutationSmoke = true;
+			if (argument == "-debug-run-world-state-control") { state.HostControlSmoke = true; state.RequestHostWorldStateTransition = true; }
+			if (argument == "-debug-run-require-world-state-control") { state.ClientControlSmoke = true; state.RequireWorldStateTransition = true; }
 			if (argument == "-debug-run-require-world-state-equipment-mutation") state.RequireRemoteEquipmentMutationSmoke = true;
 			if (argument == "-debug-run-output" && i + 1 < argc) state.OutputDirectoryName = argv[++i];
 		}
@@ -827,6 +839,57 @@ namespace {
 			return;
 		}
 		++state.SimulationUpdates;
+		if (state.HostControlSmoke && state.HostWorldStateTransitionApplied && worldStateServer &&
+		    worldStateServer->GetConnectedClientCount() > 0 && !state.HostControlPassed) {
+			Activity* activity = g_ActivityMan.GetActivity();
+			const auto slots = worldStateServer->GetAssignedPlayerSlots();
+			if (activity && !slots.empty() && !state.ControlTestActor) {
+				const Entity* actorPreset = g_PresetMan.GetEntityPreset("AHuman", "Fat Culled Clone", "Base.rte");
+				const Entity* gunPreset = g_PresetMan.GetEntityPreset("HDFirearm", "Pistol", "Base.rte");
+				AHuman* actor = actorPreset ? dynamic_cast<AHuman*>(actorPreset->Clone()) : nullptr;
+				HDFirearm* gun = gunPreset ? dynamic_cast<HDFirearm*>(gunPreset->Clone()) : nullptr;
+				if (actor && gun) {
+					const int slot = slots.front();
+					actor->SetTeam(activity->GetTeamOfPlayer(slot));
+					actor->SetPos(g_SceneMan.MovePointToGround(Vector(400, 0), 0, 3));
+					actor->AddInventoryItem(gun);
+					actor->EquipFirearm();
+					if (g_MovableMan.AddMO(actor)) {
+						activity->SetPlayerBrain(actor, slot);
+						// Keep the other human team alive so Skirmish does not end
+						// before remote input arrives after client scene loading.
+						for (int player = Players::PlayerOne; player < Players::MaxPlayerCount; ++player) {
+							if (player == slot || !activity->PlayerHuman(player) || !activity->PlayerActive(player) ||
+							    g_MovableMan.IsActor(activity->GetPlayerBrain(player))) continue;
+							AHuman* brain = dynamic_cast<AHuman*>(actorPreset->Clone());
+							if (!brain) continue;
+							brain->SetTeam(activity->GetTeamOfPlayer(player));
+							brain->SetPos(g_SceneMan.MovePointToGround(Vector(250 + player * 40, 0), 0, 3));
+							brain->SetHealth(1000);
+							if (g_MovableMan.AddMO(brain)) activity->SetPlayerBrain(brain, player);
+							else delete brain;
+						}
+						activity->SetActivityState(Activity::Running);
+						if (activity->SwitchToActor(actor, slot, actor->GetTeam())) {
+							state.ControlTestActor = actor;
+							state.ControlStartX = actor->GetPos().GetX();
+							state.ControlStartRounds = gun->GetMagazine() ? gun->GetMagazine()->GetRoundCount() : 0;
+							state.Log << "control_fixture_created slot=" << slot << " rounds=" << state.ControlStartRounds << '\n' << std::flush;
+						}
+					} else { delete actor; }
+				} else { delete actor; delete gun; }
+			}
+			if (state.ControlTestActor && g_MovableMan.IsActor(state.ControlTestActor)) {
+				const auto* gun = dynamic_cast<HDFirearm*>(state.ControlTestActor->GetEquippedItem());
+				const int rounds = gun && gun->GetMagazine() ? gun->GetMagazine()->GetRoundCount() : state.ControlStartRounds;
+				const float moved = std::abs(g_SceneMan.ShortestDistance(Vector(state.ControlStartX, 0), Vector(state.ControlTestActor->GetPos().GetX(), 0)).GetX());
+				if (moved > 8 && rounds >= 0 && rounds < state.ControlStartRounds) {
+					state.HostControlPassed = true;
+					state.HostControlPassedUpdate = state.SimulationUpdates;
+					state.Log << "world_state_host_control=passed moved=" << moved << " rounds=" << rounds << '\n' << std::flush;
+				}
+			}
+		}
 		if (state.RequestHostEquipmentMutationSmoke && worldStateServer && worldStateServer->GetConnectedClientCount() > 0 &&
 		    !state.HostEquipmentMutationApplied) {
 			if (state.EquipmentMutationScheduledUpdate == 0) {
@@ -1409,6 +1472,11 @@ namespace {
 		          << ",vsync:" << g_WindowMan.GetVSyncEnabled() << '\n' << std::flush;
 		success = success && performanceCountersPassed;
 		success = success && state.LuaFilesystemProbePassed;
+		if (state.HostControlSmoke || state.ClientControlSmoke) {
+			const bool controlPassed = (!state.HostControlSmoke || state.HostControlPassed) && (!state.ClientControlSmoke || state.ClientControlPassed);
+			state.Log << "world_state_control_smoke=" << (controlPassed ? "passed" : "failed") << '\n' << std::flush;
+			success = success && controlPassed;
+		}
 		if (state.RequireClientDisconnectAfterPause) {
 			state.Log << "network_disconnect_while_paused=" << (state.ClientDisconnectWhilePausedObserved ? "passed" : "failed")
 			          << " paused=" << state.SimulationPausedByDebugRun << " client_seen=" << state.SawClientBeforeDebugDisconnect << '\n' << std::flush;
@@ -1489,7 +1557,9 @@ namespace {
 		}
 		const bool requiredHostTransitionComplete = !state.RequestHostWorldStateTransition || state.HostWorldStateTransitionApplied;
 		const bool requiredClientTransitionComplete = !state.RequireWorldStateTransition || state.WorldStateTransitionApplied;
-		const bool requiredTransitionsComplete = requiredHostTransitionComplete && requiredClientTransitionComplete;
+		const bool requiredTransitionsComplete = requiredHostTransitionComplete && requiredClientTransitionComplete &&
+		    (!state.HostControlSmoke || (state.HostControlPassed && state.SimulationUpdates >= state.HostControlPassedUpdate + 180)) &&
+		    (!state.ClientControlSmoke || state.ClientControlPassed);
 		if (!state.FinalScreenshotCaptured && state.SimulationUpdates >= state.UpdateLimit && requiredTransitionsComplete) {
 			state.FinalScreenshotCaptured = true;
 			capture("final");
@@ -1951,6 +2021,19 @@ void RunGameLoop() {
 				                                                                            static_cast<int>(WorldStateProtocol::c_MaxMouseWheelDelta)));
 				inputCommand.ResetActivityVote = g_UInputMan.KeyHeld(SDL_SCANCODE_BACKSPACE);
 				inputCommand.RestartActivityVote = g_UInputMan.KeyHeld(SDL_SCANCODE_BACKSLASH);
+				DebugRunState& controlDebug = GetDebugRunState();
+				if (controlDebug.Enabled && controlDebug.ClientControlSmoke) {
+					inputCommand.HeldElements = 0;
+					inputCommand.MouseButtonsHeld = 0;
+					inputCommand.MouseDeltaX = inputCommand.MouseDeltaY = 0;
+					inputCommand.AnalogMoveX = inputCommand.AnalogMoveY = 0;
+					inputCommand.AnalogAimX = inputCommand.AnalogAimY = 0;
+					if (controlDebug.ControlBaselineId && !controlDebug.ClientControlPassed) {
+						inputCommand.HeldElements = std::uint64_t{1} << InputElements::INPUT_L_RIGHT;
+						if (++controlDebug.ControlInputTicks % 30 < 10)
+							inputCommand.HeldElements |= std::uint64_t{1} << InputElements::INPUT_FIRE;
+					}
+				}
 				worldStateClient->SendInputCommand(inputCommand);
 			}
 
@@ -1964,6 +2047,28 @@ void RunGameLoop() {
 				if (snapshotCount != worldStateClientLastObservedSnapshotCount) {
 					const WorldStateProtocol::Snapshot& receivedSnapshot = worldStateClient->GetLatestSnapshot();
 					DebugRunState& debugRunState = GetDebugRunState();
+					if (debugRunState.ClientControlSmoke && !debugRunState.ClientControlPassed) {
+						const int slot = worldStateClient->GetAssignedPlayerSlot();
+						if (slot >= Players::PlayerOne && slot < Players::MaxPlayerCount) {
+							const auto& player = receivedSnapshot.Players[slot];
+							for (const auto& object : receivedSnapshot.Objects) {
+								if (!player.ControlledActorId || object.NetworkId != player.ControlledActorId || !object.HasEquippedDeviceMagazine) continue;
+								if (!debugRunState.ControlBaselineId) {
+									debugRunState.ControlBaselineId = object.NetworkId;
+									debugRunState.ControlStartX = object.PositionX;
+									debugRunState.ControlStartRounds = object.EquippedDeviceMagazineRounds;
+									debugRunState.Log << "control_client_baseline id=" << object.NetworkId << " rounds=" << object.EquippedDeviceMagazineRounds << '\n' << std::flush;
+								}
+								const float moved = std::abs(g_SceneMan.ShortestDistance(Vector(debugRunState.ControlStartX, 0), Vector(object.PositionX, 0)).GetX());
+								if (object.NetworkId == debugRunState.ControlBaselineId && moved > 8 &&
+								    object.EquippedDeviceMagazineRounds >= 0 && object.EquippedDeviceMagazineRounds < debugRunState.ControlStartRounds &&
+								    worldStateClientReplica.BindPlayerView(object.NetworkId, player.Team)) {
+									debugRunState.ClientControlPassed = true;
+									debugRunState.Log << "world_state_client_control=passed moved=" << moved << " rounds=" << object.EquippedDeviceMagazineRounds << '\n' << std::flush;
+								}
+							}
+						}
+					}
 					if (debugRunState.RequireRemoteEquipmentMutationSmoke && !debugRunState.RemoteEquipmentMutationObserved) {
 						std::unordered_map<std::uint64_t, int> currentMagazineRounds;
 						currentMagazineRounds.reserve(receivedSnapshot.Objects.size());

@@ -89,3 +89,36 @@ On Windows, an unhandled exception also writes `AbortDump.dmp` next to `AbortLog
 The 2026-10-04 crash log identified a null dereference in `GibEditor::Update`: the first `EditorDone` action tried to destroy a previous test copy before one existed. The editor now checks the owned test-copy pointer before destroying it. Windows `Debug Minimal|x64` rebuilt successfully, and a fresh hidden `-debug-run 60 -debug-overlay` exited with code 0 and `result=passed` (49 actors, 291 particles). That gameplay smoke does not drive the Gib Editor UI, so it verifies the build and surrounding runtime but is not a direct interactive regression test of the editor action. After the UTF-8 crash-message fallback was added, another rebuilt Windows run also passed with 60 updates (49 actors, 300 particles, 46.21 s elapsed); timings vary across runs and this is not a performance comparison.
 
 This is a repeatable smoke and stress run, not a headless server or a multi-scene benchmark yet. It uses real game content and the existing Lua object creation API.
+## Remote movement/fire smoke
+
+`Tools/RunWorldStateSmoke.ps1 -Scenario Control` starts a paired world-state run.
+Use `-ExecutablePath '.\Cortex Command.debug.minimal.exe'` for Debug Minimal.
+The host flag is `-debug-run-world-state-control`; the client flag is
+`-debug-run-require-world-state-control`. These imply the existing Activity/Scene
+transition checks. The fixture loads Skirmish Defense/Ketanot Hills, creates a
+Pistol-equipped human for the remote slot and a surviving actor for the other
+human team, and switches the host Activity to running. This fixture is enabled
+only by these diagnostic flags.
+
+After the client receives the controlled actor ID and initial magazine count,
+it sends right movement and pulsed fire through the normal InputCommand path.
+Both peers require horizontal displacement greater than eight pixels and a
+decrease in that actor's magazine count. The client also requires a successful
+player-view binding. The host keeps simulating for 180 updates after its own
+success so the client can observe later snapshots. A missing result fails the
+run; the existing 300-second scenario timeout and wrapper timeout still apply.
+
+Debug Minimal x64 passed this scenario on October 7 in 178.93 seconds with exit
+code 0 from both processes. Host displacement was 8.22287 pixels and client
+displacement 8.45746 pixels; both observed 11 rounds becoming 9. Reports and
+screenshots are in `ScreenShots/RemoteControlPair-Host/` and
+`ScreenShots/RemoteControlPair-Client/`. Reusing this prefix replaces the prior
+artifacts. The initial attempt exposed a fixture lifetime error: the host exited
+on its own success before the client could observe the displacement threshold;
+the post-success simulation interval fixes that observed case.
+
+This checks the actual client-input/server-simulation/snapshot path, rather than
+only codec or input-manager state. It does not validate all weapons, reloading,
+actor switching, inventory, player death/reconnect or mod activities. The final
+client screenshot contains terrain and HUD markers, but complete actor visual
+presentation and authoritative visibility/fog remain unverified.

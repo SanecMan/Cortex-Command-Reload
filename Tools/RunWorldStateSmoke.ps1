@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [string]$ExecutablePath,
-    [ValidateSet('Transition', 'Equipment')]
+    [ValidateSet('Transition', 'Equipment', 'Control')]
     [string]$Scenario = 'Transition',
     [ValidatePattern('^[A-Za-z0-9_-]{1,48}$')]
     [string]$OutputPrefix = 'WorldStateSmoke',
@@ -58,6 +58,10 @@ $hostUpdates = if ($Scenario -eq 'Equipment') { '3600' } else { '900' }
 $clientUpdates = if ($Scenario -eq 'Equipment') { '600' } else { '900' }
 $hostCheck = if ($Scenario -eq 'Equipment') { '-debug-run-world-state-equipment-mutation' } else { '-debug-run-world-state-transition' }
 $clientCheck = if ($Scenario -eq 'Equipment') { '-debug-run-require-world-state-equipment-mutation' } else { '-debug-run-require-world-state-transition' }
+if ($Scenario -eq 'Control') {
+    $hostCheck = '-debug-run-world-state-control'
+    $clientCheck = '-debug-run-require-world-state-control'
+}
 
 try {
     $hostProcess = Start-Process -FilePath $executable -WorkingDirectory $gameDirectory -WindowStyle Hidden -PassThru -ArgumentList @(

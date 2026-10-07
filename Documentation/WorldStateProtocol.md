@@ -104,3 +104,11 @@ The separate-process Debug Minimal Transition pair also passed in 178.6 seconds
 and `result=passed` from both peers. Both ran the new player-view lifetime check;
 the host applied and the client observed the scene transition. As before, the
 transition fixture does not exercise remote controlled-actor movement/fire.
+
+The subsequent `Control` fixture does exercise movement/fire across separate
+processes: Debug Minimal peers passed in 178.93 seconds, with the same actor's
+11-round magazine decreasing to 9 on host and client and horizontal movement
+exceeding eight pixels on both. The client generated InputCommands only after
+recording the actor's initial authoritative state. This is a narrow gameplay
+test for the Pistol fixture, not a claim of complete equipment/pose/visibility
+replication. See `Documentation/DebugRun.md` for commands and limitations.
