@@ -56,6 +56,15 @@ After the log says `world-state host listening`, start a second process and repl
 
 The host waits until it has sent the client's baseline material patch for a deterministic probe pixel, then removes that pixel through the normal terrain-penetration API and replicates the resulting patch. The client fails unless it receives the material change and reads `Air` back from its loaded terrain. A passing host report also requires that it mutated the pixel and sent its incremental patch. Both processes still create a hidden OpenGL context; this is not a headless-server test.
 
+To verify live equipment state replication between separate processes, start a long-running host and then a client:
+
+```powershell
+& '.\Cortex Command.debug.minimal.exe' -debug-run 3600 -debug-run-output EquipmentMutationHost -debug-run-world-state-equipment-mutation -world-state-server 18121
+& '.\Cortex Command.debug.minimal.exe' -debug-run 600 -debug-run-output EquipmentMutationClient -debug-run-require-world-state-equipment-mutation -world-state-client 127.0.0.1 18121
+```
+
+After a client connects, the host waits 120 simulation updates and changes every loaded human firearm magazine to `-1` (the engine's infinite-ammo value). This mutation exists only in the automated debug session. The client records magazine round counts from the initial server snapshot before loading its Activity, then requires a later snapshot to report a changed count for the same network object ID. A passing client log includes `world_state_remote_equipment_mutation_observed=passed`; the host must report at least one magazine changed. Use separate output directory names if you change the commands for repeated runs. This proves a persistent authoritative equipment-field mutation is serialized and applied over a live connection; it does not simulate a player firing or switching weapons.
+
 The resident-memory measurement is the Windows working set or Linux resident pages, in bytes; `0` means that the platform query failed or is not implemented. The network check uses four local client peers and does not connect remote gameplay clients.
 
 ### 2026-10-07 particle-settling crash follow-up

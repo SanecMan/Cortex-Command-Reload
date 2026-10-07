@@ -53,6 +53,10 @@
 #include "MovableMan.h"
 #include "MovableObject.h"
 #include "Entities/Activity.h"
+#include "Entities/AHuman.h"
+#include "Entities/HDFirearm.h"
+#include "Entities/Magazine.h"
+#include "Entities/SceneObject.h"
 #include "Activities/GameActivity.h"
 #include "PrimitiveMan.h"
 #include "ThreadMan.h"
@@ -96,11 +100,13 @@
 #include <fstream>
 #include <limits>
 #include <filesystem>
+#include <list>
 #include <memory>
 #include <sstream>
 #include <string>
 #include <string_view>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 extern "C" {
@@ -221,6 +227,13 @@ namespace {
 		bool RequireWorldStateTransition = false;
 		bool RequestHostTerrainMutationSmoke = false;
 		bool RequireRemoteTerrainMutationSmoke = false;
+		bool RequestHostEquipmentMutationSmoke = false;
+		bool RequireRemoteEquipmentMutationSmoke = false;
+		bool HostEquipmentMutationApplied = false;
+		bool RemoteEquipmentMutationObserved = false;
+		int EquipmentMutationScheduledUpdate = 0;
+		int EquipmentMutationChangedMagazines = 0;
+		std::unordered_map<std::uint64_t, int> PreviousMagazineRoundsByNetworkId;
 		bool PauseSimulationAfterClient = false;
 		bool RequireClientDisconnectAfterPause = false;
 		bool SawClientForPauseTest = false;
@@ -329,6 +342,8 @@ namespace {
 		}
 			if (argument == "-debug-run-world-state-terrain-mutation") state.RequestHostTerrainMutationSmoke = true;
 			if (argument == "-debug-run-require-world-state-terrain-mutation") state.RequireRemoteTerrainMutationSmoke = true;
+			if (argument == "-debug-run-world-state-equipment-mutation") state.RequestHostEquipmentMutationSmoke = true;
+			if (argument == "-debug-run-require-world-state-equipment-mutation") state.RequireRemoteEquipmentMutationSmoke = true;
 			if (argument == "-debug-run-output" && i + 1 < argc) state.OutputDirectoryName = argv[++i];
 		}
 		for (int i = 1; i < argc; ++i) {
@@ -773,12 +788,52 @@ namespace {
 		state.StressStarted = state.StressStarted || (result >= 0 && actorCount > state.InitialActorCount && particleCount > state.InitialParticleCount);
 	}
 
+	int ApplyDebugWorldStateEquipmentMutation() {
+		std::list<SceneObject*> actors;
+		g_MovableMan.GetAllActors(false, actors);
+		int changedMagazines = 0;
+		for (SceneObject* sceneObject : actors) {
+			auto* human = dynamic_cast<AHuman*>(sceneObject);
+			auto* firearm = human ? dynamic_cast<HDFirearm*>(human->GetEquippedItem()) : nullptr;
+			Magazine* magazine = firearm ? firearm->GetMagazine() : nullptr;
+			if (!magazine) {
+				continue;
+			}
+
+			const int currentRounds = magazine->GetRoundCount();
+			// Infinite ammo is a persistent sentinel for this test, so an AI reload
+			// between 20 Hz snapshots cannot erase the observed state transition.
+			constexpr int c_DebugInfiniteAmmo = -1;
+			const int targetRounds = c_DebugInfiniteAmmo;
+			if (currentRounds != targetRounds) {
+				magazine->SetRoundCount(targetRounds);
+				++changedMagazines;
+			}
+		}
+		return changedMagazines;
+	}
+
 	void AdvanceDebugRunSimulation() {
 		DebugRunState& state = GetDebugRunState();
 		if (!state.Enabled || System::IsSetToQuit()) {
 			return;
 		}
 		++state.SimulationUpdates;
+		if (state.RequestHostEquipmentMutationSmoke && worldStateServer && worldStateServer->GetConnectedClientCount() > 0 &&
+		    !state.HostEquipmentMutationApplied) {
+			if (state.EquipmentMutationScheduledUpdate == 0) {
+				state.EquipmentMutationScheduledUpdate = state.SimulationUpdates + 120;
+				state.Log << "world_state_host_equipment_mutation_scheduled=true at_update=" << state.EquipmentMutationScheduledUpdate << '\n' << std::flush;
+			} else if (state.SimulationUpdates >= state.EquipmentMutationScheduledUpdate) {
+				state.EquipmentMutationChangedMagazines = ApplyDebugWorldStateEquipmentMutation();
+				state.HostEquipmentMutationApplied = state.EquipmentMutationChangedMagazines > 0;
+				state.Log << "world_state_host_equipment_mutation=" << (state.HostEquipmentMutationApplied ? "passed" : "retry")
+				          << " changed_magazines=" << state.EquipmentMutationChangedMagazines << " at_update=" << state.SimulationUpdates << '\n' << std::flush;
+				if (!state.HostEquipmentMutationApplied) {
+					state.EquipmentMutationScheduledUpdate = state.SimulationUpdates + 60;
+				}
+			}
+		}
 		if (state.SimulationUpdates == 1) {
 			state.InitialActorCount = g_MovableMan.GetActorCount();
 			state.InitialParticleCount = g_MovableMan.GetParticleCount();
@@ -1280,6 +1335,16 @@ namespace {
 		if (state.RequestHostTerrainMutationSmoke) {
 			state.Log << "world_state_host_terrain_mutation=" << (hostTerrainMutationPassed ? "passed" : "failed") << '\n' << std::flush;
 		}
+		const bool hostEquipmentMutationPassed = !state.RequestHostEquipmentMutationSmoke || state.HostEquipmentMutationApplied;
+		const bool remoteEquipmentMutationPassed = !state.RequireRemoteEquipmentMutationSmoke || state.RemoteEquipmentMutationObserved;
+		if (state.RequestHostEquipmentMutationSmoke) {
+			state.Log << "world_state_host_equipment_mutation=" << (hostEquipmentMutationPassed ? "passed" : "failed")
+			          << " changed_magazines=" << state.EquipmentMutationChangedMagazines << '\n' << std::flush;
+		}
+		if (state.RequireRemoteEquipmentMutationSmoke) {
+			state.Log << "world_state_remote_equipment_mutation=" << (remoteEquipmentMutationPassed ? "passed" : "failed")
+			          << " observed=" << state.RemoteEquipmentMutationObserved << '\n' << std::flush;
+		}
 		state.Log << "utf8_unicode_font_loaded=" << (g_FrameMan.DidDebugUTF8GlyphFontLoad() ? "yes" : "no") << '\n' << std::flush;
 		const std::string unicodeFontPath = g_PresetMan.GetFullModulePath("Base.rte/GUIs/Fonts/Roboto-Medium.ttf");
 		std::filesystem::path unicodeFontFilePath = std::filesystem::u8path(unicodeFontPath);
@@ -1311,7 +1376,8 @@ namespace {
 			          << " paused=" << state.SimulationPausedByDebugRun << " client_seen=" << state.SawClientBeforeDebugDisconnect << '\n' << std::flush;
 			success = success && state.ClientDisconnectWhilePausedObserved;
 		}
-		success = success && utf8GlyphRenderPassed && worldStateTransitionPassed && remoteTerrainMutationPassed && hostTerrainMutationPassed && state.HostSessionTestPassed && worldIdentityStable && replicaSmokePassed && transientPixelReplicaPassed && terrainPatchApplyPassed &&
+		success = success && utf8GlyphRenderPassed && worldStateTransitionPassed && remoteTerrainMutationPassed && hostTerrainMutationPassed && hostEquipmentMutationPassed && remoteEquipmentMutationPassed &&
+		          state.HostSessionTestPassed && worldIdentityStable && replicaSmokePassed && transientPixelReplicaPassed && terrainPatchApplyPassed &&
 		          networkInputApplicationPassed && worldSnapshotPassed && snapshotCompressionPassed && liveSnapshotTransportPassed;
 		const double elapsedSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - state.StartTime).count();
 		const double simulationSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - state.SimulationStartTime).count();
@@ -1857,7 +1923,28 @@ void RunGameLoop() {
 			if (worldStateClient && worldStateClient->HasSnapshot() && !worldStateSceneTransitionQueued) {
 				const std::uint32_t snapshotCount = worldStateClient->GetReceivedSnapshotCount();
 				if (snapshotCount != worldStateClientLastObservedSnapshotCount) {
-					const WorldStateClientReplica::ApplyResult applied = worldStateClientReplica.Apply(worldStateClient->GetLatestSnapshot());
+					const WorldStateProtocol::Snapshot& receivedSnapshot = worldStateClient->GetLatestSnapshot();
+					DebugRunState& debugRunState = GetDebugRunState();
+					if (debugRunState.RequireRemoteEquipmentMutationSmoke && !debugRunState.RemoteEquipmentMutationObserved) {
+						std::unordered_map<std::uint64_t, int> currentMagazineRounds;
+						currentMagazineRounds.reserve(receivedSnapshot.Objects.size());
+						for (const WorldStateProtocol::ObjectState& object : receivedSnapshot.Objects) {
+							if (!object.HasEquippedDeviceMagazine) {
+								continue;
+							}
+							currentMagazineRounds.emplace(object.NetworkId, object.EquippedDeviceMagazineRounds);
+							const auto previous = debugRunState.PreviousMagazineRoundsByNetworkId.find(object.NetworkId);
+							if (previous != debugRunState.PreviousMagazineRoundsByNetworkId.end() && previous->second != object.EquippedDeviceMagazineRounds) {
+								debugRunState.RemoteEquipmentMutationObserved = true;
+								GetDebugRunState().Log << "world_state_remote_equipment_mutation_observed=passed network_id=" << object.NetworkId
+								                      << " previous_rounds=" << previous->second << " current_rounds=" << object.EquippedDeviceMagazineRounds
+								                      << " tick=" << receivedSnapshot.Tick << '\n' << std::flush;
+								break;
+							}
+						}
+						debugRunState.PreviousMagazineRoundsByNetworkId = std::move(currentMagazineRounds);
+					}
+					const WorldStateClientReplica::ApplyResult applied = worldStateClientReplica.Apply(receivedSnapshot);
 					g_MovableMan.CommitPendingAdditions();
 					g_MovableMan.UpdateDrawMOIDs();
 					worldStateClientLastObservedSnapshotCount = snapshotCount;
@@ -2295,6 +2382,17 @@ int main(int argc, char** argv) {
 			return EXIT_FAILURE;
 		}
 		const WorldStateProtocol::Snapshot& snapshot = worldStateClient->GetLatestSnapshot();
+		if (debugRun && GetDebugRunState().RequireRemoteEquipmentMutationSmoke) {
+			DebugRunState& state = GetDebugRunState();
+			state.PreviousMagazineRoundsByNetworkId.reserve(snapshot.Objects.size());
+			for (const WorldStateProtocol::ObjectState& object : snapshot.Objects) {
+				if (object.HasEquippedDeviceMagazine) {
+					state.PreviousMagazineRoundsByNetworkId.emplace(object.NetworkId, object.EquippedDeviceMagazineRounds);
+				}
+			}
+			state.Log << "world_state_remote_equipment_baseline=true snapshot_objects=" << snapshot.Objects.size()
+			         << " magazines=" << state.PreviousMagazineRoundsByNetworkId.size() << '\n' << std::flush;
+		}
 		std::string failureReason;
 		if (!QueueWorldStateActivity(snapshot, failureReason)) {
 			std::cerr << "[NETWORK] " << failureReason << "; verify installed .rte modules\n";
