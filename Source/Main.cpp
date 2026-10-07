@@ -216,6 +216,7 @@ namespace {
 		bool HostSessionTestPassed = true;
 		bool OverlayCaptureEnabled = false;
 		bool PreflightOnly = false;
+		bool LoadAllOptionalModules = false;
 		bool RequestHostWorldStateTransition = false;
 		bool RequireWorldStateTransition = false;
 		bool RequestHostTerrainMutationSmoke = false;
@@ -313,6 +314,7 @@ namespace {
 			const std::string_view argument(argv[i]);
 			if (argument == "-debug-overlay") state.OverlayCaptureEnabled = true;
 			if (argument == "-debug-run-preflight-only") state.PreflightOnly = true;
+			if (argument == "-debug-run-all-mods") state.LoadAllOptionalModules = true;
 			if (argument == "-debug-run-world-state-transition") state.RequestHostWorldStateTransition = true;
 			if (argument == "-debug-run-require-world-state-transition") state.RequireWorldStateTransition = true;
 			if (argument == "-debug-run-pause-after-client") state.PauseSimulationAfterClient = true;
@@ -2116,7 +2118,11 @@ int main(int argc, char** argv) {
 		g_SettingsMan.MeasureModuleLoadTime(true);
 		GetDebugRunState().ModuleLoadStartTime = std::chrono::steady_clock::now();
 	}
-	g_PresetMan.LoadAllDataModules();
+	const bool includeOptionalModules = !debugRun || GetDebugRunState().LoadAllOptionalModules;
+	if (debugRun) {
+		GetDebugRunState().Log << "optional_module_scan=" << (includeOptionalModules ? "enabled" : "disabled") << '\n' << std::flush;
+	}
+	g_PresetMan.LoadAllDataModules(includeOptionalModules);
 	if (debugRun) {
 		GetDebugRunState().ModuleLoadEndTime = std::chrono::steady_clock::now();
 		GetDebugRunState().SimulationStartTime = GetDebugRunState().ModuleLoadEndTime;

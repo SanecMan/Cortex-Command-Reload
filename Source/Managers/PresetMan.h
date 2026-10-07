@@ -62,9 +62,9 @@ namespace RTE {
 		/// @return Whether the DataModule was read and added correctly.
 		bool LoadDataModule(const std::string& moduleName) { return LoadDataModule(moduleName, false); }
 
-		/// Loads all the official data modules individually with LoadDataModule, then proceeds to look for any non-official modules and loads them as well.
+		/// Loads official modules and, when requested, scans for non-official modules/user data. A configured single module remains loadable when scanning is disabled.
 		/// @return
-		bool LoadAllDataModules();
+		bool LoadAllDataModules(bool includeOptionalModules = true);
 
 		/// Sets the single module to be loaded after the official modules. This will be the ONLY non-official module to be loaded.
 		/// @param moduleName Name of the module to load.

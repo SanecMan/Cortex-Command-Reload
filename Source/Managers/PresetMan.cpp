@@ -124,13 +124,15 @@ bool PresetMan::LoadDataModule(const std::string& moduleName, bool official, boo
 	return true;
 }
 
-bool PresetMan::LoadAllDataModules() {
+bool PresetMan::LoadAllDataModules(bool includeOptionalModules) {
 	auto moduleLoadTimerStart = std::chrono::steady_clock::now();
 
 	// Destroy any possible loaded modules
 	Destroy();
 
-	FindAndExtractZippedModules();
+	if (includeOptionalModules || !m_SingleModuleToLoad.empty()) {
+		FindAndExtractZippedModules();
+	}
 
 	// Load all the official modules first!
 	for (const std::string& officialModule: c_OfficialModules) {
@@ -145,7 +147,7 @@ bool PresetMan::LoadAllDataModules() {
 			g_ConsoleMan.PrintString("ERROR: Failed to load DataModule \"" + m_SingleModuleToLoad + "\"! Only official modules were loaded!");
 			return false;
 		}
-	} else {
+	} else if (includeOptionalModules) {
 		std::vector<std::filesystem::directory_entry> modDirectoryFolders;
 		const std::string modDirectory = System::GetWorkingDirectory() + System::GetModDirectory();
 		std::copy_if(std::filesystem::directory_iterator(UTF8::PathFromString(modDirectory)), std::filesystem::directory_iterator(), std::back_inserter(modDirectoryFolders),

@@ -12,6 +12,8 @@ Output is written to `ScreenShots/DebugRuns/`. Starting another debug run clears
 
 The process exits with code 0 only when the smoke run completes successfully. Performance counters are verified during the run and latched, so a later Activity/Scene transition to an initially empty map does not erase evidence collected during the stress phase. Host runs must pass the local stress-spawn check; client runs must observe replicated objects before the transition. A failed check, missing activity, interrupted run, or output setup error returns a nonzero exit code, so CI and scripts can detect failures without parsing screenshots.
 
+Gameplay diagnostics load the ten official data modules by default and skip the optional-module directory scan, ZIP extraction and userdata modules. Add `-module <Name.rte>` to load one selected mod after official content, or use `-debug-run-all-mods` to enable the normal full scan of all enabled Mods and userdata modules. The latter is intended for compatibility runs and can take several minutes with a large Mods folder. Normal non-debug launches still load modules using the existing full behavior.
+
 Use `-debug-run-preflight-only` to run the UTF-8 text/path checks, a Cyrillic ZIP create/open/read/delete round trip, and the local world-state protocol/transport checks, then exit before SDL, content loading, simulation and rendering. This is useful for automated checks on Windows sessions without an interactive display. It does not count as a gameplay or rendering smoke test and creates no screenshots:
 
 ```powershell
