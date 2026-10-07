@@ -1,5 +1,24 @@
 # World-state protocol
 
+## Catalog rules (v12)
+
+Message type 9 is a reliable ordered purchase-policy frame. It contains scene
+revision, active player slot/team, only-owned/mass/passenger flags, allow/always
+allow/prohibit key lists, signed stock counts and landing-area boxes. It is
+bounded to 1 MiB, 4096 entries in each collection and 1024 finite-float boxes.
+Keys use bounded UTF-8 strings. Duplicate keys, invalid role/flags, non-finite
+coordinates, truncation and trailing bytes are rejected without replacing the
+previous decoded policy. Negative stock counts retain existing engine semantics.
+
+The host compares rules every 15 simulation updates and sends only changes to
+that player's connection. Policies have a separate sequence counter. The client
+applies them only for its matching scene, slot and team, rebuilds catalog rows,
+refreshes the order total and constrains the landing cursor to the replicated
+area. The catalog waits for its first matching policy. Purchase validation still
+runs against current server state; policy delivery does not authorize an order.
+Base preset prices still require matching installed content; metagame-specific
+pricing modifiers are not part of this rule frame.
+
 ## Player orders (v11)
 
 Message types 7 and 8 carry a purchase request and result. Both use reliable
@@ -31,9 +50,9 @@ responses are queued with a 64-result bound. The client equipment menu uses thes
 scene revision. The RPC does not replicate complete craft inventories or provide
 cross-reconnect purchase receipts.
 
-The experimental world-state path serializes data explicitly instead of sending C++ structs or framebuffer pixels. Protocol version 11 carries a server tick, scene revision, signed Activity state, four finite team-funds values, UTF-8 Activity class/preset/module and Scene module/preset identity, then top-level actors, items and particles and four player-view records. Each object has a stable host-assigned network ID, class/module/preset identity, transform, velocity, health, sprite frame, horizontal flip, team and category. `AHuman` actor records also carry foreground equipped-device identity and, for an `HDFirearm`, inserted magazine identity and round count. Clients switch or clone those devices from locally installed `.rte` presets and apply the authoritative magazine count. Dynamic `MOPixel` objects without a preset carry material, color, mass, lifetime and sharpness so clients can recreate common transient particles. Version 11 retains the bounded terrain-patch frame with scene revision, pixel rectangle, material/foreground/background layer and indexed pixel bytes.
+The experimental world-state path serializes data explicitly instead of sending C++ structs or framebuffer pixels. Protocol version 12 carries a server tick, scene revision, signed Activity state, four finite team-funds values, UTF-8 Activity class/preset/module and Scene module/preset identity, then top-level actors, items and particles and four player-view records. Each object has a stable host-assigned network ID, class/module/preset identity, transform, velocity, health, sprite frame, horizontal flip, team and category. `AHuman` actor records also carry foreground equipped-device identity and, for an `HDFirearm`, inserted magazine identity and round count. Clients switch or clone those devices from locally installed `.rte` presets and apply the authoritative magazine count. Dynamic `MOPixel` objects without a preset carry material, color, mass, lifetime and sharpness so clients can recreate common transient particles. Version 12 retains the bounded terrain-patch frame with scene revision, pixel rectangle, material/foreground/background layer and indexed pixel bytes.
 
-The decoded packet starts with a 16-byte header: `CCR1` magic, version, message type, reserved byte, sequence and payload length, all little-endian. The decoder rejects unknown versions/types, malformed UTF-8, non-finite numeric data, duplicate or zero IDs, invalid team/category/equipment fields, invalid terrain layer/dimensions, truncated/oversized packets and counts beyond fixed bounds. Version 11 peers are required; earlier peers cannot exchange v11 frames. Each fixed player-view record contains the controlled actor's network ID (zero for no actor), a finite camera position, team and active-human flag. Nonzero actor references must resolve to an actor in the same snapshot, and inactive players cannot reference a controlled actor. Assigned clients follow their server-selected view, using the replica actor's interpolated position to smooth the camera between snapshots. The local Activity player view now binds to the selected replica actor for existing HUD identification; visual and remote-control gameplay validation remain outstanding.
+The decoded packet starts with a 16-byte header: `CCR1` magic, version, message type, reserved byte, sequence and payload length, all little-endian. The decoder rejects unknown versions/types, malformed UTF-8, non-finite numeric data, duplicate or zero IDs, invalid team/category/equipment fields, invalid terrain layer/dimensions, truncated/oversized packets and counts beyond fixed bounds. Version 12 peers are required; earlier peers cannot exchange v12 frames. Each fixed player-view record contains the controlled actor's network ID (zero for no actor), a finite camera position, team and active-human flag. Nonzero actor references must resolve to an actor in the same snapshot, and inactive players cannot reference a controlled actor. Assigned clients follow their server-selected view, using the replica actor's interpolated position to smooth the camera between snapshots. The local Activity player view now binds to the selected replica actor for existing HUD identification; visual and remote-control gameplay validation remain outstanding.
 
 On 2026-10-07, Windows x64 Debug Minimal rebuilt for v8. The preflight passed player-view round-trip and rejected a non-actor control reference and a non-finite camera coordinate. A 60-update gameplay smoke passed with 292 replicated objects and 22 human equipment records. Its camera check resolved the actor, rejected the removed actor, restored it, and applied the expected 20-pixel interpolation correction (`x=300`, `y=240` from an authoritative camera probe of `320,240`). The four-client assignment/input/disconnect test also passed. Artifacts are under `ScreenShots/V8ViewPreflight/` and `ScreenShots/V8ViewGameplay/`. A separate-process visual check of camera following and the player HUD remains outstanding.
 

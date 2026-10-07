@@ -27,11 +27,14 @@ public:
 	const WorldStateProtocol::PurchaseRequest& LastRequest() const { return m_Request; }
 	bool IsSpectator() const { return m_Slot < 0; }
 	BuyMenuGUI* GetMenu() { return m_Menu.get(); }
+	bool IsPolicyReady() const { return m_PolicyReady; }
+	const Scene::Area& GetLandingArea() const { return m_LandingArea; }
 	void Reset() {
 		m_Menu.reset(); m_Mode=Mode::Closed; m_Revision=0; m_Slot=-1; m_Team=-1; m_LastAccepted=false; m_Status.clear(); m_WaitForFireRelease=false;
+		m_PolicyReady=false; m_AppliedPolicySequence=0; m_LandingArea.Reset();
 		g_UInputMan.TrapMousePos(true, Players::PlayerOne);
 	}
-	void Open() { if (m_Menu && m_Mode==Mode::Closed) { m_Menu->SetEnabled(true); m_Mode=Mode::Catalog; m_Status.clear(); } }
+	void Open() { if (m_Menu && m_PolicyReady && m_Mode==Mode::Closed) { m_Menu->SetEnabled(true); m_Mode=Mode::Catalog; m_Status.clear(); } }
 	void ConfirmOrder() {
 		if (!m_Menu || m_Mode!=Mode::Catalog) return;
 		m_Menu->ConfirmOrder();
@@ -66,6 +69,21 @@ public:
 			g_ConsoleMan.PrintString(m_Status);
 		}
 		if (!m_Menu) return;
+		const auto& policy=client.GetPurchasePolicy();
+		if (policy.SceneRevision==m_Revision && policy.PlayerSlot==m_Slot && policy.Team==m_Team && client.GetPurchasePolicySequence()!=m_AppliedPolicySequence) {
+			const bool firstPolicy=!m_PolicyReady;
+			m_Menu->ClearAllowedItems(); m_Menu->ClearAlwaysAllowedItems(); m_Menu->ClearProhibitedItems(); m_Menu->ClearOwnedItems();
+			for (const auto& key:policy.Allowed) m_Menu->AddAllowedItem(key);
+			for (const auto& key:policy.AlwaysAllowed) m_Menu->AddAlwaysAllowedItem(key);
+			for (const auto& key:policy.Prohibited) m_Menu->AddProhibitedItem(key);
+			for (const auto& [key,count]:policy.Owned) m_Menu->SetOwnedItemsAmount(key,count);
+			m_Menu->SetOnlyShowOwnedItems(policy.OnlyOwned); m_Menu->SetEnforceMaxMassConstraint(policy.EnforceMass); m_Menu->SetEnforceMaxPassengersConstraint(policy.EnforcePassengers);
+			m_LandingArea.Reset();
+			for (const auto& box:policy.LandingBoxes) m_LandingArea.AddBox(Box(Vector(box.X,box.Y),box.Width,box.Height));
+			m_Menu->ForceRefresh(); m_AppliedPolicySequence=client.GetPurchasePolicySequence(); m_PolicyReady=true;
+			if (firstPolicy && m_Mode==Mode::Closed) m_Status.clear();
+		}
+		if (!m_PolicyReady) { m_Status="Waiting for server catalog..."; return; }
 		if (m_WaitForFireRelease && !g_UInputMan.ElementHeld(Players::PlayerOne, InputElements::INPUT_FIRE) && !g_UInputMan.MouseButtonHeld(MouseButtons::MOUSE_LEFT, Players::PlayerOne))
 			m_WaitForFireRelease=false;
 		if (allowPhysicalInput) m_Controller.Update();
@@ -81,6 +99,7 @@ public:
 		if (m_Mode==Mode::Landing) {
 			if (allowPhysicalInput) m_Controller.RelativeCursorMovement(m_Landing);
 			g_SceneMan.ForceBounds(m_Landing);
+			if (!m_LandingArea.HasNoArea()) m_LandingArea.MovePointInsideX(m_Landing.m_X,0);
 			g_CameraMan.SetScrollTarget(m_Landing, 0.1F, Players::PlayerOne);
 			m_Status="Choose landing zone: click to order, F6 to cancel";
 			if (allowPhysicalInput && m_Controller.IsState(PRESS_PRIMARY)) ConfirmLanding(client, m_Landing);
@@ -124,5 +143,8 @@ private:
 	bool m_LastAccepted=false;
 	bool m_WaitForFireRelease=false;
 	float m_LastCharge=0;
+	bool m_PolicyReady=false;
+	std::uint32_t m_AppliedPolicySequence=0;
+	Scene::Area m_LandingArea;
 };
 }

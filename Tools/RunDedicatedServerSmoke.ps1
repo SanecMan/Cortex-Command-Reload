@@ -7,10 +7,12 @@ param(
     [switch]$CheckTeamFunds,
     [switch]$CheckPurchases,
     [switch]$CheckBuyMenu,
+    [switch]$CheckPurchasePolicy,
     [ValidateRange(60, 600)]
     [int]$TimeoutSeconds = 360
 )
 $ErrorActionPreference = 'Stop'
+if ($CheckPurchasePolicy) { $CheckBuyMenu=$true }
 if ($CheckPurchases -and $CheckTeamFunds) { throw 'Run purchase and administrative funds fixtures separately.' }
 if ($CheckBuyMenu -and ($CheckPurchases -or $CheckTeamFunds)) { throw 'Run the buy-menu fixture separately.' }
 if (!$ServerExecutablePath) { $ServerExecutablePath = Join-Path $PSScriptRoot '..\CortexCommandServer.exe' }
@@ -77,6 +79,7 @@ try {
 		$purchaseArguments = @()
 		if ($CheckPurchases) { $purchaseArguments = @('-debug-run-world-state-purchase') }
 		if ($CheckBuyMenu) { $purchaseArguments = @('-debug-run-world-state-buy-menu') }
+		if ($CheckPurchasePolicy) { $purchaseArguments = @('-debug-run-world-state-purchase-policy') }
         $client = Start-Process -FilePath $clientBinary -WorkingDirectory (Split-Path -Parent $clientBinary) -WindowStyle Hidden -PassThru -ArgumentList (@(
             '-debug-run','600','-debug-run-output',"$OutputPrefix-Client$index",'-world-state-client','127.0.0.1',"$port"
         )+$purchaseArguments)
@@ -84,9 +87,18 @@ try {
         $clients.Add($client)
     }
     $fundsChanged = $false
+    $policyChanged = $false
     while (@($clients | Where-Object { !$_.HasExited }).Count -gt 0) {
         Check-Time
         if ($server.HasExited) { throw 'Server stopped while clients were running.' }
+        if ($CheckPurchasePolicy -and !$policyChanged) {
+            $catalogReady=$false
+            foreach ($index in 1..2) {
+                $reportPath=Join-Path (Split-Path -Parent $clientBinary) "ScreenShots\$OutputPrefix-Client$index\DebugRun.log"
+                $catalogReady=$catalogReady -or (Read-Report $reportPath) -match 'debug-run-buy-catalog\.png result=0'
+            }
+            if ($catalogReady) { $server.StandardInput.WriteLine('debug-purchase-policy'); $server.StandardInput.Flush(); $policyChanged=$true }
+        }
         if ($CheckTeamFunds -and !$fundsChanged) {
             $clientsReady = $true
             foreach ($index in 1..2) {
@@ -129,6 +141,7 @@ try {
     [IO.File]::WriteAllText((Join-Path $logDirectory 'StdOut.log'), $outputTask.GetAwaiter().GetResult(), [Text.UTF8Encoding]::new($false))
     [IO.File]::WriteAllText((Join-Path $logDirectory 'StdErr.log'), $errorTask.GetAwaiter().GetResult(), [Text.UTF8Encoding]::new($false))
     $networkLog = Read-Report (Join-Path $logDirectory 'WorldStateServer.log')
+    if ($CheckPurchasePolicy -and (!$policyChanged -or $networkLog -notmatch 'purchase id=1 accepted=1 charged=324\.000000')) { throw 'Server stock-price policy checks failed.' }
     if ($CheckBuyMenu -and ([regex]::Matches($networkLog, 'purchase id=\d+ accepted=1').Count -ne 1)) { throw 'Expected exactly one accepted menu purchase.' }
     if ($CheckPurchases -and ($networkLog -notmatch 'purchase id=3 accepted=1 charged=500\.000000' -or
         $networkLog -notmatch 'purchase replay id=3' -or ([regex]::Matches($networkLog, 'purchase id=3 accepted=1').Count -ne 1))) { throw 'Purchase/replay server checks failed.' }
@@ -139,6 +152,7 @@ try {
         $clientNetwork = Read-Report (Join-Path $clientDirectory 'WorldStateClient.log')
         if ($CheckPurchases -and $clientReport -notmatch '(?m)^world_state_purchase=passed') { throw 'Client purchase checks failed.' }
         if ($CheckBuyMenu -and $clientReport -notmatch '(?m)^world_state_buy_menu=passed') { throw 'Client buy menu checks failed.' }
+        if ($CheckPurchasePolicy -and $clientReport -notmatch '(?m)^world_state_purchase_policy=passed') { throw 'Client live policy checks failed.' }
         if ($clientReport -notmatch '(?m)^result=passed' -or $clientNetwork -notmatch '(?m)^client_local_simulation_ticks=0' -or
             $clientNetwork -notmatch '(?m)^snapshot=\d+.*missing_presets=0' -or $clientNetwork -match 'missing_presets=[1-9]') { throw 'Client replica checks failed.' }
         if ($CheckTeamFunds -and (!$fundsChanged -or $clientReport -notmatch '(?m)^world_state_team_funds_presentation=passed' -or

@@ -8,6 +8,7 @@
 #include "ACraft.h"
 #include "PresetMan.h"
 #include "ThreadMan.h"
+#include "BuyMenuGUI.h"
 #include "NetworkMessages.h"
 #include "SceneMan.h"
 #include "SLTerrain.h"
@@ -52,6 +53,7 @@ bool WorldStateServerSession::Start(const std::string& bindAddress, unsigned sho
 	m_PendingTerrainPatches.clear();
 	m_LastInputSequenceByClient.clear();
 	m_LastPurchaseByClient.clear();
+	m_LastPolicyByClient.clear(); m_LastPolicyTick=0; m_PolicySequence=0;
 	m_LastPurchaseTimeByClient.clear();
 	m_PlayerSlotByClient.clear();
 	m_ClientAddresses.clear();
@@ -258,6 +260,7 @@ void WorldStateServerSession::PollNetwork(std::uint32_t simulationTick) {
 			const std::string clientAddress(packet.Sender.ToString(true));
 			m_LastInputSequenceByClient.erase(clientAddress);
 			m_LastPurchaseByClient.erase(clientAddress);
+			m_LastPolicyByClient.erase(clientAddress);
 			m_LastPurchaseTimeByClient.erase(clientAddress);
 			m_ResetVotesByClient.erase(clientAddress);
 			m_RestartVotesByClient.erase(clientAddress);
@@ -287,6 +290,7 @@ void WorldStateServerSession::PollNetwork(std::uint32_t simulationTick) {
 			m_ConnectedClients = m_ConnectedClients > 0 ? static_cast<unsigned short>(m_ConnectedClients - 1) : 0;
 			const std::string clientAddress(packet.Sender.ToString(true));
 			m_ClientAddresses.erase(clientAddress);
+			m_LastPolicyByClient.erase(clientAddress);
 			m_LastPurchaseByClient.erase(clientAddress);
 			m_LastPurchaseTimeByClient.erase(clientAddress);
 			m_ReportedPlayerSlots.erase(clientAddress);
@@ -365,6 +369,39 @@ void WorldStateServerSession::ProcessPurchase(const WorldStateTransport::Receive
 	    std::to_string(result.ChargedCost) + " reason=" + result.Reason + " client=" + client);
 }
 
+void WorldStateServerSession::PublishPurchasePolicies(std::uint32_t tick) {
+	if (m_LastPolicyTick && tick-m_LastPolicyTick<15) return;
+	m_LastPolicyTick=tick;
+	auto* activity=dynamic_cast<GameActivity*>(g_ActivityMan.GetActivity());
+	if (!activity) return;
+	const auto revision=m_SnapshotBuilder.RefreshSceneRevision();
+	for (const auto& [client,address]:m_ClientAddresses) {
+		const int slot=m_ReportedPlayerSlots.at(client);
+		if (slot<0) { m_LastPolicyByClient.erase(client); continue; }
+		const BuyMenuGUI* menu=activity->GetBuyGUI(slot);
+		const int team=activity->GetTeamOfPlayer(slot);
+		if (!menu || team<0 || team>=Activity::MaxTeamCount) continue;
+		WorldStateProtocol::PurchasePolicy policy;
+		policy.SceneRevision=revision; policy.PlayerSlot=static_cast<std::int8_t>(slot);
+		policy.Team=static_cast<std::int8_t>(team);
+		policy.OnlyOwned=menu->GetOnlyShowOwnedItems(); policy.EnforceMass=menu->EnforceMaxMassConstraint(); policy.EnforcePassengers=menu->EnforceMaxPassengersConstraint();
+		for (const auto& entry:menu->GetAllowedItems()) policy.Allowed.push_back(entry.first);
+		for (const auto& entry:menu->GetAlwaysAllowedItems()) policy.AlwaysAllowed.push_back(entry.first);
+		for (const auto& entry:menu->GetProhibitedItems()) policy.Prohibited.push_back(entry.first);
+		for (const auto& entry:menu->GetOwnedItems()) policy.Owned.emplace(entry.first,entry.second);
+		for (const Box* box:activity->GetLZArea(team).GetBoxes()) {
+			const Vector corner=box->GetCorner();
+			policy.LandingBoxes.push_back({corner.m_X,corner.m_Y,box->GetWidth(),box->GetHeight()});
+		}
+		if (const auto previous=m_LastPolicyByClient.find(client); previous!=m_LastPolicyByClient.end() && previous->second==policy) continue;
+		if (++m_PolicySequence==0) ++m_PolicySequence;
+		if (m_Transport.SendPurchasePolicy(address,policy,m_PolicySequence)) {
+			m_LastPolicyByClient[client]=policy;
+			Log("INFO: purchase policy sequence="+std::to_string(m_PolicySequence)+" slot="+std::to_string(slot)+" stock_entries="+std::to_string(policy.Owned.size()));
+		} else Log("ERROR: purchase policy encoding/send failed client="+client);
+	}
+}
+
 void WorldStateServerSession::Update(std::uint32_t simulationTick) {
 	if (!m_Transport.IsStarted()) {
 		return;
@@ -439,6 +476,7 @@ void WorldStateServerSession::Update(std::uint32_t simulationTick) {
 		}
 	}
 	ProcessActivityVotes();
+	PublishPurchasePolicies(simulationTick);
 	if (m_DebugTerrainMutationSmokeEnabled && !m_DebugTerrainMutationProbeLocated && !m_DebugTerrainMutationSmokeAttempted && m_ConnectedClients > 0) {
 		SLTerrain* terrain = g_SceneMan.GetScene() ? g_SceneMan.GetScene()->GetTerrain() : nullptr;
 		if (terrain) {

@@ -2257,7 +2257,7 @@ void BuyMenuGUI::AddObjectsToItemList(std::vector<std::list<Entity*>>& moduleLis
 	}
 
 	// Remove items which are not in stock
-	if (m_OnlyShowOwnedItems && m_OwnedItems.size() > 0) {
+	if (m_OnlyShowOwnedItems) {
 		for (int moduleID = 0; moduleID < moduleList.size(); ++moduleID) {
 			std::list<Entity*> toRemove;
 

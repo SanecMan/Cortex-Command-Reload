@@ -246,7 +246,7 @@ namespace RTE {
 		bool IsProhibitedItem(std::string presetName) { return m_ProhibitedItems.find(presetName) != m_ProhibitedItems.end(); }
 
 		/// Forces a refresh update of the list of buy menu items
-		void ForceRefresh() { CategoryChange(); }
+		void ForceRefresh() { CategoryChange(); if (m_pController) UpdateTotalCostLabel(m_pController->GetTeam()); }
 
 		/// Clear the cart out of items selected for purchase
 		void ClearCartList();
@@ -296,6 +296,11 @@ namespace RTE {
 		/// Checks catalog eligibility and allow/prohibit policy without consuming stock.
 		/// Stock counts for duplicate items are validated by the delivery transaction.
 		bool IsPurchaseAllowed(const SceneObject& item) const;
+		const std::map<std::string,bool>& GetAllowedItems() const { return m_AllowedItems; }
+		const std::map<std::string,bool>& GetAlwaysAllowedItems() const { return m_AlwaysAllowedItems; }
+		const std::map<std::string,bool>& GetProhibitedItems() const { return m_ProhibitedItems; }
+		const std::map<std::string,int>& GetOwnedItems() const { return m_OwnedItems; }
+		void ClearOwnedItems() { m_OwnedItems.clear(); }
 
 #pragma region Faction Theme Handling
 		/// Changes the banner image to the one specified. If none is specified, resets it to the default banner image.

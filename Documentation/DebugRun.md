@@ -247,6 +247,17 @@ Windows Final configuration evidence: a BOM UTF-8 `сервер.ini` containing 
 
 The separate Windows console binary and the client's --server mode use the same headless content/step functions as the diagnostics. The persistent mode does not run debug fixtures or require clients to exit successfully; it runs until console/signal shutdown. See DedicatedServer.md for build, CLI/configuration, runtime limits and the real two-client console-server verification. After the extraction, RunHeadlessWorldStateSmoke also passed again in 70.66 seconds.
 
+## Remote catalog policy check
+
+Run `Tools/RunDedicatedServerSmoke.ps1 -CheckPurchasePolicy` to check live
+server-owned stock, item restrictions, mass/passenger flags and landing areas.
+The wrapper changes these rules through the server console after the client's
+catalog opens, checks a discounted accepted delivery and the spectator role,
+then verifies continued simulation after disconnection. Use a disposable test
+session: the `debug-purchase-policy` console command replaces the current
+player's purchase rules and stock. Output is confined to the wrapper's selected
+`ScreenShots/<OutputPrefix>-*` directories and is replaced on another run.
+
 ## Team-funds replication checks
 
 Protocol v10 adds four authoritative team balances. Preflight reports

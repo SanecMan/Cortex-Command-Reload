@@ -239,6 +239,7 @@ namespace {
 		bool DeliveryValidationTest = false;
 		bool RequestPurchaseTest = false;
 		bool RequestBuyMenuTest = false;
+		bool RequirePurchasePolicyTest = false, PurchasePolicyTestObserved = false;
 		int BuyMenuTestStage = 0;
 		bool BuyMenuTestPassed = false, BuyMenuCatalogCaptured = false, BuyMenuLandingCaptured = false;
 		float BuyMenuInitialFunds = 0;
@@ -365,6 +366,7 @@ namespace {
 			if (argument == "-debug-run-preflight-only") state.PreflightOnly = true;
 			if (argument == "-debug-run-world-state-purchase") state.RequestPurchaseTest = true;
 			if (argument == "-debug-run-world-state-buy-menu") state.RequestBuyMenuTest = true;
+			if (argument == "-debug-run-world-state-purchase-policy") { state.RequestBuyMenuTest=true; state.RequirePurchasePolicyTest=true; }
 			if (argument == "-debug-run-cpu-graphics-preflight") { state.CPUGraphicsPreflight = true; state.PreflightOnly = true; }
 			if (argument == "-debug-run-headless-content") { state.HeadlessContentPreflight = true; state.CPUGraphicsPreflight = true; state.PreflightOnly = true; }
 			if (argument == "-debug-run-headless-simulation") { state.HeadlessSimulationPreflight = true; state.HeadlessContentPreflight = true; state.CPUGraphicsPreflight = true; state.PreflightOnly = true; }
@@ -462,6 +464,9 @@ namespace {
 		}
 		const std::string utf8Probe = "Aя🙂";
 		const bool purchaseCodecPassed=TestPurchaseCodec();
+		const bool policyCodecPassed=WorldStateProtocol::TestPurchasePolicyCodec();
+		state.Log << "world_state_purchase_policy_codec=" << (policyCodecPassed ? "passed" : "failed") << '\n' << std::flush;
+		if (!policyCodecPassed) return false;
 		state.Log << "world_state_purchase_codec=" << (purchaseCodecPassed ? "passed" : "failed") << '\n' << std::flush;
 		if (!purchaseCodecPassed) return false;
 		std::string utf8EncodedProbe;
@@ -1590,6 +1595,11 @@ namespace {
 		          networkInputApplicationPassed && worldSnapshotPassed && snapshotCompressionPassed && liveSnapshotTransportPassed;
 		const double elapsedSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - state.StartTime).count();
 		if (state.RequestBuyMenuTest) {
+			if (state.RequirePurchasePolicyTest) {
+				const bool passed=state.PurchasePolicyTestObserved || (worldStateBuyMenu && worldStateBuyMenu->IsSpectator());
+				state.Log << "world_state_purchase_policy=" << (passed ? "passed" : "failed") << '\n' << std::flush;
+				success=success && passed;
+			}
 			state.Log << "world_state_buy_menu=" << (state.BuyMenuTestPassed ? "passed" : "failed") << " stage=" << state.BuyMenuTestStage
 			    << " catalog_captured=" << state.BuyMenuCatalogCaptured << " landing_captured=" << state.BuyMenuLandingCaptured << '\n' << std::flush;
 			success=success && state.BuyMenuTestPassed;
@@ -1801,6 +1811,20 @@ int RunPersistentHeadlessServer(const ServerConfiguration& config) {
 		for (const std::string& command : console.Poll()) {
 			if (command == "quit" || command == "exit" || command == "stop") ServerConsole::StopRequested.store(true);
 			else if (command == "status") log("INFO status tick=" + std::to_string(tick) + " clients=" + std::to_string(session.GetConnectedClientCount()) + " actors=" + std::to_string(g_MovableMan.GetActorCount()));
+			else if (command == "debug-purchase-policy") {
+				auto* activity=dynamic_cast<GameActivity*>(g_ActivityMan.GetActivity());
+				BuyMenuGUI* menu=activity ? activity->GetBuyGUI(0) : nullptr;
+				if (menu) {
+					menu->ClearAllowedItems(); menu->ClearAlwaysAllowedItems(); menu->ClearProhibitedItems(); menu->ClearOwnedItems();
+					for (const char* name : {"Base.rte/Rocket MK2","Coalition.rte/Soldier Light","Coalition.rte/Assault Rifle","Coalition.rte/Auto Pistol"}) menu->AddAllowedItem(name);
+					menu->AddAlwaysAllowedItem("Base.rte/Brain Case"); menu->AddProhibitedItem("Base.rte/SMG");
+					menu->SetOwnedItemsAmount("Base.rte/Rocket MK2",1); menu->SetOwnedItemsAmount("Coalition.rte/Soldier Light",2);
+					menu->SetOnlyShowOwnedItems(false); menu->SetEnforceMaxMassConstraint(false); menu->SetEnforceMaxPassengersConstraint(false);
+					Scene::Area area; area.AddBox(Box(Vector(100,0),300,static_cast<float>(g_SceneMan.GetSceneHeight())));
+					activity->SetLZArea(activity->GetTeamOfPlayer(0),area);
+					log("INFO debug_purchase_policy=applied");
+				} else log("ERROR debug_purchase_policy=unavailable");
+			}
 			else if (command == "help") log("INFO commands: status, help, quit");
 			else if (command.starts_with("funds ")) {
 				std::istringstream input(command.substr(6));
@@ -2471,7 +2495,7 @@ void RunGameLoop() {
 				worldStateBuyMenu->Update(*worldStateClient, !uiTest.RequestBuyMenuTest);
 				if (uiTest.RequestBuyMenuTest && uiTest.SimulationUpdates>=60) {
 					if (worldStateBuyMenu->IsSpectator()) { uiTest.BuyMenuTestPassed=true; uiTest.BuyMenuTestStage=4; }
-					else if (uiTest.BuyMenuTestStage==0 && worldStateBuyMenu->GetMenu()) {
+					else if (uiTest.BuyMenuTestStage==0 && worldStateBuyMenu->GetMenu() && worldStateBuyMenu->IsPolicyReady()) {
 						const auto* loadout=dynamic_cast<const Loadout*>(g_PresetMan.GetEntityPreset("Loadout", "Default", "Coalition.rte"));
 						if (loadout) {
 							BuyMenuGUI* menu=worldStateBuyMenu->GetMenu();
@@ -2479,12 +2503,12 @@ void RunGameLoop() {
 							menu->SelectLoadout(static_cast<int>(menu->GetLoadoutPresets().size())-1);
 							worldStateBuyMenu->Open(); uiTest.BuyMenuTestStage=1;
 						}
-					} else if (uiTest.BuyMenuTestStage==1 && uiTest.BuyMenuCatalogCaptured && uiTest.SimulationUpdates>=180) {
+					} else if (uiTest.BuyMenuTestStage==1 && uiTest.BuyMenuCatalogCaptured && uiTest.SimulationUpdates>=180 && (!uiTest.RequirePurchasePolicyTest || uiTest.PurchasePolicyTestObserved)) {
 						worldStateBuyMenu->ConfirmOrder(); uiTest.BuyMenuTestStage=2;
 					} else if (uiTest.BuyMenuTestStage==2 && uiTest.BuyMenuLandingCaptured && uiTest.SimulationUpdates>=240) {
 						const auto& snapshot=worldStateClient->GetLatestSnapshot();
 						const int team=snapshot.Players[worldStateClient->GetAssignedPlayerSlot()].Team;
-						Scene::Area* area=g_SceneMan.GetScene()->GetArea("LZ Team " + std::to_string(team+1));
+						const Scene::Area* area=&worldStateBuyMenu->GetLandingArea();
 						if (area && area->GetFirstBox()) {
 							const Vector center=area->GetFirstBox()->GetCenter();
 							uiTest.BuyMenuInitialFunds=snapshot.TeamFunds[team];
@@ -2500,6 +2524,13 @@ void RunGameLoop() {
 							return object.ClassName==craft.ClassName && object.ModuleName==craft.ModuleName && object.PresetName==craft.PresetName;
 						});
 						if (funds && delivered) { uiTest.BuyMenuTestPassed=true; uiTest.BuyMenuTestStage=4; }
+					}
+					if (uiTest.RequirePurchasePolicyTest && worldStateBuyMenu->GetMenu()) {
+						BuyMenuGUI* menu=worldStateBuyMenu->GetMenu();
+						if (menu->GetOwnedItemsAmount("Coalition.rte/Soldier Light")==2 && menu->GetOwnedItemsAmount("Base.rte/Rocket MK2")==1 &&
+						    menu->IsAllowedItem("Base.rte/Rocket MK2") && menu->IsProhibitedItem("Base.rte/SMG") && menu->IsAlwaysAllowedItem("Base.rte/Brain Case") &&
+						    !menu->EnforceMaxMassConstraint() && !menu->EnforceMaxPassengersConstraint() && worldStateBuyMenu->GetLandingArea().IsInsideX(250) &&
+						    !worldStateBuyMenu->GetLandingArea().IsInsideX(900)) uiTest.PurchasePolicyTestObserved=true;
 					}
 				}
 			}

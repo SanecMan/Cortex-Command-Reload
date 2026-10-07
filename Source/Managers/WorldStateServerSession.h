@@ -45,6 +45,9 @@ namespace RTE {
 		void QueueTerrainChanges(std::uint32_t sceneRevision);
 		void SendPendingTerrainPatches();
 		void ProcessPurchase(const WorldStateTransport::ReceivedPacket& packet, const WorldStateProtocol::PurchaseRequest& request);
+		void PublishPurchasePolicies(std::uint32_t tick);
+		std::uint32_t m_LastPolicyTick=0, m_PolicySequence=0;
+		std::unordered_map<std::string, WorldStateProtocol::PurchasePolicy> m_LastPolicyByClient;
 		std::unordered_map<std::string, WorldStateProtocol::PurchaseResult> m_LastPurchaseByClient;
 		std::unordered_map<std::string, std::chrono::steady_clock::time_point> m_LastPurchaseTimeByClient;
 

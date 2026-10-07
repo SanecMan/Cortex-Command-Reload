@@ -1,5 +1,29 @@
 # Dedicated server
 
+## Live catalog policy (v12)
+
+The client now receives server-owned stock, allow/always-allow/prohibit lists,
+only-owned and transport-limit flags, and landing-area boxes. Changes made by
+Activity/Lua to the existing BuyMenu or LZ state propagate during the session.
+The menu waits for the first matching policy, refreshes its total after a stock
+change and clamps landing selection against the server area. Server validation
+remains authoritative at purchase time. Empty stock in only-owned mode hides
+unavailable catalog entries while retaining always-allowed exceptions.
+
+Both executables must use v12. The rule frame does not yet transmit custom base
+preset prices or metagame pricing modifiers, nor complete craft inventories.
+
+Run `Tools/RunDedicatedServerSmoke.ps1 -CheckPurchasePolicy` for the live rule
+fixture. After the client's catalog screenshot, the wrapper sends the explicit
+local console command `debug-purchase-policy`. This modifies player 0's rules
+in a disposable Tutorial session: restricts allowed items, adds an always-allowed
+brain and a prohibited SMG, gives one Rocket MK2 and two soldiers as stock,
+disables transport-limit enforcement and moves the LZ to X=100..400. The client
+must observe the changes before confirmation and buy the official loadout for
+324 instead of 864. The command is diagnostic and permanently changes that
+running session; use it only in a disposable test server. Normal Lua API callers
+need no new method or wire handling to publish their rule changes.
+
 ## Client equipment orders
 
 On a world-state client, press F6 to open the existing equipment catalog. Select
@@ -16,12 +40,11 @@ consume stock or subtract money on the client. The server's validated RPC owns
 those actions. A FrameMan client-GUI callback draws it into the normal player
 framebuffer, and teardown clears that callback before releasing UI resources.
 
-Catalog prices and available items currently come from local installed content.
-The server enforces its stock, tech/economy and allow/prohibit policy; custom
-scripted policy changes are not yet sent to the catalog, so a visible item can be
-rejected. Landing areas changed dynamically by server Lua are likewise not yet
-replicated to the chooser. These remaining metadata gaps must be addressed before
-claiming complete remote BuyMenu parity.
+Base preset prices and assets still come from local installed content. Server
+stock, allow/prohibit rules, transport constraints and dynamic landing areas now
+update the catalog through v12 policies. Metagame pricing modifiers and custom
+base-price differences are still outside that policy frame; complete remote
+BuyMenu parity is not yet established.
 
 `Tools/RunDedicatedServerSmoke.ps1 -CheckBuyMenu` enables the automated menu
 fixture. It selects an official Coalition loadout through the GUI's loadout/cart
@@ -286,6 +309,31 @@ updates after disconnection and shut down cleanly with code 0. That network
 regression checks session behavior, not purchase messages.
 
 ## Network purchases (v11)
+
+### v12 live policy verification
+
+`Tools/RunDedicatedServerSmoke.ps1 -OutputPrefix PurchasePolicyDedicated
+-CheckPurchasePolicy` passed with two separate Windows Final clients. The fixture
+changed the server's stock, allow/deny lists, mass/passenger flags and landing
+area after the remote catalog opened. The active client checked the replicated
+values and submitted its order through the equipment menu API. The server
+accepted exactly one order, charging 324 rather than the initial 864 because
+the rocket and two soldiers were in stock. The spectator remained unable to
+purchase. Both clients reported `world_state_purchase_policy=passed`; the
+server continued 64 updates after disconnection and exited with code 0.
+
+Elapsed time was 42.74 seconds, not a performance benchmark. The landing-screen
+capture was inspected. This fixture exercises API confirmation rather than
+physical mouse input. `OnlyOwned=true` has codec coverage but was not enabled
+in this live scenario. Custom pricing/meta multipliers and complete inventory
+replication remain outside this policy message.
+
+The same v12 binaries also passed the Control regression (movement, firing and
+scene transition) in 62.48 seconds and the separate purchase RPC regression in
+63.14 seconds, including duplicate-ID idempotency and 65 updates after both
+clients disconnected. These checks ran concurrently; their elapsed times do
+not measure engine performance. A normal 60-update actor/particle diagnostic
+also exited with code 0 (`ScreenShots/CrashScreenshotCheck/DebugRun.log`).
 
 The world-state sessions now carry client purchase requests and server results.
 The server owns preset lookup, player assignment, scene revision and charging.

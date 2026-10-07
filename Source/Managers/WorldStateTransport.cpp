@@ -128,6 +128,11 @@ bool WorldStateTransport::SendClientAssignment(const RakNet::AddressOrGUID& targ
 	return WorldStateProtocol::EncodeClientAssignment(assignment, sequence, packet) && Send(target, packet, false, RELIABLE_ORDERED);
 }
 
+bool WorldStateTransport::SendPurchasePolicy(const RakNet::AddressOrGUID& target, const WorldStateProtocol::PurchasePolicy& policy, std::uint32_t sequence) {
+	std::vector<std::uint8_t> packet;
+	return WorldStateProtocol::EncodePurchasePolicy(policy,sequence,packet) && Send(target,packet,false);
+}
+
 bool WorldStateTransport::SendPurchaseRequest(const WorldStateProtocol::PurchaseRequest& request) {
 	if (!m_Peer || m_Peer->NumberOfConnections() == 0) return false;
 	std::vector<std::uint8_t> packet;

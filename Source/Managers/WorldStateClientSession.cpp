@@ -21,6 +21,7 @@ void WorldStateClientSession::Disconnect() {
 	m_LastTerrainSequence = 0;
 	m_TerrainPatches.clear();
 	m_PurchaseResults.clear();
+	m_PurchasePolicy={}; m_PolicySequence=0;
 	m_ReceivedSnapshotCount = 0;
 	m_InputCommandSequence = 0;
 	m_AssignedPlayerSlot = -1;
@@ -78,6 +79,12 @@ void WorldStateClientSession::Update() {
 		}
 		WorldStateProtocol::TerrainPatch terrainPatch;
 		WorldStateProtocol::PurchaseResult purchase;
+		WorldStateProtocol::PurchasePolicy policy;
+		std::uint32_t policySequence=0;
+		if (WorldStateProtocol::DecodePurchasePolicy(packet.Payload,policy,&policySequence)) {
+			if (!m_PolicySequence || static_cast<std::int32_t>(policySequence-m_PolicySequence)>0) { m_PolicySequence=policySequence; m_PurchasePolicy=std::move(policy); }
+			continue;
+		}
 		if (WorldStateProtocol::DecodePurchaseResult(packet.Payload, purchase)) {
 			if (m_PurchaseResults.size() >= 64) m_PurchaseResults.pop_front();
 			m_PurchaseResults.push_back(std::move(purchase));
