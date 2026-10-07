@@ -112,3 +112,50 @@ exceeding eight pixels on both. The client generated InputCommands only after
 recording the actor's initial authoritative state. This is a narrow gameplay
 test for the Pistol fixture, not a claim of complete equipment/pose/visibility
 replication. See `Documentation/DebugRun.md` for commands and limitations.
+
+### Replica rendering and complete world membership
+
+Snapshot clients skip `MovableMan::Update`, which also normally fills the MO
+color layer. The client now clears and draws that layer on drawn updates without
+running physics, AI, Activity updates or Lua simulation. Attachables and wounds
+are repositioned from existing offsets after snapshot application and each
+interpolation step; this maintains coherent preset geometry, but does not yet
+replicate each limb's authoritative animated pose.
+
+The live client applies snapshots with `authoritativeWorld=true`. Locally spawned
+objects not matched to a snapshot ID are removed, and matched scene objects
+become replica-owned so later server removal deletes them as well. Controlled
+actor and brain references are cleared before destruction. Standalone internal
+smoke replicas retain their previous non-exclusive behavior by default. This
+does not change normal offline gameplay or any Lua API.
+
+The Debug Minimal Control pair passed in 163.82 seconds under
+`ScreenShots/ReplicaRenderPair-Host/` and `ReplicaRenderPair-Client/`, both with
+exit code 0. The client observed movement of 8.94177 pixels and 11 rounds becoming
+9. Its new membership check passed across received snapshots. The initial
+snapshot removed 20 unmatched locally spawned objects and left exactly 68
+server objects; later logged counts included 275/275, 24/24 and 32/32 live versus
+expected objects, with no missing presets. The final client screenshot was
+inspected: actor bodies/limbs now render on the terrain alongside HUD markers,
+where the earlier Control screenshot showed markers with missing actor sprites.
+Full pose, authoritative fog/visibility, Activity state and all HUD values still
+need their own synchronization and tests.
+
+The first Final Control run exposed a separate race in the diagnostic fixture:
+native `AHuman::Clone` ran immediately after `MovableMan::Update` had started
+async Lua GC. A process dump showed the host main thread inside the assertion
+dialog from `LuaMan::GetAndLockFreeScriptState`, not a network deadlock. The
+fixture now waits for priority-pool GC/MOID tasks before native cloning. This
+wait is diagnostic-only and occurs when creating the control fixture, rather
+than adding a synchronization barrier to ordinary gameplay frames. The failed
+run's stack report is `ScreenShots/ReplicaRenderFinalPair-Host/HangStacks.txt`.
+
+After that fixture fix, Windows x64 Final rebuilt successfully and the Control
+pair passed in 70.51 seconds using the same output prefix. Both peers exited with
+code 0 and `result=passed`. Host movement was 8.30072 pixels, client movement
+8.85358 pixels, and both observed 11 rounds becoming 10. Player-view lifetime and
+client membership checks passed. Logged client counts included 7/7, 50/50 and
+18/18 live versus expected objects with no missing presets. The Final client
+screenshot was inspected: bodies and preset limbs render on terrain, and the
+selected actor shows its 10-round ammo counter and health. These checks do not
+extend to the remaining pose/fog/Activity-state gaps described above.

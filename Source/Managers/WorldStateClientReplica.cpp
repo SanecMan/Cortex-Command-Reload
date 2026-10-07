@@ -13,6 +13,7 @@
 #include "MovableMan.h"
 #include "MovableObject.h"
 #include "MOSprite.h"
+#include "MOSRotating.h"
 #include "PresetMan.h"
 #include "SceneObject.h"
 #include "Scene.h"
@@ -37,6 +38,7 @@ namespace {
 		if (RTE::Activity* activity = RTE::g_ActivityMan.GetActivity()) {
 			for (int player = RTE::Players::PlayerOne; player < RTE::Players::MaxPlayerCount; ++player) {
 				if (activity->GetControlledActor(player) == object) activity->ClearReplicaControlledActor(player);
+				if (activity->GetPlayerBrain(player) == object) activity->SetPlayerBrain(nullptr, player);
 			}
 		}
 	}
@@ -220,7 +222,7 @@ bool WorldStateClientReplica::BindPlayerView(std::uint64_t networkId, int team, 
 	return bound && (networkId == 0 || actor != nullptr);
 }
 
-WorldStateClientReplica::ApplyResult WorldStateClientReplica::Apply(const WorldStateProtocol::Snapshot& snapshot) {
+WorldStateClientReplica::ApplyResult WorldStateClientReplica::Apply(const WorldStateProtocol::Snapshot& snapshot, bool authoritativeWorld) {
 	ApplyResult result;
 	std::uint32_t interpolationDurationTicks = 3;
 	if (m_LastSnapshotTick != 0) {
@@ -248,6 +250,7 @@ WorldStateClientReplica::ApplyResult WorldStateClientReplica::Apply(const WorldS
 		if (!incomingIds.contains(replica->first)) {
 			ClearReplicaControlLinks(replica->second.Object);
 			if (replica->second.ClientOwned && replica->second.Object && g_MovableMan.RemoveMO(replica->second.Object)) {
+				activeObjects.erase(replica->second.Object);
 				replica->second.Object->DestroyScriptState();
 				delete replica->second.Object;
 				++result.Removed;
@@ -353,9 +356,10 @@ WorldStateClientReplica::ApplyResult WorldStateClientReplica::Apply(const WorldS
 			++result.Updated;
 		}
 		mappedObjects.insert(object);
+		if (auto* rotating = dynamic_cast<MOSRotating*>(object)) rotating->CorrectAttachableAndWoundPositionsAndRotations();
 		Replica& replica = m_Objects[state.NetworkId];
 		replica.Object = object;
-		replica.ClientOwned = clientOwned;
+		replica.ClientOwned = clientOwned || authoritativeWorld;
 		replica.AuthoritativeX = state.PositionX;
 		replica.AuthoritativeY = state.PositionY;
 		if (wasTrackedReplica) {
@@ -374,6 +378,18 @@ WorldStateClientReplica::ApplyResult WorldStateClientReplica::Apply(const WorldS
 		} else {
 			replica.InterpolationElapsedTicks = 0;
 			replica.InterpolationDurationTicks = 0;
+		}
+	}
+	if (authoritativeWorld) {
+		// Local Activity startup can spawn objects independently. A full server
+		// snapshot is the only world authority for this client, including absence.
+		for (MovableObject* object : activeObjects) {
+			if (!mappedObjects.contains(object) && g_MovableMan.RemoveMO(object)) {
+				ClearReplicaControlLinks(object);
+				object->DestroyScriptState();
+				delete object;
+				++result.Removed;
+			}
 		}
 	}
 	m_LastSnapshotTick = snapshot.Tick;
@@ -399,6 +415,7 @@ std::uint32_t WorldStateClientReplica::AdvanceInterpolation() {
 		g_SceneMan.WrapPosition(interpolatedPosition);
 		replica.Object->SetPos(interpolatedPosition);
 		replica.Object->SetRotAngle(replica.InterpolationStartRotation + replica.InterpolationDeltaRotation * progress);
+		if (auto* rotating = dynamic_cast<MOSRotating*>(replica.Object)) rotating->CorrectAttachableAndWoundPositionsAndRotations();
 		++advancedObjects;
 		if (replica.InterpolationElapsedTicks == replica.InterpolationDurationTicks) {
 			replica.InterpolationDurationTicks = 0;

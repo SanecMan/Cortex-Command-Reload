@@ -233,6 +233,7 @@ namespace {
 		bool HostControlPassed = false;
 		int HostControlPassedUpdate = 0;
 		bool ClientControlPassed = false;
+		bool ReplicaWorldExact = true;
 		AHuman* ControlTestActor = nullptr;
 		float ControlStartX = 0;
 		int ControlStartRounds = 0;
@@ -844,6 +845,9 @@ namespace {
 			Activity* activity = g_ActivityMan.GetActivity();
 			const auto slots = worldStateServer->GetAssignedPlayerSlots();
 			if (activity && !slots.empty() && !state.ControlTestActor) {
+				// The normal update has just launched GC and MOID work. Native
+				// cloning must not race those tasks when acquiring a Lua state.
+				g_ThreadMan.GetPriorityThreadPool().wait_for_tasks();
 				const Entity* actorPreset = g_PresetMan.GetEntityPreset("AHuman", "Fat Culled Clone", "Base.rte");
 				const Entity* gunPreset = g_PresetMan.GetEntityPreset("HDFirearm", "Pistol", "Base.rte");
 				AHuman* actor = actorPreset ? dynamic_cast<AHuman*>(actorPreset->Clone()) : nullptr;
@@ -1472,6 +1476,10 @@ namespace {
 		          << ",vsync:" << g_WindowMan.GetVSyncEnabled() << '\n' << std::flush;
 		success = success && performanceCountersPassed;
 		success = success && state.LuaFilesystemProbePassed;
+		if (worldStateClient) {
+			state.Log << "world_state_replica_membership=" << (state.ReplicaWorldExact ? "passed" : "failed") << '\n' << std::flush;
+			success = success && state.ReplicaWorldExact;
+		}
 		if (state.HostControlSmoke || state.ClientControlSmoke) {
 			const bool controlPassed = (!state.HostControlSmoke || state.HostControlPassed) && (!state.ClientControlSmoke || state.ClientControlPassed);
 			state.Log << "world_state_control_smoke=" << (controlPassed ? "passed" : "failed") << '\n' << std::flush;
@@ -2088,13 +2096,21 @@ void RunGameLoop() {
 						}
 						debugRunState.PreviousMagazineRoundsByNetworkId = std::move(currentMagazineRounds);
 					}
-					const WorldStateClientReplica::ApplyResult applied = worldStateClientReplica.Apply(receivedSnapshot);
+					const WorldStateClientReplica::ApplyResult applied = worldStateClientReplica.Apply(receivedSnapshot, true);
 					g_MovableMan.CommitPendingAdditions();
+					const int liveReplicaObjects = g_MovableMan.GetMovableObjectCount();
+					if (debugRunState.Enabled && applied.MissingPresets == 0 &&
+					    static_cast<std::size_t>(liveReplicaObjects) != receivedSnapshot.Objects.size()) {
+						debugRunState.ReplicaWorldExact = false;
+						debugRunState.Log << "replica_membership_mismatch live=" << liveReplicaObjects
+						                  << " expected=" << receivedSnapshot.Objects.size() << '\n' << std::flush;
+					}
 					g_MovableMan.UpdateDrawMOIDs();
 					worldStateClientLastObservedSnapshotCount = snapshotCount;
 					if (worldStateClientLog.is_open() &&
 					    (worldStateClientLastLoggedSnapshotCount == 0 || snapshotCount - worldStateClientLastLoggedSnapshotCount >= 20)) {
 						worldStateClientLog << "snapshot=" << snapshotCount << " updated=" << applied.Updated << " spawned=" << applied.Spawned << " removed=" << applied.Removed
+						                    << " live_objects=" << liveReplicaObjects << " expected_objects=" << receivedSnapshot.Objects.size()
 						                    << " missing_presets=" << applied.MissingPresets << " human_equipment_applied=" << applied.HumanEquipmentStatesApplied
 						                    << " position_error_samples=" << applied.PositionErrorsMeasured
 						                    << " mean_position_error_before_correction_px=" << applied.MeanPositionErrorBeforeCorrection
@@ -2197,6 +2213,10 @@ void RunGameLoop() {
 
 			if (!worldStateReplicaClient) {
 				g_MovableMan.Update();
+			} else if (!worldStateSceneTransitionQueued && g_SceneMan.GetScene() && g_TimerMan.DrawnSimUpdate()) {
+				g_PostProcessMan.ClearScenePostEffects();
+				g_SceneMan.ClearMOColorLayer();
+				g_MovableMan.Draw(g_SceneMan.GetMOColorBitmap());
 			}
 
 			g_AudioMan.Update();

@@ -28,7 +28,7 @@ namespace RTE {
 			std::vector<std::string> MissingPresetDetails;
 		};
 
-		ApplyResult Apply(const WorldStateProtocol::Snapshot& snapshot);
+		ApplyResult Apply(const WorldStateProtocol::Snapshot& snapshot, bool authoritativeWorld = false);
 		std::uint32_t AdvanceInterpolation();
 		bool AdjustCameraForInterpolation(std::uint64_t networkId, class Vector& camera) const;
 		bool BindPlayerView(std::uint64_t networkId, int team, int localPlayer = 0) const;
