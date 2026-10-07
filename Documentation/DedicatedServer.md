@@ -46,6 +46,25 @@ update the catalog through v12 policies. Metagame pricing modifiers and custom
 base-price differences are still outside that policy frame; complete remote
 BuyMenu parity is not yet established.
 
+The stock-price regression also checks that the client's displayed order total
+equals the server's accepted charge. The earlier v12 policy fixture checked
+replicated stock and the server deduction, but did not compare the displayed
+total: the legacy menu incorrectly reset its duplicate-item counter to one.
+The counter now increases for each copy, so copies beyond available stock are
+paid normally. This correction also applies to local play and retains the
+existing delivery economics and Lua purchase API.
+
+Windows Final stock-total verification passed with matching rebuilt client and
+server binaries. `StockCostPolicy` displayed 324 and accepted a 324-unit charge;
+`StockCostNormal` displayed 864 and accepted an 864-unit charge. Both wrappers
+ran two separate clients, checked the replicated balance and delivered craft,
+and exited with code 0. The servers continued 66 and 64 updates respectively
+after disconnection. Elapsed times were 62.10 and 64.15 seconds while the tests
+ran concurrently, not performance benchmarks. The normal 60-update diagnostic
+also passed (`BuyStockLocalRegression`). These runs cover duplicate soldiers
+exceeding stock and a stock-owned delivery craft; metagame multipliers still
+require separate implementation and verification.
+
 `Tools/RunDedicatedServerSmoke.ps1 -CheckBuyMenu` enables the automated menu
 fixture. It selects an official Coalition loadout through the GUI's loadout/cart
 path, captures catalog and landing screenshots, submits from the landing chooser,

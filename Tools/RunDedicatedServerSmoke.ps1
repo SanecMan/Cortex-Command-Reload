@@ -75,6 +75,7 @@ try {
     }
     Write-Host "Dedicated server ready on $port; connecting two separate clients."
     $clients = [Collections.Generic.List[Diagnostics.Process]]::new()
+    $displayedStockPriceObserved = $false
     foreach ($index in 1..2) {
 		$purchaseArguments = @()
 		if ($CheckPurchases) { $purchaseArguments = @('-debug-run-world-state-purchase') }
@@ -153,11 +154,13 @@ try {
         if ($CheckPurchases -and $clientReport -notmatch '(?m)^world_state_purchase=passed') { throw 'Client purchase checks failed.' }
         if ($CheckBuyMenu -and $clientReport -notmatch '(?m)^world_state_buy_menu=passed') { throw 'Client buy menu checks failed.' }
         if ($CheckPurchasePolicy -and $clientReport -notmatch '(?m)^world_state_purchase_policy=passed') { throw 'Client live policy checks failed.' }
+        if ($clientReport -match '(?m)^buy_menu_displayed_cost=324\r?$') { $displayedStockPriceObserved = $true }
         if ($clientReport -notmatch '(?m)^result=passed' -or $clientNetwork -notmatch '(?m)^client_local_simulation_ticks=0' -or
             $clientNetwork -notmatch '(?m)^snapshot=\d+.*missing_presets=0' -or $clientNetwork -match 'missing_presets=[1-9]') { throw 'Client replica checks failed.' }
         if ($CheckTeamFunds -and (!$fundsChanged -or $clientReport -notmatch '(?m)^world_state_team_funds_presentation=passed' -or
             $clientNetwork -notmatch 'funds_team0=12345\.250000 funds_team1=-17\.500000')) { throw 'Client team funds replication failed.' }
     }
+    if ($CheckPurchasePolicy -and !$displayedStockPriceObserved) { throw 'Client catalog stock discount does not match the server charge.' }
     [pscustomobject]@{ Result='passed'; Clients=2; UpdatesAfterDisconnect=($latestTick-$baselineTick); Port=$port; ServerBinary=$serverBinary; ElapsedSeconds=[Math]::Round($timer.Elapsed.TotalSeconds,2) }
 } finally {
     foreach ($process in $processes) {

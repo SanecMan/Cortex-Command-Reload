@@ -242,7 +242,7 @@ namespace {
 		bool RequirePurchasePolicyTest = false, PurchasePolicyTestObserved = false;
 		int BuyMenuTestStage = 0;
 		bool BuyMenuTestPassed = false, BuyMenuCatalogCaptured = false, BuyMenuLandingCaptured = false;
-		float BuyMenuInitialFunds = 0;
+		float BuyMenuInitialFunds = 0, BuyMenuDisplayedCost = 0;
 		WorldStatePurchaseTest PurchaseTest;
 		ServerConfiguration HeadlessConfig{.ListenAddress = "127.0.0.1", .Port = 0};
 		std::string ErrorProbe;
@@ -2504,6 +2504,8 @@ void RunGameLoop() {
 							worldStateBuyMenu->Open(); uiTest.BuyMenuTestStage=1;
 						}
 					} else if (uiTest.BuyMenuTestStage==1 && uiTest.BuyMenuCatalogCaptured && uiTest.SimulationUpdates>=180 && (!uiTest.RequirePurchasePolicyTest || uiTest.PurchasePolicyTestObserved)) {
+						uiTest.BuyMenuDisplayedCost=worldStateBuyMenu->GetMenu()->GetTotalOrderCost();
+						uiTest.Log << "buy_menu_displayed_cost=" << uiTest.BuyMenuDisplayedCost << '\n' << std::flush;
 						worldStateBuyMenu->ConfirmOrder(); uiTest.BuyMenuTestStage=2;
 					} else if (uiTest.BuyMenuTestStage==2 && uiTest.BuyMenuLandingCaptured && uiTest.SimulationUpdates>=240) {
 						const auto& snapshot=worldStateClient->GetLatestSnapshot();
@@ -2523,7 +2525,8 @@ void RunGameLoop() {
 						const bool delivered=std::any_of(snapshot.Objects.begin(), snapshot.Objects.end(), [&](const auto& object) {
 							return object.ClassName==craft.ClassName && object.ModuleName==craft.ModuleName && object.PresetName==craft.PresetName;
 						});
-						if (funds && delivered) { uiTest.BuyMenuTestPassed=true; uiTest.BuyMenuTestStage=4; }
+						const bool priceMatches=std::abs(worldStateBuyMenu->LastCharge()-uiTest.BuyMenuDisplayedCost)<0.01F;
+						if (funds && delivered && priceMatches) { uiTest.BuyMenuTestPassed=true; uiTest.BuyMenuTestStage=4; }
 					}
 					if (uiTest.RequirePurchasePolicyTest && worldStateBuyMenu->GetMenu()) {
 						BuyMenuGUI* menu=worldStateBuyMenu->GetMenu();

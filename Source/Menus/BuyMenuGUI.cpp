@@ -605,10 +605,7 @@ float BuyMenuGUI::GetTotalCost(bool includeDelivery) const {
 			bool needsToBePaid = true;
 			std::string presetName = (*itr)->m_pEntity->GetModuleAndPresetName();
 
-			if (orderedItems.find(presetName) != orderedItems.end())
-				orderedItems[presetName] = 1;
-			else
-				orderedItems[presetName] += 1;
+			++orderedItems[presetName];
 
 			auto itrFound = m_OwnedItems.find(presetName);
 			if (itrFound != m_OwnedItems.end() && itrFound->second >= orderedItems[presetName])
@@ -623,10 +620,7 @@ float BuyMenuGUI::GetTotalCost(bool includeDelivery) const {
 			bool needsToBePaid = true;
 			std::string presetName = m_pSelectedCraft->GetModuleAndPresetName();
 
-			if (orderedItems.find(presetName) != orderedItems.end())
-				orderedItems[presetName] = 1;
-			else
-				orderedItems[presetName] += 1;
+			++orderedItems[presetName];
 
 			auto itrFound = m_OwnedItems.find(presetName);
 			if (itrFound != m_OwnedItems.end() && itrFound->second >= orderedItems[presetName])
