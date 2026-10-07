@@ -1,5 +1,12 @@
 # Automated debug run
 
+`Tools/RunDedicatedServerSmoke.ps1 -CheckBuyMenu` runs the client equipment menu
+fixture with an active player and spectator. The player opens the real catalog,
+selects an official loadout through GUI APIs, confirms a landing point and waits
+for authoritative delivery/funds state. Additional `debug-run-buy-catalog.png`
+and `debug-run-buy-landing.png` images are captured. Confirmation uses the same
+GUI checks as the button, but does not inject physical mouse/keyboard events.
+
 For the v11 purchase RPC, run `Tools/RunDedicatedServerSmoke.ps1 -CheckPurchases`.
 It launches a real headless server and two clients. One player exercises request
 validation, purchase, replay and stale ID rejection; the spectator must be

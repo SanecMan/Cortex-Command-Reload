@@ -1,5 +1,52 @@
 # Dedicated server
 
+## Client equipment orders
+
+On a world-state client, press F6 to open the existing equipment catalog. Select
+craft/cargo and confirm the order, then move the landing cursor and click to
+submit. F6 cancels the catalog or landing selection. The client waits for server
+confirmation and displays acceptance/charged cost or a rejection reason. Gameplay
+input is suppressed while this interface is open; the server keeps simulating.
+Spectators cannot open the order menu. Scene/assignment changes discard its local
+presentation state. Delayed requests retry the same ID once per second.
+
+This presentation has its own local controller and uses the ordinary BuyMenuGUI
+controls/rendering. It does not run GameActivity gameplay update, clone a craft,
+consume stock or subtract money on the client. The server's validated RPC owns
+those actions. A FrameMan client-GUI callback draws it into the normal player
+framebuffer, and teardown clears that callback before releasing UI resources.
+
+Catalog prices and available items currently come from local installed content.
+The server enforces its stock, tech/economy and allow/prohibit policy; custom
+scripted policy changes are not yet sent to the catalog, so a visible item can be
+rejected. Landing areas changed dynamically by server Lua are likewise not yet
+replicated to the chooser. These remaining metadata gaps must be addressed before
+claiming complete remote BuyMenu parity.
+
+`Tools/RunDedicatedServerSmoke.ps1 -CheckBuyMenu` enables the automated menu
+fixture. It selects an official Coalition loadout through the GUI's loadout/cart
+path, captures catalog and landing screenshots, submits from the landing chooser,
+and verifies an accepted order, replicated charge and craft. It uses GUI APIs for
+confirmation rather than physical mouse events. The spectator must stay without
+a menu. Server funding is set to 10000 for this disposable Tutorial session.
+
+Windows Final menu verification passed in 45.65 seconds with two separate
+clients (`RemoteBuyMenuDedicated`). The active client captured the catalog and
+landing chooser, submitted one 864-unit order and observed the charge and craft
+in server snapshots; the spectator had no menu. Both screenshots were inspected.
+The landing cursor uses the engine's palette color, and normal gameplay input
+stays blocked until the confirmation's fire button is released. This last input
+guard was compiled and exercised without physical held-button injection; actual
+mouse/keyboard interaction remains a manual validation gap. The server continued
+65 updates after disconnection and shut down with code 0.
+
+After the final server relink, the menu test passed again in 62.46 seconds and
+the separate RPC replay test passed in 60.11 seconds, with 65/66 continued updates
+after disconnection and clean shutdown. Both ran concurrently. The ordinary
+60-update client stress test and v11 Control/transition regression also passed.
+These are functionality checks, not a performance comparison. Renderer callback
+initialization and cleanup were exercised by those client starts/exits.
+
 ## Current implementation
 
 Windows x64 has a separate `CortexCommandServer.exe` console executable with a
@@ -212,8 +259,7 @@ nesting, craft AI, delivery delay, stock consumption and native/foreign economy
 modifiers. A pending Lua override order is preserved. Existing Lua delivery calls
 continue to use their established rules, including deliberate overspending.
 
-The v11 RPC described below now calls this entry point; the remote buy menu remains
-unconnected. A server must call it serially with simulation updates;
+The v11 RPC and client equipment menu now call this entry point. A server must call it serially with simulation updates;
 the method does not add locking around the global managers. A fatal allocation
 failure during cloning is not a recoverable purchase rollback.
 
@@ -246,7 +292,7 @@ The server owns preset lookup, player assignment, scene revision and charging.
 It returns the last result on a retry of the same ID, rejects older IDs, checks
 spectator status and limits new requests to one per 250 ms. Native craft/cargo
 cloning waits for the priority task pool's asynchronous Lua GC to finish.
-The client API is available but has not yet been connected to the visible buy UI.
+The client equipment menu now uses this API.
 See [WorldStateProtocol.md](WorldStateProtocol.md) for the wire layout and retry
 semantics. Rebuild both client and server: v10 peers cannot exchange v11 messages.
 
@@ -279,5 +325,6 @@ seconds and the separate funds regression passed in 61.30 seconds; both continue
 so these durations are test elapsed times, not performance measurements. The
 v11 Control scenario (movement, firing and scene transition) passed in 79.23
 seconds. The purchase client's final screenshot was inspected and displayed
-Funds: 9500. Complete inventory replication and the visible remote BuyMenu remain
-outside this completed RPC step.
+Funds: 9500. At that RPC checkpoint, complete inventory replication and the
+visible remote BuyMenu were still outside the completed step. The client menu
+is now described above; complete inventory replication remains outstanding.

@@ -53,6 +53,8 @@ namespace RTE {
 #pragma region Concrete Methods
 		/// Updates the state of this FrameMan. Supposed to be done every frame.
 		void Update();
+		/// Optional client presentation overlay, after the world GUI and before screen text.
+		void SetClientGUIRenderer(std::function<void(BITMAP*, int, const Vector&)> renderer) { m_ClientGUIRenderer = std::move(renderer); }
 
 		/// Draws the current frame to the screen.
 		void Draw();
@@ -313,6 +315,7 @@ namespace RTE {
 #pragma endregion
 
 	private:
+		std::function<void(BITMAP*, int, const Vector&)> m_ClientGUIRenderer;
 		/// Enumeration with different settings for the SaveBitmap() method.
 		enum SaveBitmapMode {
 			SingleBitmap,

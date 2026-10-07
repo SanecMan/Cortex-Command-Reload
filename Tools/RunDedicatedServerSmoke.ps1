@@ -6,11 +6,13 @@ param(
     [string]$OutputPrefix = 'DedicatedServerSmoke',
     [switch]$CheckTeamFunds,
     [switch]$CheckPurchases,
+    [switch]$CheckBuyMenu,
     [ValidateRange(60, 600)]
     [int]$TimeoutSeconds = 360
 )
 $ErrorActionPreference = 'Stop'
 if ($CheckPurchases -and $CheckTeamFunds) { throw 'Run purchase and administrative funds fixtures separately.' }
+if ($CheckBuyMenu -and ($CheckPurchases -or $CheckTeamFunds)) { throw 'Run the buy-menu fixture separately.' }
 if (!$ServerExecutablePath) { $ServerExecutablePath = Join-Path $PSScriptRoot '..\CortexCommandServer.exe' }
 if (!$ClientExecutablePath) { $ClientExecutablePath = Join-Path $PSScriptRoot '..\Cortex Command.exe' }
 $serverBinary = (Resolve-Path -LiteralPath $ServerExecutablePath).Path
@@ -59,7 +61,7 @@ try {
     }
     $server.Refresh()
     if ($server.MainWindowHandle -ne 0) { throw 'Server created a native window.' }
-    if ($CheckPurchases) {
+    if ($CheckPurchases -or $CheckBuyMenu) {
         # Tutorial begins with zero funds. Fund this disposable server fixture before clients sample it.
         $server.StandardInput.WriteLine('funds 0 10000')
         $server.StandardInput.Flush()
@@ -74,6 +76,7 @@ try {
     foreach ($index in 1..2) {
 		$purchaseArguments = @()
 		if ($CheckPurchases) { $purchaseArguments = @('-debug-run-world-state-purchase') }
+		if ($CheckBuyMenu) { $purchaseArguments = @('-debug-run-world-state-buy-menu') }
         $client = Start-Process -FilePath $clientBinary -WorkingDirectory (Split-Path -Parent $clientBinary) -WindowStyle Hidden -PassThru -ArgumentList (@(
             '-debug-run','600','-debug-run-output',"$OutputPrefix-Client$index",'-world-state-client','127.0.0.1',"$port"
         )+$purchaseArguments)
@@ -126,6 +129,7 @@ try {
     [IO.File]::WriteAllText((Join-Path $logDirectory 'StdOut.log'), $outputTask.GetAwaiter().GetResult(), [Text.UTF8Encoding]::new($false))
     [IO.File]::WriteAllText((Join-Path $logDirectory 'StdErr.log'), $errorTask.GetAwaiter().GetResult(), [Text.UTF8Encoding]::new($false))
     $networkLog = Read-Report (Join-Path $logDirectory 'WorldStateServer.log')
+    if ($CheckBuyMenu -and ([regex]::Matches($networkLog, 'purchase id=\d+ accepted=1').Count -ne 1)) { throw 'Expected exactly one accepted menu purchase.' }
     if ($CheckPurchases -and ($networkLog -notmatch 'purchase id=3 accepted=1 charged=500\.000000' -or
         $networkLog -notmatch 'purchase replay id=3' -or ([regex]::Matches($networkLog, 'purchase id=3 accepted=1').Count -ne 1))) { throw 'Purchase/replay server checks failed.' }
     if ($networkLog -notmatch '\(2 connected, input slot') { throw 'Two simultaneous connections not observed.' }
@@ -134,6 +138,7 @@ try {
         $clientReport = Read-Report (Join-Path $clientDirectory 'DebugRun.log')
         $clientNetwork = Read-Report (Join-Path $clientDirectory 'WorldStateClient.log')
         if ($CheckPurchases -and $clientReport -notmatch '(?m)^world_state_purchase=passed') { throw 'Client purchase checks failed.' }
+        if ($CheckBuyMenu -and $clientReport -notmatch '(?m)^world_state_buy_menu=passed') { throw 'Client buy menu checks failed.' }
         if ($clientReport -notmatch '(?m)^result=passed' -or $clientNetwork -notmatch '(?m)^client_local_simulation_ticks=0' -or
             $clientNetwork -notmatch '(?m)^snapshot=\d+.*missing_presets=0' -or $clientNetwork -match 'missing_presets=[1-9]') { throw 'Client replica checks failed.' }
         if ($CheckTeamFunds -and (!$fundsChanged -or $clientReport -notmatch '(?m)^world_state_team_funds_presentation=passed' -or

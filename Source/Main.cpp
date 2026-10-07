@@ -76,6 +76,7 @@
 #include "System/WorldStateTerrainTest.h"
 #include "System/DeliveryValidationTest.h"
 #include "System/WorldStatePurchaseTest.h"
+#include "System/WorldStateBuyMenu.h"
 #include "WorldStateCompression.h"
 #include "WorldStateTransport.h"
 #include "WorldStateSnapshotBuilder.h"
@@ -138,6 +139,7 @@ namespace {
 	std::string worldStateClientAddress;
 	unsigned short worldStateClientPort = 8000;
 	std::unique_ptr<WorldStateClientSession> worldStateClient;
+	std::unique_ptr<WorldStateBuyMenu> worldStateBuyMenu;
 	WorldStateClientReplica worldStateClientReplica;
 	std::ofstream worldStateClientLog;
 	std::uint32_t worldStateClientLastObservedSnapshotCount = 0;
@@ -236,6 +238,10 @@ namespace {
 		bool HeadlessServerPreflight = false;
 		bool DeliveryValidationTest = false;
 		bool RequestPurchaseTest = false;
+		bool RequestBuyMenuTest = false;
+		int BuyMenuTestStage = 0;
+		bool BuyMenuTestPassed = false, BuyMenuCatalogCaptured = false, BuyMenuLandingCaptured = false;
+		float BuyMenuInitialFunds = 0;
 		WorldStatePurchaseTest PurchaseTest;
 		ServerConfiguration HeadlessConfig{.ListenAddress = "127.0.0.1", .Port = 0};
 		std::string ErrorProbe;
@@ -358,6 +364,7 @@ namespace {
 			if (argument == "-debug-overlay") state.OverlayCaptureEnabled = true;
 			if (argument == "-debug-run-preflight-only") state.PreflightOnly = true;
 			if (argument == "-debug-run-world-state-purchase") state.RequestPurchaseTest = true;
+			if (argument == "-debug-run-world-state-buy-menu") state.RequestBuyMenuTest = true;
 			if (argument == "-debug-run-cpu-graphics-preflight") { state.CPUGraphicsPreflight = true; state.PreflightOnly = true; }
 			if (argument == "-debug-run-headless-content") { state.HeadlessContentPreflight = true; state.CPUGraphicsPreflight = true; state.PreflightOnly = true; }
 			if (argument == "-debug-run-headless-simulation") { state.HeadlessSimulationPreflight = true; state.HeadlessContentPreflight = true; state.CPUGraphicsPreflight = true; state.PreflightOnly = true; }
@@ -1582,6 +1589,11 @@ namespace {
 		          state.HostSessionTestPassed && worldIdentityStable && replicaSmokePassed && transientPixelReplicaPassed && terrainPatchApplyPassed &&
 		          networkInputApplicationPassed && worldSnapshotPassed && snapshotCompressionPassed && liveSnapshotTransportPassed;
 		const double elapsedSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - state.StartTime).count();
+		if (state.RequestBuyMenuTest) {
+			state.Log << "world_state_buy_menu=" << (state.BuyMenuTestPassed ? "passed" : "failed") << " stage=" << state.BuyMenuTestStage
+			    << " catalog_captured=" << state.BuyMenuCatalogCaptured << " landing_captured=" << state.BuyMenuLandingCaptured << '\n' << std::flush;
+			success=success && state.BuyMenuTestPassed;
+		}
 		if (state.RequestPurchaseTest) {
 			const bool passed=state.PurchaseTest.Passed && !state.PurchaseTest.Failed;
 			state.Log << "world_state_purchase=" << (passed ? "passed" : "failed") << " spectator=" << state.PurchaseTest.Spectator
@@ -1649,6 +1661,12 @@ namespace {
 			const int screenshotResult = g_FrameMan.SaveScreenToPNGBlocking(imageName);
 			state.Log << "screenshot=" << imageName << " result=" << screenshotResult << '\n' << std::flush;
 		};
+		if (state.RequestBuyMenuTest && worldStateBuyMenu && state.BuyMenuTestStage==1 && state.SimulationUpdates>=120 && !state.BuyMenuCatalogCaptured) {
+			capture("buy-catalog"); state.BuyMenuCatalogCaptured=true;
+		}
+		if (state.RequestBuyMenuTest && state.BuyMenuTestStage==2 && state.SimulationUpdates>=220 && !state.BuyMenuLandingCaptured) {
+			capture("buy-landing"); state.BuyMenuLandingCaptured=true;
+		}
 		if (!state.InitialScreenshotCaptured && state.SimulationUpdates >= 1) {
 			state.InitialScreenshotCaptured = true;
 			capture("initial");
@@ -2237,6 +2255,10 @@ void RunGameLoop() {
 				                                                                            static_cast<int>(WorldStateProtocol::c_MaxMouseWheelDelta)));
 				inputCommand.ResetActivityVote = g_UInputMan.KeyHeld(SDL_SCANCODE_BACKSPACE);
 				inputCommand.RestartActivityVote = g_UInputMan.KeyHeld(SDL_SCANCODE_BACKSLASH);
+				if ((worldStateBuyMenu && worldStateBuyMenu->BlocksGameplayInput()) || g_UInputMan.KeyPressed(SDLK_F6)) {
+					const std::uint32_t tick=inputCommand.ClientTick;
+					inputCommand={}; inputCommand.ClientTick=tick;
+				}
 				DebugRunState& controlDebug = GetDebugRunState();
 				if (controlDebug.Enabled && controlDebug.ClientControlSmoke) {
 					inputCommand.HeldElements = 0;
@@ -2438,6 +2460,49 @@ void RunGameLoop() {
 			}
 
 			g_AudioMan.Update();
+			if (worldStateReplicaClient && !worldStateSceneTransitionQueued && !GetDebugRunState().RequestPurchaseTest) {
+				if (!worldStateBuyMenu) {
+					worldStateBuyMenu=std::make_unique<WorldStateBuyMenu>();
+					g_FrameMan.SetClientGUIRenderer([](BITMAP* target, int screen, const Vector& offset) {
+						if (worldStateBuyMenu) worldStateBuyMenu->Draw(target, screen, offset);
+					});
+				}
+				DebugRunState& uiTest=GetDebugRunState();
+				worldStateBuyMenu->Update(*worldStateClient, !uiTest.RequestBuyMenuTest);
+				if (uiTest.RequestBuyMenuTest && uiTest.SimulationUpdates>=60) {
+					if (worldStateBuyMenu->IsSpectator()) { uiTest.BuyMenuTestPassed=true; uiTest.BuyMenuTestStage=4; }
+					else if (uiTest.BuyMenuTestStage==0 && worldStateBuyMenu->GetMenu()) {
+						const auto* loadout=dynamic_cast<const Loadout*>(g_PresetMan.GetEntityPreset("Loadout", "Default", "Coalition.rte"));
+						if (loadout) {
+							BuyMenuGUI* menu=worldStateBuyMenu->GetMenu();
+							menu->GetLoadoutPresets().push_back(*loadout);
+							menu->SelectLoadout(static_cast<int>(menu->GetLoadoutPresets().size())-1);
+							worldStateBuyMenu->Open(); uiTest.BuyMenuTestStage=1;
+						}
+					} else if (uiTest.BuyMenuTestStage==1 && uiTest.BuyMenuCatalogCaptured && uiTest.SimulationUpdates>=180) {
+						worldStateBuyMenu->ConfirmOrder(); uiTest.BuyMenuTestStage=2;
+					} else if (uiTest.BuyMenuTestStage==2 && uiTest.BuyMenuLandingCaptured && uiTest.SimulationUpdates>=240) {
+						const auto& snapshot=worldStateClient->GetLatestSnapshot();
+						const int team=snapshot.Players[worldStateClient->GetAssignedPlayerSlot()].Team;
+						Scene::Area* area=g_SceneMan.GetScene()->GetArea("LZ Team " + std::to_string(team+1));
+						if (area && area->GetFirstBox()) {
+							const Vector center=area->GetFirstBox()->GetCenter();
+							uiTest.BuyMenuInitialFunds=snapshot.TeamFunds[team];
+							if (worldStateBuyMenu->ConfirmLanding(*worldStateClient, Vector(center.m_X, std::clamp(center.m_Y, 0.0F, static_cast<float>(g_SceneMan.GetSceneHeight()-1)))))
+								uiTest.BuyMenuTestStage=3;
+						}
+					} else if (uiTest.BuyMenuTestStage==3 && worldStateBuyMenu->LastOrderAccepted()) {
+						const auto& snapshot=worldStateClient->GetLatestSnapshot();
+						const int team=snapshot.Players[worldStateClient->GetAssignedPlayerSlot()].Team;
+						const bool funds=std::abs(snapshot.TeamFunds[team]-(uiTest.BuyMenuInitialFunds-worldStateBuyMenu->LastCharge()))<0.01F;
+						const auto& craft=worldStateBuyMenu->LastRequest().Craft;
+						const bool delivered=std::any_of(snapshot.Objects.begin(), snapshot.Objects.end(), [&](const auto& object) {
+							return object.ClassName==craft.ClassName && object.ModuleName==craft.ModuleName && object.PresetName==craft.PresetName;
+						});
+						if (funds && delivered) { uiTest.BuyMenuTestPassed=true; uiTest.BuyMenuTestStage=4; }
+					}
+				}
+			}
 			g_MusicMan.Update();
 
 			if (!worldStateReplicaClient) {
@@ -3103,6 +3168,8 @@ int main(int argc, char** argv) {
 	if (worldStateClient) {
 		worldStateClient->Disconnect();
 		worldStateClient.reset();
+		g_FrameMan.SetClientGUIRenderer({});
+		worldStateBuyMenu.reset();
 	}
 	DiscordPresence::Shutdown();
 

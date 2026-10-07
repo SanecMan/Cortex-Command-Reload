@@ -27,8 +27,7 @@ disconnect; IDs are not a persistent account transaction system. Retry only the
 latest ID, and reconnect before exhausting the u32 ID space.
 
 Client session callers send `PurchaseRequest` and drain `PurchaseResult` values;
-responses are queued with a 64-result bound. The gameplay BuyMenu is not yet wired
-to these calls. UI callers must associate results with their pending request and
+responses are queued with a 64-result bound. The client equipment menu uses these calls. UI callers must associate results with their pending request and
 scene revision. The RPC does not replicate complete craft inventories or provide
 cross-reconnect purchase receipts.
 

@@ -65,6 +65,7 @@ FrameMan::~FrameMan() {
 }
 
 void FrameMan::Clear() {
+	m_ClientGUIRenderer = {};
 	m_DebugUTF8GlyphProbePassed = false;
 	m_DebugUTF8GlyphProbeDrawn = false;
 	m_DebugUTF8GlyphFontLoaded = false;
@@ -887,6 +888,7 @@ void FrameMan::Draw() {
 		g_SceneMan.Draw(drawScreen, drawScreenGUI, targetPos);
 
 		g_PrimitiveMan.DrawPrimitives(playerScreen, drawScreenGUI, targetPos);
+		if (m_ClientGUIRenderer) m_ClientGUIRenderer(drawScreenGUI, playerScreen, targetPos);
 
 		// Get only the scene-relative post effects that affect this player's screen
 		if (pActivity) {

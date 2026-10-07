@@ -115,6 +115,9 @@ namespace RTE {
 		/// Reports whether a purchase was made during the last Update.
 		/// @return Wheter the BUY button was pressed or not during the last update.
 		bool PurchaseMade() const { return m_PurchaseMade; }
+		/// Confirms the current cart through the same checks used by the purchase button.
+		void ConfirmOrder() { TryPurchase(); }
+		bool SelectLoadout(int index) { return DeployLoadout(index); }
 
 		/// Gets the width of the current delivery craft.
 		/// @return The width of the delivery craft, in pixels.
