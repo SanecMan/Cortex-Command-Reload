@@ -825,6 +825,9 @@ namespace {
 			          << " result=" << (state.StressStarted ? "passed" : "waiting") << '\n' << std::flush;
 			return;
 		}
+		// This fixture runs after MovableMan can schedule asynchronous Lua GC.
+		// Native cloning through CreateAHuman requires an unlocked script state.
+		g_ThreadMan.GetPriorityThreadPool().wait_for_tasks();
 		std::ostringstream script;
 		script << "for i = 1, 16 do "
 		          "local actor = CreateAHuman('Fat Culled Clone', 'Base.rte'); "
@@ -1241,6 +1244,10 @@ namespace {
 		if (!state.Enabled || System::IsSetToQuit()) {
 			return;
 		}
+		// Replica smoke checks below can clone script-bearing objects. Finish the
+		// update's async Lua GC and MOID work before those native clone operations.
+		g_ThreadMan.GetPriorityThreadPool().wait_for_tasks();
+		g_ThreadMan.GetBackgroundThreadPool().wait_for_tasks();
 		const WorldStateProtocol::Snapshot worldSnapshot = state.HasProtocolSmokeSnapshot ? state.ProtocolSmokeSnapshot : CaptureDebugWorldStateSnapshot();
 		const WorldStateProtocol::Snapshot repeatedWorldSnapshot = state.HasProtocolSmokeSnapshot ? state.ProtocolSmokeSnapshot : CaptureDebugWorldStateSnapshot();
 		bool worldIdentityStable = worldSnapshot.SceneRevision == repeatedWorldSnapshot.SceneRevision &&
