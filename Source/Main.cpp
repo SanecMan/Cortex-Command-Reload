@@ -2405,6 +2405,8 @@ int main(int argc, char** argv) {
 			const bool noVideo = SDL_WasInit(SDL_INIT_VIDEO) == 0 && !g_WindowMan.GetWindow();
 			g_FrameMan.Destroy();
 			g_GLResourceMan.Destroy();
+			g_WindowMan.Destroy();
+			g_WindowMan.Destroy();
 			SDL_Quit();
 			const bool passed = coreInitialized && frameInitialized && cpuResourcesPassed && noVideo;
 			GetDebugRunState().Log << "cpu_graphics_preflight=" << (passed ? "passed" : "failed")

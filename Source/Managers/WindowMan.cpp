@@ -88,6 +88,11 @@ WindowMan::WindowMan() {
 WindowMan::~WindowMan() = default;
 
 void WindowMan::Destroy() {
+	// A simulation-only startup may construct WindowMan for resolution settings
+	// without creating a window, GL context or ImGui backends.
+	if (!m_GLContext) {
+		return;
+	}
 	ImGui_ImplOpenGL3_Shutdown();
 	ImGui_ImplSDL3_Shutdown();
 	ImGui::DestroyContext();

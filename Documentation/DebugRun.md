@@ -163,3 +163,9 @@ including UTF-8 glyph and replica-player-view tests. The wrapper retains the
 original process handle through `System.Diagnostics.Process`, avoiding missing
 `ExitCode` from rapidly exiting redirected `Start-Process -PassThru` processes
 on Windows PowerShell 5.1.
+
+## CPU graphics startup probe
+
+Run `Cortex Command.exe -debug-run 60 -debug-run-cpu-graphics-preflight -debug-run-output CPUGraphicsFoundation` to exercise CPU frame-buffer and bitmap resource initialization without SDL video or OpenGL. The probe also calls WindowMan shutdown twice without initializing a window, to verify safe cleanup for simulation-only startup. To verify that no working video driver is required, set `SDL_VIDEODRIVER=invalid-driver-for-headless-test` for this process and restore the previous environment value afterwards.
+
+This probe exits before content-module loading and Activity simulation; it creates no screenshots. A passing report contains `cpu_graphics_preflight=passed video_initialized=0 gpu_enabled=0` and `result=passed`. It does not demonstrate a playable dedicated server or a software renderer. The regular debug run remains the rendering and gameplay startup check.
