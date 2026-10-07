@@ -2,7 +2,7 @@
 
 The experimental world-state path serializes data explicitly instead of sending C++ structs or framebuffer pixels. Protocol version 8 carries a server tick, scene revision, UTF-8 Activity class/preset/module and Scene module/preset identity, then top-level actors, items and particles and four player-view records. Each object has a stable host-assigned network ID, class/module/preset identity, transform, velocity, health, sprite frame, horizontal flip, team and category. `AHuman` actor records also carry foreground equipped-device identity and, for an `HDFirearm`, inserted magazine identity and round count. Clients switch or clone those devices from locally installed `.rte` presets and apply the authoritative magazine count. Dynamic `MOPixel` objects without a preset carry material, color, mass, lifetime and sharpness so clients can recreate common transient particles. Version 8 also defines a bounded terrain-patch frame with scene revision, pixel rectangle, material/foreground/background layer and indexed pixel bytes.
 
-The decoded packet starts with a 16-byte header: `CCR1` magic, version, message type, reserved byte, sequence and payload length, all little-endian. The decoder rejects unknown versions/types, malformed UTF-8, non-finite numeric data, duplicate or zero IDs, invalid team/category/equipment fields, invalid terrain layer/dimensions, truncated/oversized packets and counts beyond fixed bounds. Version 8 peers are required; earlier peers cannot exchange v8 frames. Each fixed player-view record contains the controlled actor's network ID (zero for no actor), a finite camera position, team and active-human flag. Nonzero actor references must resolve to an actor in the same snapshot, and inactive players cannot reference a controlled actor. Assigned clients follow their server-selected view, using the replica actor's interpolated position to smooth the camera between snapshots. This does not yet bind the local Activity HUD to that actor.
+The decoded packet starts with a 16-byte header: `CCR1` magic, version, message type, reserved byte, sequence and payload length, all little-endian. The decoder rejects unknown versions/types, malformed UTF-8, non-finite numeric data, duplicate or zero IDs, invalid team/category/equipment fields, invalid terrain layer/dimensions, truncated/oversized packets and counts beyond fixed bounds. Version 8 peers are required; earlier peers cannot exchange v8 frames. Each fixed player-view record contains the controlled actor's network ID (zero for no actor), a finite camera position, team and active-human flag. Nonzero actor references must resolve to an actor in the same snapshot, and inactive players cannot reference a controlled actor. Assigned clients follow their server-selected view, using the replica actor's interpolated position to smooth the camera between snapshots. The local Activity player view now binds to the selected replica actor for existing HUD identification; visual and remote-control gameplay validation remain outstanding.
 
 On 2026-10-07, Windows x64 Debug Minimal rebuilt for v8. The preflight passed player-view round-trip and rejected a non-actor control reference and a non-finite camera coordinate. A 60-update gameplay smoke passed with 292 replicated objects and 22 human equipment records. Its camera check resolved the actor, rejected the removed actor, restored it, and applied the expected 20-pixel interpolation correction (`x=300`, `y=240` from an authoritative camera probe of `320,240`). The four-client assignment/input/disconnect test also passed. Artifacts are under `ScreenShots/V8ViewPreflight/` and `ScreenShots/V8ViewGameplay/`. A separate-process visual check of camera following and the player HUD remains outstanding.
 
@@ -70,14 +70,37 @@ An Ubuntu 24.04 x86_64 rebuild passed. Separate offscreen server and client proc
 When a mapped object disappears from the authoritative snapshot, has already
 been removed locally, or is forgotten during a scene transition, the replica
 now releases matching Activity controlled-actor links before discarding the
-mapping or destroying the object. This uses the existing `LoseControlOfActor`
-validation and compares pointer identities without dereferencing an externally
-removed object. It prepares the lifetime boundary needed for remote-player HUD
-binding; it does not itself implement that binding.
+mapping or destroying the object. The presentation-specific
+`ClearReplicaControlledActor` compares pointer identities and validates actor
+liveness without dereferencing an externally removed object. It changes
+controller fields directly, avoiding gameplay Lua callbacks.
 
 Debug Minimal x64 compiled successfully. The paired Transition smoke
 (`ScreenShots/ReplicaLifetimePair-Host/` and `ReplicaLifetimePair-Client/`)
 completed in 211.95 seconds with both processes exiting with code 0 and
 `result=passed`. This covers normal replica application and Activity/Scene
 transition. The fixture does not bind a controlled actor on the client, so the
-new controlled-pointer clearing branch still requires a targeted gameplay test.
+new controlled-pointer clearing branch was not covered by that run.
+
+Assigned clients now bind their local Activity player view to the authoritative
+controlled actor ID and team through `BindPlayerView`. A missing actor clears
+the old selection; spectator/inactive assignments clear the view as well.
+`SetReplicaControlledActor` enables the existing player HUD identification but
+keeps the actor controller disabled. Local simulation remains skipped. This
+presentation operation does not call `SwitchToActor`, alter squads, run
+`OnControllerInputModeChange`, or play switch sounds.
+
+The new targeted Debug Minimal gameplay test under
+`ScreenShots/PlayerViewLifecycle/` passed with exit code 0:
+`world_state_player_view_smoke=passed bound=1 removal_cleared=1 forget_cleared=1`.
+It binds a live replica actor, verifies player identification and disabled local
+control, removes the snapshot actor, restores/binds it, and forgets the mapping.
+The existing camera interpolation, UTF-8 glyph, terrain and transport checks
+also passed. This verifies pointer/controller behavior, not a visual HUD review
+or remote movement/fire gameplay.
+
+The separate-process Debug Minimal Transition pair also passed in 178.6 seconds
+(`ScreenShots/PlayerViewPair-Host/`, `PlayerViewPair-Client/`), with exit code 0
+and `result=passed` from both peers. Both ran the new player-view lifetime check;
+the host applied and the client observed the scene transition. As before, the
+transition fixture does not exercise remote controlled-actor movement/fire.

@@ -36,7 +36,7 @@ namespace {
 		if (!object) return;
 		if (RTE::Activity* activity = RTE::g_ActivityMan.GetActivity()) {
 			for (int player = RTE::Players::PlayerOne; player < RTE::Players::MaxPlayerCount; ++player) {
-				if (activity->GetControlledActor(player) == object) activity->LoseControlOfActor(player);
+				if (activity->GetControlledActor(player) == object) activity->ClearReplicaControlledActor(player);
 			}
 		}
 	}
@@ -205,6 +205,19 @@ bool WorldStateClientReplica::AdjustCameraForInterpolation(std::uint64_t network
 	if (replica == m_Objects.end() || !dynamic_cast<Actor*>(replica->second.Object)) return false;
 	camera += g_SceneMan.ShortestDistance(Vector(replica->second.AuthoritativeX, replica->second.AuthoritativeY), replica->second.Object->GetPos());
 	return true;
+}
+
+bool WorldStateClientReplica::BindPlayerView(std::uint64_t networkId, int team, int localPlayer) const {
+	Activity* activity = g_ActivityMan.GetActivity();
+	if (!activity) return false;
+	Actor* actor = nullptr;
+	if (networkId != 0) {
+		const auto replica = m_Objects.find(networkId);
+		if (replica != m_Objects.end() && g_MovableMan.IsActor(replica->second.Object))
+			actor = static_cast<Actor*>(replica->second.Object);
+	}
+	const bool bound = activity->SetReplicaControlledActor(actor, localPlayer, team);
+	return bound && (networkId == 0 || actor != nullptr);
 }
 
 WorldStateClientReplica::ApplyResult WorldStateClientReplica::Apply(const WorldStateProtocol::Snapshot& snapshot) {

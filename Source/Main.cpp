@@ -1203,10 +1203,18 @@ namespace {
 		Vector cameraProbe(320.0F, 240.0F);
 		const std::uint64_t cameraActorId = worldSnapshot.Objects.empty() ? 0 : worldSnapshot.Objects.front().NetworkId;
 		const bool cameraInitiallyResolved = replicaSmoke.AdjustCameraForInterpolation(cameraActorId, cameraProbe);
+		Activity* viewActivity = g_ActivityMan.GetActivity();
+		Actor* previousViewActor = viewActivity ? viewActivity->GetControlledActor(Players::PlayerOne) : nullptr;
+		const int previousViewTeam = viewActivity ? viewActivity->GetTeamOfPlayer(Players::PlayerOne) : Activity::TeamOne;
+		const bool viewBound = viewActivity && replicaSmoke.BindPlayerView(cameraActorId, Activity::TeamOne) &&
+		    viewActivity->GetControlledActor(Players::PlayerOne) &&
+		    viewActivity->GetControlledActor(Players::PlayerOne)->IsPlayerControlled() &&
+		    viewActivity->GetControlledActor(Players::PlayerOne)->GetController()->IsDisabled();
 		WorldStateProtocol::Snapshot emptyReplicaSnapshot = worldSnapshot;
 		emptyReplicaSnapshot.Objects.clear();
 		const WorldStateClientReplica::ApplyResult removalApply = replicaSmoke.Apply(emptyReplicaSnapshot);
 		const bool cameraRemoved = !replicaSmoke.AdjustCameraForInterpolation(cameraActorId, cameraProbe);
+		const bool removedViewCleared = viewActivity && !viewActivity->GetControlledActor(Players::PlayerOne);
 		const WorldStateClientReplica::ApplyResult restoredApply = replicaSmoke.Apply(worldSnapshot);
 		const WorldStateClientReplica::ApplyResult repeatedApply = replicaSmoke.Apply(worldSnapshot);
 		WorldStateProtocol::Snapshot interpolationTarget = worldSnapshot;
@@ -1223,6 +1231,17 @@ namespace {
 		    std::abs(cameraProbe.GetX() - 300.0F) < 0.01F && std::abs(cameraProbe.GetY() - 240.0F) < 0.01F;
 		state.Log << "world_state_camera_replica_smoke=" << (cameraInterpolationPassed ? "passed" : "failed")
 		          << " lifecycle=" << (cameraInitiallyResolved && cameraRemoved) << " x=" << cameraProbe.GetX() << " y=" << cameraProbe.GetY() << '\n' << std::flush;
+		const bool viewRebound = replicaSmoke.BindPlayerView(cameraActorId, Activity::TeamOne);
+		replicaSmoke.Forget();
+		const bool forgottenViewCleared = viewActivity && !viewActivity->GetControlledActor(Players::PlayerOne);
+		const bool viewLifetimePassed = viewBound && removedViewCleared && viewRebound && forgottenViewCleared;
+		state.Log << "world_state_player_view_smoke=" << (viewLifetimePassed ? "passed" : "failed")
+		          << " bound=" << viewBound << " removal_cleared=" << removedViewCleared
+		          << " forget_cleared=" << forgottenViewCleared << '\n' << std::flush;
+		if (viewActivity) {
+			viewActivity->SetReplicaControlledActor(previousViewActor, Players::PlayerOne, previousViewTeam);
+			if (previousViewActor && g_MovableMan.IsActor(previousViewActor)) previousViewActor->GetController()->SetDisabled(false);
+		}
 		const auto isHumanObject = [](const WorldStateProtocol::ObjectState& object) { return object.ClassName == "AHuman"; };
 		const std::uint32_t expectedHumanEquipmentStates = static_cast<std::uint32_t>(std::count_if(worldSnapshot.Objects.begin(), worldSnapshot.Objects.end(), isHumanObject));
 		const bool interpolationSmokePassed = !interpolationTarget.Objects.empty() && interpolationApply.MissingPresets == 0 &&
@@ -1236,7 +1255,7 @@ namespace {
 		                               restoredApply.HumanEquipmentStatesApplied == expectedHumanEquipmentStates &&
 		                               repeatedApply.Updated == worldSnapshot.Objects.size() && repeatedApply.Spawned == 0 && repeatedApply.Removed == 0 && repeatedApply.MissingPresets == 0 &&
 		                               repeatedApply.HumanEquipmentStatesApplied == expectedHumanEquipmentStates &&
-		                               interpolationApply.Updated == worldSnapshot.Objects.size() && interpolationSmokePassed && cameraInterpolationPassed;
+		                               interpolationApply.Updated == worldSnapshot.Objects.size() && interpolationSmokePassed && cameraInterpolationPassed && viewLifetimePassed;
 		state.Log << "world_state_replica_smoke=" << (replicaSmokePassed ? "passed" : "failed") << " objects=" << worldSnapshot.Objects.size()
 		          << " first_updated=" << firstApply.Updated << " first_spawned=" << firstApply.Spawned << " removed=" << removalApply.Removed
 		          << " repeat_updated=" << repeatedApply.Updated << " human_equipment=" << firstApply.HumanEquipmentStatesApplied << '/'
@@ -1987,10 +2006,17 @@ void RunGameLoop() {
 			if (worldStateReplicaClient && !worldStateSceneTransitionQueued) {
 				worldStateClientReplica.AdvanceInterpolation();
 				const int slot = worldStateClient->GetAssignedPlayerSlot();
+				const bool activeView = slot >= Players::PlayerOne && slot < Players::MaxPlayerCount &&
+				    worldStateClient->GetLatestSnapshot().Players[slot].ActiveHuman;
+				if (!activeView) {
+					if (Activity* activity = g_ActivityMan.GetActivity(); activity && activity->GetControlledActor(Players::PlayerOne))
+						activity->ClearReplicaControlledActor(Players::PlayerOne);
+				}
 				if (slot >= Players::PlayerOne && slot < Players::MaxPlayerCount) {
 					const auto& snapshot = worldStateClient->GetLatestSnapshot();
 					const auto& player = snapshot.Players[slot];
 					if (player.ActiveHuman) {
+						worldStateClientReplica.BindPlayerView(player.ControlledActorId, player.Team);
 						Vector camera(player.CameraX, player.CameraY);
 						worldStateClientReplica.AdjustCameraForInterpolation(player.ControlledActorId, camera);
 						g_CameraMan.SetScrollTarget(camera, 0.1F, 0);

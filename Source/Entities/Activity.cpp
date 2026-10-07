@@ -754,6 +754,35 @@ bool Activity::SwitchToActor(Actor* actor, int player, int team) {
 	return true;
 }
 
+bool Activity::SetReplicaControlledActor(Actor* actor, int player, int team) {
+	if (player < Players::PlayerOne || player >= Players::MaxPlayerCount || !m_IsHuman[player] ||
+	    team < Teams::TeamOne || team >= Teams::MaxTeamCount || (actor && !g_MovableMan.IsActor(actor))) return false;
+	if (m_ControlledActor[player] != actor) {
+		ClearReplicaControlledActor(player);
+		m_ControlledActor[player] = actor;
+	}
+	SetTeamOfPlayer(player, team);
+	if (actor) {
+		actor->GetController()->SetInputMode(Controller::CIM_PLAYER);
+		actor->GetController()->SetPlayer(player);
+		actor->GetController()->SetDisabled(true);
+		m_ViewState[player] = Normal;
+	}
+	return true;
+}
+
+void Activity::ClearReplicaControlledActor(int player) {
+	if (player < Players::PlayerOne || player >= Players::MaxPlayerCount) return;
+	if (Actor* actor = m_ControlledActor[player]; actor && g_MovableMan.IsActor(actor)) {
+		actor->GetController()->SetInputMode(Controller::CIM_AI);
+		actor->GetController()->SetPlayer(Players::NoPlayer);
+		actor->GetController()->SetDisabled(true);
+	}
+	m_ControlledActor[player] = nullptr;
+	m_ViewState[player] = ViewState::DeathWatch;
+	m_DeathTimer[player].Reset();
+}
+
 void Activity::LoseControlOfActor(int player) {
 	if (player >= Players::PlayerOne && player < Players::MaxPlayerCount) {
 		if (Actor* actor = m_ControlledActor[player]; actor && g_MovableMan.IsActor(actor)) {

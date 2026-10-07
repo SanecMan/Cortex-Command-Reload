@@ -526,6 +526,11 @@ namespace RTE {
 		/// @param player Which player to lose control of their selected Actor.
 		virtual void LoseControlOfActor(int player);
 
+		/// Client presentation only. Does not run gameplay switching, squad changes or sounds.
+		/// The caller must skip local simulation while using a replicated view.
+		bool SetReplicaControlledActor(Actor* actor, int player, int team);
+		void ClearReplicaControlledActor(int player);
+
 		/// Handles when an ACraft has left the game scene and entered orbit, though does not delete it. Ownership is NOT transferred, as the ACraft's inventory is just 'unloaded'.
 		/// @param orbitedCraft The ACraft instance that entered orbit. Ownership is NOT transferred!
 		virtual void HandleCraftEnteringOrbit(ACraft* orbitedCraft);

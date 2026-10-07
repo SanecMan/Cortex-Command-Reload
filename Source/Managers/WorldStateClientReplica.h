@@ -31,6 +31,7 @@ namespace RTE {
 		ApplyResult Apply(const WorldStateProtocol::Snapshot& snapshot);
 		std::uint32_t AdvanceInterpolation();
 		bool AdjustCameraForInterpolation(std::uint64_t networkId, class Vector& camera) const;
+		bool BindPlayerView(std::uint64_t networkId, int team, int localPlayer = 0) const;
 		bool ApplyTerrainPatch(const WorldStateProtocol::TerrainPatch& patch);
 		void Forget();
 
