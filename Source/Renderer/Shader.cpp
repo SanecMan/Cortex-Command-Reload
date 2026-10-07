@@ -66,6 +66,9 @@ int Shader::Create(const Shader& ref) {
 }
 
 bool Shader::Compile(const std::string& vertexPath, const std::string& fragPath) {
+	if (!g_GLResourceMan.IsGPUEnabled()) {
+		return true;
+	}
 	assert(m_ProgramID != 0);
 	GLuint vertexShader = glCreateShader(GL_VERTEX_SHADER);
 	GLuint fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);

@@ -62,6 +62,16 @@ void LoadingScreen::Create(AllegroScreen* guiScreen, GUIInputWrapper* guiInput, 
 	}
 }
 
+bool LoadingScreen::CreateLogOnly(const std::string& logPath) {
+	Destroy();
+	m_LoadingLogWriter = std::make_unique<Writer>(logPath.c_str());
+	if (!m_LoadingLogWriter->WriterOK()) {
+		m_LoadingLogWriter.reset();
+		return false;
+	}
+	return true;
+}
+
 void LoadingScreen::CreateLoadingSplash(int xOffset) {
 	if (m_LoadingSplashBitmap) {
 		destroy_bitmap(m_LoadingSplashBitmap);
@@ -107,7 +117,9 @@ void LoadingScreen::CreateProgressReportListbox(GUIControlManager* parentControl
 }
 
 void LoadingScreen::Destroy() {
-	destroy_bitmap(m_LoadingSplashBitmap);
+	if (m_LoadingSplashBitmap) {
+		destroy_bitmap(m_LoadingSplashBitmap);
+	}
 	if (m_ProgressListboxBitmap) {
 		destroy_bitmap(m_ProgressListboxBitmap);
 	}
@@ -153,5 +165,8 @@ void LoadingScreen::LoadingSplashProgressReport(const std::string& reportString,
 }
 
 void LoadingScreen::DrawLoadingSplash() {
+	if (!m_LoadingSplashBitmap) {
+		return;
+	}
 	draw_sprite(g_FrameMan.GetBackBuffer32(), m_LoadingSplashBitmap, 0, 0);
 }

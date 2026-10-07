@@ -83,3 +83,7 @@ Normal GPU startup also passed a Windows Final 60-update diagnostic run
 (CPUGraphicsClientRegression, exit code 0). Its final screenshot was inspected:
 scene terrain, actor sprites, HUD and the UTF-8 diagnostic text rendered.
 This is a short startup/render regression check, not a multiplayer gameplay test.
+
+## Headless content initialization (October 7)
+
+The Windows Final executable now passes the headless content probe documented in DebugRun.md: all 10 official modules load through PresetMan with SDL video uninitialized and an invalid video driver. Common manager construction is shared with client startup; the probe initializes Lua and CPU simulation resources, uses LoadingScreen's log-only path and skips shader compilation in CPU mode. It resolves the Tutorial Bunker scene preset and tears down loaded content without a window. This advances the content boundary; an Activity simulation loop, dedicated executable and live headless client/server test remain required. Linux execution of this path is not yet verified.

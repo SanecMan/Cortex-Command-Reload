@@ -29,6 +29,9 @@ namespace RTE {
 		/// @param progressReportDisabled Whether the loading screen progress report is disabled meaning GUI elements and adjustments relevant to it can be skipped.
 		void Create(AllegroScreen* guiScreen, GUIInputWrapper* guiInput, bool progressReportDisabled);
 
+		/// Creates only the progress log; no GUI, splash assets or graphics calls.
+		bool CreateLogOnly(const std::string& logPath);
+
 		/// Creates the loading splash screen and draws the composed frame to the LoadingSplashBitmap.
 		/// @param xOffset Horizontal offset of the loading splash screen.
 		void CreateLoadingSplash(int xOffset = 0);
