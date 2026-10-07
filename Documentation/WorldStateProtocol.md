@@ -65,3 +65,19 @@ Protocol v5 added `MOSprite` frame and horizontal-flip state to each object reco
 Terrain changes now enter a 64-pixel dirty grid from penetration, orphan removal, dislodging, silhouette erasure and terrain-object placement. The host snapshots material, foreground and background indexed pixels into bounded 64×64 patches, sends them reliably, and sends a full terrain baseline when a peer joins. Clients queue patches by scene revision and apply them on the simulation thread only after the matching local Scene is loaded. On 2026-10-04 the Windows x64 `Debug Minimal` solution build succeeded and `-debug-run 60 -debug-run-preflight-only` passed dirty-grid clipping/wrap/coalescing and a four-client RakNet snapshot-plus-terrain-patch client-session loopback. A full hidden-window debug run passed the in-game apply/restore smoke for all three terrain layers on the loaded Tutorial Bunker scene, alongside the protocol, replica, input, UTF-8 glyph and performance-counter checks. The separate Windows process run additionally passed an end-to-end host-originated terrain mutation: the client read back material `0` after receiving the host's penetration update for a known probe pixel. This does not establish visual comparison or reconcile the independently running client simulation. The Windows offscreen SDL driver still cannot create the engine's OpenGL window (`Invalid window`); the ordinary hidden OpenGL window path did work on this machine. The abort reporter is safe without a GL context and records the window error and CPU details without a secondary access violation. The Linux host was unavailable during this turn.
 
 An Ubuntu 24.04 x86_64 rebuild passed. Separate offscreen server and client processes connected over loopback: the client loaded `GATutorial/Tutorial Mission` and `Missions.rte/Tutorial Bunker`, applied 111 snapshots and created its replica; the server applied client input commands (120 were logged), observed the client disconnect, and remained running until manually stopped. This verifies the experimental transport lifecycle, not a full authoritative gameplay session. The client process also exposed an FMOD worker-thread shutdown crash on Ctrl+C in this Linux configuration; forced termination was required for that test process, so graceful shutdown needs separate investigation.
+### Replica control-pointer lifetime (October 7)
+
+When a mapped object disappears from the authoritative snapshot, has already
+been removed locally, or is forgotten during a scene transition, the replica
+now releases matching Activity controlled-actor links before discarding the
+mapping or destroying the object. This uses the existing `LoseControlOfActor`
+validation and compares pointer identities without dereferencing an externally
+removed object. It prepares the lifetime boundary needed for remote-player HUD
+binding; it does not itself implement that binding.
+
+Debug Minimal x64 compiled successfully. The paired Transition smoke
+(`ScreenShots/ReplicaLifetimePair-Host/` and `ReplicaLifetimePair-Client/`)
+completed in 211.95 seconds with both processes exiting with code 0 and
+`result=passed`. This covers normal replica application and Activity/Scene
+transition. The fixture does not bind a controlled actor on the client, so the
+new controlled-pointer clearing branch still requires a targeted gameplay test.

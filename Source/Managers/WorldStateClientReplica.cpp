@@ -1,6 +1,8 @@
 #include "WorldStateClientReplica.h"
 
 #include "Actor.h"
+#include "Activity.h"
+#include "ActivityMan.h"
 #include "AHuman.h"
 #include "Atom.h"
 #include "Constants.h"
@@ -27,6 +29,24 @@
 #include <string_view>
 #include <unordered_set>
 #include <vector>
+
+namespace {
+	// Compare identities only: the replica can already have been removed externally.
+	void ClearReplicaControlLinks(RTE::MovableObject* object) {
+		if (!object) return;
+		if (RTE::Activity* activity = RTE::g_ActivityMan.GetActivity()) {
+			for (int player = RTE::Players::PlayerOne; player < RTE::Players::MaxPlayerCount; ++player) {
+				if (activity->GetControlledActor(player) == object) activity->LoseControlOfActor(player);
+			}
+		}
+	}
+}
+
+void RTE::WorldStateClientReplica::Forget() {
+	for (const auto& [id, replica] : m_Objects) ClearReplicaControlLinks(replica.Object);
+	m_Objects.clear();
+	m_LastSnapshotTick = 0;
+}
 
 using namespace RTE;
 
@@ -208,10 +228,12 @@ WorldStateClientReplica::ApplyResult WorldStateClientReplica::Apply(const WorldS
 
 	for (auto replica = m_Objects.begin(); replica != m_Objects.end();) {
 		if (replica->second.Object && !activeObjects.contains(replica->second.Object)) {
+			ClearReplicaControlLinks(replica->second.Object);
 			replica = m_Objects.erase(replica);
 			continue;
 		}
 		if (!incomingIds.contains(replica->first)) {
+			ClearReplicaControlLinks(replica->second.Object);
 			if (replica->second.ClientOwned && replica->second.Object && g_MovableMan.RemoveMO(replica->second.Object)) {
 				replica->second.Object->DestroyScriptState();
 				delete replica->second.Object;

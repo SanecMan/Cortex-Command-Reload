@@ -32,7 +32,7 @@ namespace RTE {
 		std::uint32_t AdvanceInterpolation();
 		bool AdjustCameraForInterpolation(std::uint64_t networkId, class Vector& camera) const;
 		bool ApplyTerrainPatch(const WorldStateProtocol::TerrainPatch& patch);
-		void Forget() { m_Objects.clear(); m_LastSnapshotTick = 0; }
+		void Forget();
 
 	private:
 		struct Replica {
