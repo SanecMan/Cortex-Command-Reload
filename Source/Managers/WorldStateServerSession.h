@@ -18,11 +18,11 @@ namespace RTE {
 
 	class Activity;
 
-	/// Optional in-process authoritative snapshot host. It shares the normal simulation;
-	/// it is not a headless server.
+	/// In-process authoritative snapshot host shared by graphical and headless startup.
+	/// The caller owns simulation startup and its lifecycle.
 	class WorldStateServerSession {
 	public:
-		bool Start(const std::string& bindAddress, unsigned short port, unsigned short maxPlayers, const std::string& logPath, bool truncateLog = false);
+		bool Start(const std::string& bindAddress, unsigned short port, unsigned short maxPlayers, const std::string& logPath, bool truncateLog = false, bool reserveLocalPlayer = true);
 		void Stop();
 		void PollNetwork(std::uint32_t simulationTick);
 		void Update(std::uint32_t simulationTick);
@@ -90,6 +90,7 @@ namespace RTE {
 		bool m_LoggedWaitingForWorldState = false;
 		bool m_TerrainBaselinePending = false;
 		bool m_DebugEmptyWorldSnapshotSmokeEnabled = false;
+		bool m_ReserveLocalPlayer = true;
 		int m_DebugTerrainMutationPixelX = 0;
 		int m_DebugTerrainMutationPixelY = 0;
 	};

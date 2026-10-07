@@ -229,6 +229,8 @@ namespace {
 		bool CPUGraphicsPreflight = false;
 		bool HeadlessContentPreflight = false;
 		bool HeadlessSimulationPreflight = false;
+		bool HeadlessServerPreflight = false;
+		unsigned short HeadlessServerPort = 0;
 		std::string ErrorProbe;
 		bool LoadAllOptionalModules = false;
 		bool RequestHostWorldStateTransition = false;
@@ -350,6 +352,10 @@ namespace {
 			if (argument == "-debug-run-cpu-graphics-preflight") { state.CPUGraphicsPreflight = true; state.PreflightOnly = true; }
 			if (argument == "-debug-run-headless-content") { state.HeadlessContentPreflight = true; state.CPUGraphicsPreflight = true; state.PreflightOnly = true; }
 			if (argument == "-debug-run-headless-simulation") { state.HeadlessSimulationPreflight = true; state.HeadlessContentPreflight = true; state.CPUGraphicsPreflight = true; state.PreflightOnly = true; }
+			if (argument == "-debug-run-headless-server") {
+				state.HeadlessServerPreflight = true;
+				state.HeadlessSimulationPreflight = state.HeadlessContentPreflight = state.CPUGraphicsPreflight = state.PreflightOnly = true;
+			}
 			if (argument == "-debug-run-error-probe" && i + 1 < argc) state.ErrorProbe = argv[++i];
 			if (argument == "-debug-run-all-mods") state.LoadAllOptionalModules = true;
 			if (argument == "-debug-run-world-state-transition") state.RequestHostWorldStateTransition = true;
@@ -2455,18 +2461,34 @@ int main(int argc, char** argv) {
 						probeParticle->SetPos(initialPosition);
 						probeParticle->SetVel(Vector(15, -5));
 						probeParticle->SetLifetime(10000);
-						g_MovableMan.AddParticle(probeParticle);
+					    g_MovableMan.AddParticle(probeParticle);
+					}
+					std::unique_ptr<WorldStateServerSession> headlessServer;
+					bool serverStarted = true;
+					bool sawClient = false;
+					int disconnectUpdate = -1;
+					if (started && GetDebugRunState().HeadlessServerPreflight) {
+						headlessServer = std::make_unique<WorldStateServerSession>();
+						serverStarted = headlessServer->Start("127.0.0.1", GetDebugRunState().HeadlessServerPort, 8,
+						    UTF8::PathToString(GetDebugRunState().OutputDirectory / "WorldStateServer.log"), true, false);
+						GetDebugRunState().Log << "headless_server_ready=" << serverStarted << " port=" << headlessServer->GetBoundPort() << '\n' << std::flush;
 					}
 					int updates = 0;
 					bool particleMoved = false;
-					const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
-					while (started && updates < GetDebugRunState().UpdateLimit && std::chrono::steady_clock::now() < deadline) {
+					const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(headlessServer ? 300 : 60);
+					while (started && serverStarted && updates < GetDebugRunState().UpdateLimit && std::chrono::steady_clock::now() < deadline) {
 						g_TimerMan.Update();
+						if (headlessServer) {
+							headlessServer->PollNetwork(static_cast<std::uint32_t>(updates));
+							if (headlessServer->GetConnectedClientCount() > 0) sawClient = true;
+							else if (sawClient && disconnectUpdate < 0) disconnectUpdate = updates;
+						}
 						if (!g_TimerMan.TimeForSimUpdate()) {
 							std::this_thread::sleep_for(std::chrono::milliseconds(1));
 							continue;
 						}
 						g_TimerMan.UpdateSim();
+						if (headlessServer) headlessServer->Update(static_cast<std::uint32_t>(updates + 1));
 						g_LuaMan.Update();
 						g_FrameMan.Update();
 						g_MovableMan.CompleteQueuedMOIDDrawings();
@@ -2481,6 +2503,16 @@ int main(int argc, char** argv) {
 					}
 					contentPassed = started && particleMoved && updates == GetDebugRunState().UpdateLimit &&
 					    g_TimerMan.GetSimUpdateCount() >= updates && SDL_WasInit(SDL_INIT_VIDEO) == 0 && !g_WindowMan.GetWindow();
+					if (headlessServer) {
+						const bool networkPassed = serverStarted && sawClient && disconnectUpdate >= 0 && updates - disconnectUpdate >= 60 &&
+						    headlessServer->GetSnapshotBroadcastCount() > 0;
+						contentPassed = contentPassed && networkPassed;
+						GetDebugRunState().Log << "headless_server_network=" << (networkPassed ? "passed" : "failed")
+						    << " saw_client=" << sawClient << " snapshots=" << headlessServer->GetSnapshotBroadcastCount()
+						    << " input_commands=" << headlessServer->GetInputCommandCount() << " updates_after_disconnect="
+						    << (disconnectUpdate >= 0 ? updates - disconnectUpdate : 0) << '\n' << std::flush;
+						headlessServer->Stop();
+					}
 					GetDebugRunState().Log << "headless_simulation_preflight=" << (contentPassed ? "passed" : "failed")
 					    << " updates=" << updates << " particle_moved=" << particleMoved << " actors=" << g_MovableMan.GetActorCount()
 					    << " video_initialized=" << (SDL_WasInit(SDL_INIT_VIDEO) != 0) << '\n' << std::flush;

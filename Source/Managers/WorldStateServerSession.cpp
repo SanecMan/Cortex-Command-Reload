@@ -17,7 +17,7 @@
 
 using namespace RTE;
 
-bool WorldStateServerSession::Start(const std::string& bindAddress, unsigned short port, unsigned short maxPlayers, const std::string& logPath, bool truncateLog) {
+bool WorldStateServerSession::Start(const std::string& bindAddress, unsigned short port, unsigned short maxPlayers, const std::string& logPath, bool truncateLog, bool reserveLocalPlayer) {
 	Stop();
 	m_Log.open(UTF8::PathFromString(logPath), std::ios::out | (truncateLog ? std::ios::trunc : std::ios::app));
 	if (!m_Log || !m_Transport.StartServer(port, maxPlayers, bindAddress.c_str())) {
@@ -58,9 +58,10 @@ bool WorldStateServerSession::Start(const std::string& bindAddress, unsigned sho
 	m_PendingInputPackets.clear();
 	m_LastActivityVoteAction = {};
 	m_InputSlotsInUse.fill(false);
-	// This session runs inside the playable host client. Keep its local PlayerOne
-	// input independent from network peers; use PlayerTwo through PlayerFour remotely.
-	m_InputSlotsInUse[Players::PlayerOne] = true;
+	// Graphical hosts keep local PlayerOne independent from network peers.
+	// Headless hosts can assign PlayerOne to a remote connection.
+	m_ReserveLocalPlayer = reserveLocalPlayer;
+	m_InputSlotsInUse[Players::PlayerOne] = reserveLocalPlayer;
 	m_ConnectedClients = 0;
 	m_DebugTerrainMutationSmokeEnabled = false;
 	m_DebugTerrainMutationSmokeAttempted = false;
@@ -163,7 +164,7 @@ std::size_t WorldStateServerSession::ConfigureActivityPlayers(Activity& activity
 	std::size_t configuredPlayers = 0;
 	auto* gameActivity = dynamic_cast<GameActivity*>(&activity);
 	for (const int playerSlot : GetAssignedPlayerSlots()) {
-		if (playerSlot < Players::PlayerTwo || playerSlot >= Players::MaxPlayerCount ||
+		if (playerSlot < (m_ReserveLocalPlayer ? Players::PlayerTwo : Players::PlayerOne) || playerSlot >= Players::MaxPlayerCount ||
 		    (activity.PlayerActive(playerSlot) && activity.PlayerHuman(playerSlot))) {
 			continue;
 		}
@@ -256,7 +257,7 @@ void WorldStateServerSession::PollNetwork(std::uint32_t simulationTick) {
 			m_PreviousResetInputByClient.erase(clientAddress);
 			m_PreviousRestartInputByClient.erase(clientAddress);
 			int assignedPlayer = Players::NoPlayer;
-			for (int player = Players::PlayerTwo; player < Players::MaxPlayerCount; ++player) {
+			for (int player = m_ReserveLocalPlayer ? Players::PlayerTwo : Players::PlayerOne; player < Players::MaxPlayerCount; ++player) {
 				if (!m_InputSlotsInUse[player]) {
 					m_InputSlotsInUse[player] = true;
 					m_PlayerSlotByClient[clientAddress] = player;
