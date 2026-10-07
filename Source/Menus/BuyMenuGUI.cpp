@@ -586,6 +586,15 @@ bool BuyMenuGUI::CommitPurchase(std::string presetName) {
 	return false;
 }
 
+bool BuyMenuGUI::IsPurchaseAllowed(const SceneObject& item) const {
+	const std::string name = item.GetModuleAndPresetName();
+	if (m_AlwaysAllowedItems.contains(name)) return true;
+	if ((!m_AllowedItems.empty() && !m_AllowedItems.contains(name)) || m_ProhibitedItems.contains(name)) return false;
+	const auto stock = m_OwnedItems.find(name);
+	return (stock != m_OwnedItems.end() && stock->second > 0) ||
+	    (item.IsBuyable() && !item.IsBuyableInObjectPickerOnly() && !item.IsBuyableInScriptOnly() && !item.IsInGroup("Brains"));
+}
+
 float BuyMenuGUI::GetTotalCost(bool includeDelivery) const {
 	float totalCost = 0;
 

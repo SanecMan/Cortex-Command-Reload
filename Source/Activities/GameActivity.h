@@ -306,6 +306,12 @@ namespace RTE {
 			return CreateDelivery(player, Actor::AIMODE_SENTRY, point, NULL);
 		};
 
+		/// Validates a player order using server-owned presets, stock, constraints and funds.
+		/// Call on the simulation thread; network callers must derive player from their session.
+		/// Trusted Lua CreateDelivery retains its existing override/overspending semantics.
+		bool CreateValidatedDelivery(int player, const ACraft* craft, const std::vector<const SceneObject*>& cargo,
+		    const Vector& landingZone, int mode, float& chargedCost, std::string& error);
+
 		/// Shows how many deliveries this team has pending.
 		/// @param m_Deliveries[team].size( Which team to check the delivery count for.
 		/// @return The number of deliveries this team has coming.

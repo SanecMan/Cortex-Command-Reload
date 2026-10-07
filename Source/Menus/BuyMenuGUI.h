@@ -290,6 +290,10 @@ namespace RTE {
 		/// @return Whether the purchase can be conducted or the item is out of stock.
 		bool CommitPurchase(std::string presetName);
 
+		/// Checks catalog eligibility and allow/prohibit policy without consuming stock.
+		/// Stock counts for duplicate items are validated by the delivery transaction.
+		bool IsPurchaseAllowed(const SceneObject& item) const;
+
 #pragma region Faction Theme Handling
 		/// Changes the banner image to the one specified. If none is specified, resets it to the default banner image.
 		/// @param imagePath Path to image to set as banner.

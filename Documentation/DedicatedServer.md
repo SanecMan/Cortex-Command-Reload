@@ -192,5 +192,50 @@ returned code 0. The server reported no SDL video initialization.
 
 These checks prepare the existing delivery implementation for server use. They
 do not expose a network purchase command or add an affordability rule to trusted
-Lua override purchases. A remote purchase still needs server-side preset/policy,
-stock, price and funds validation, request replay protection, and client buy UI.
+Lua override purchases. A remote purchase must use the validated entry point
+below, with request replay protection and a client buy UI at the network boundary.
+
+## Validated player deliveries
+
+`GameActivity::CreateValidatedDelivery` is the simulation-thread entry point for
+player orders. The caller supplies server-resolved craft/cargo presets, landing
+coordinates and cargo AI mode. It checks the active human slot, running activity,
+brain/menu availability, preset identity, buyability and allow/prohibit policy,
+stock counts for duplicate items, finite nonnegative prices/masses, transport
+mass/passenger limits, funds and the team's landing-zone area. Orders are limited
+to 128 cargo entries and 16 pending deliveries per team. Network callers must
+derive the player slot from their connection rather than a client-supplied slot.
+
+Validation rejects the entire order before consuming stock or charging money.
+Accepted orders use the existing `CreateDelivery` path, with its current cargo
+nesting, craft AI, delivery delay, stock consumption and native/foreign economy
+modifiers. A pending Lua override order is preserved. Existing Lua delivery calls
+continue to use their established rules, including deliberate overspending.
+
+This entry point is not yet connected to a network purchase message or a remote
+buy menu. Scene revision, request sequence/replay checks and result messages must
+be added at that boundary. A server must call it serially with simulation updates;
+the method does not add locking around the global managers. A fatal allocation
+failure during cloning is not a recoverable purchase rollback.
+
+Use `-debug-run 60 -debug-run-delivery-validation -debug-run-output
+ValidatedDelivery` to run the explicit headless delivery fixture. It uses a
+disposable Tutorial session, tests rejected orders without changing funds, stock,
+landing zone or queue, then buys a craft with duplicate cargo (one owned and one
+paid item) and verifies that a pending trusted Lua order still creates a delivery.
+It does not use the player's active game session or save it.
+
+Windows Final verification used 600 updates with an invalid SDL video driver
+and completed with exit code 0 (`ScreenShots/ValidatedDelivery/DebugRun.log`).
+All ten rejection scenarios passed with unchanged economy/queue/LZ. The accepted
+mixed stock/paid order charged exactly 530, consumed one owned cargo item and
+queued the delivery; the preserved Lua override then queued a second delivery.
+The subsequent simulation finished with 19 actors, a moving probe particle,
+`video_initialized=0`, `gpu_enabled=0` and `result=passed`.
+The ordinary 60-update client stress test also passed in
+`ScreenShots/ValidatedDeliveryGameplay/`, including screenshots (final frame
+inspected), glyph rendering and live snapshot transport. Both Final executables
+were rebuilt. The subsequent two-client dedicated-server regression with funds
+checks passed in 46.10 seconds (`ValidatedDeliveryDedicated`), continued 65
+updates after disconnection and shut down cleanly with code 0. That network
+regression checks session behavior, not purchase messages.

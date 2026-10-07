@@ -1,5 +1,18 @@
 # Automated debug run
 
+The explicit delivery/economy fixture runs headless:
+
+```powershell
+& '.\Cortex Command.exe' -debug-run 600 -debug-run-delivery-validation -debug-run-output ValidatedDelivery
+```
+
+It loads a disposable Tutorial session, verifies rejection without changing
+funds/stock/landing zone/queue, places a validated order with duplicate cargo and
+checks that a pending Lua override survives. It then runs the requested number
+of simulation steps. This fixture changes only its own session, does not save
+it, and does not create screenshots. See [DedicatedServer.md](DedicatedServer.md)
+for its validation scope and current networking limitations.
+
 Run the Windows client from the game directory:
 
 ```powershell

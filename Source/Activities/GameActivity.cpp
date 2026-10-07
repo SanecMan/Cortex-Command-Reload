@@ -32,6 +32,9 @@
 #include "SceneEditorGUI.h"
 #include "GUIBanner.h"
 
+#include <cmath>
+#include <limits>
+
 #define BRAINLZWIDTHDEFAULT 640
 
 using namespace RTE;
@@ -494,6 +497,97 @@ int GameActivity::SetOverridePurchaseList(const std::string& loadoutName, int pl
 		g_ConsoleMan.PrintString("ERROR: Tried to set an override purchase list based on a nonexistent Loadout!");
 
 	return 0;
+}
+
+bool GameActivity::CreateValidatedDelivery(int player, const ACraft* craft, const std::vector<const SceneObject*>& cargo,
+    const Vector& landingZone, int mode, float& chargedCost, std::string& error) {
+	chargedCost = 0;
+	error.clear();
+	auto reject = [&](const char* reason) { error = reason; return false; };
+	if (player < Players::PlayerOne || player >= Players::MaxPlayerCount) return reject("invalid_player");
+	const int team = m_Team[player];
+	if (!IsRunning() || !m_IsActive[player] || !m_IsHuman[player] || team < Teams::TeamOne || team >= Teams::MaxTeamCount)
+		return reject("inactive_player");
+	BuyMenuGUI* menu = m_pBuyGUI[player];
+	if (!menu || (m_HadBrain[player] && !m_Brain[player])) return reject("delivery_unavailable");
+	if (!craft || cargo.size() > 128 || m_Deliveries[team].size() >= 16) return reject("order_limit");
+	if (mode < Actor::AIMODE_NONE || mode >= Actor::AIMODE_COUNT) return reject("invalid_ai_mode");
+	if (!std::isfinite(landingZone.m_X) || !std::isfinite(landingZone.m_Y) || landingZone.m_X < 0 ||
+	    landingZone.m_X >= g_SceneMan.GetSceneWidth() || landingZone.m_Y < 0 || landingZone.m_Y >= g_SceneMan.GetSceneHeight())
+		return reject("invalid_landing_zone");
+	if (!m_LandingZoneArea[team].HasNoArea() && !m_LandingZoneArea[team].IsInsideX(landingZone.m_X))
+		return reject("restricted_landing_zone");
+
+	int nativeModule = 0;
+	float foreignMultiplier = 1.0F, nativeMultiplier = 1.0F;
+	MetaPlayer* metaPlayer = g_MetaMan.GetMetaPlayerOfInGamePlayer(player);
+	if (g_MetaMan.GameInProgress() && metaPlayer) {
+		nativeModule = metaPlayer->GetNativeTechModule();
+		foreignMultiplier = metaPlayer->GetForeignCostMultiplier();
+		nativeMultiplier = metaPlayer->GetNativeCostMultiplier();
+	}
+	float cost = 0, mass = 0;
+	int passengers = 0;
+	std::map<std::string, int> orderedCounts;
+	auto validateItem = [&](const SceneObject* item, bool isCraft) {
+		if (!item || g_PresetMan.GetEntityPreset(item->GetClassName(), item->GetPresetName(), item->GetModuleID()) != item)
+			return reject("invalid_preset");
+		const auto* movable = dynamic_cast<const MovableObject*>(item);
+		if (!movable || (!isCraft && dynamic_cast<const ACraft*>(item))) return reject("invalid_cargo_type");
+		if (!menu->IsPurchaseAllowed(*item)) return reject("prohibited_item");
+		const std::string name = item->GetModuleAndPresetName();
+		const int count = ++orderedCounts[name];
+		if (count > menu->GetOwnedItemsAmount(name)) {
+			if (menu->GetOnlyShowOwnedItems() && !menu->IsAlwaysAllowedItem(name)) return reject("out_of_stock");
+			const float price = item->GetGoldValue(nativeModule, foreignMultiplier, nativeMultiplier);
+			if (!std::isfinite(price) || price < 0) return reject("invalid_price");
+			cost += price;
+			if (!std::isfinite(cost)) return reject("invalid_price");
+		}
+		if (!isCraft) {
+			const float itemMass = movable->GetMass();
+			if (!std::isfinite(itemMass) || itemMass < 0) return reject("invalid_mass");
+			mass += itemMass;
+			if (!std::isfinite(mass)) return reject("invalid_mass");
+			if (const auto* actor = dynamic_cast<const Actor*>(item)) {
+				const int slots = actor->GetPassengerSlots();
+				if (slots < 0 || slots > std::numeric_limits<int>::max() - passengers) return reject("invalid_passenger_slots");
+				passengers += slots;
+			}
+		}
+		return true;
+	};
+	if (!validateItem(craft, true)) return false;
+	for (const SceneObject* item : cargo) if (!validateItem(item, false)) return false;
+	if (menu->EnforceMaxMassConstraint() && craft->GetMaxInventoryMass() >= 0 && mass > craft->GetMaxInventoryMass())
+		return reject("mass_limit");
+	if (menu->EnforceMaxPassengersConstraint() && craft->GetMaxPassengers() >= 0 && passengers > craft->GetMaxPassengers())
+		return reject("passenger_limit");
+	if (!std::isfinite(m_TeamFunds[team]) || cost > m_TeamFunds[team]) return reject("insufficient_funds");
+
+	// Reuse normal delivery economics and inventory construction, preserving any pending Lua override.
+	std::list<const SceneObject*> order{craft};
+	order.insert(order.end(), cargo.begin(), cargo.end());
+	order.swap(m_PurchaseOverride[player]);
+	const Vector previousLandingZone = m_LandingZone[player];
+	m_LandingZone[player] = landingZone;
+	Vector waypoint(-1, -1);
+	const float previousFunds = m_TeamFunds[team];
+	bool accepted = false;
+	try {
+		accepted = CreateDelivery(player, mode, waypoint, nullptr);
+	} catch (...) {
+		order.swap(m_PurchaseOverride[player]);
+		m_LandingZone[player] = previousLandingZone;
+		throw;
+	}
+	order.swap(m_PurchaseOverride[player]);
+	if (!accepted) {
+		m_LandingZone[player] = previousLandingZone;
+		return reject("delivery_failed");
+	}
+	chargedCost = previousFunds - m_TeamFunds[team];
+	return true;
 }
 
 bool GameActivity::CreateDelivery(int player, int mode, Vector& waypoint, Actor* pTargetMO) {

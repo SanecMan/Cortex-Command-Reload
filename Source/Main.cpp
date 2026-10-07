@@ -74,6 +74,7 @@
 #include "System/UTF8Zip.h"
 #include "System/WorldStateProtocol.h"
 #include "System/WorldStateTerrainTest.h"
+#include "System/DeliveryValidationTest.h"
 #include "WorldStateCompression.h"
 #include "WorldStateTransport.h"
 #include "WorldStateSnapshotBuilder.h"
@@ -232,6 +233,7 @@ namespace {
 		bool HeadlessContentPreflight = false;
 		bool HeadlessSimulationPreflight = false;
 		bool HeadlessServerPreflight = false;
+		bool DeliveryValidationTest = false;
 		ServerConfiguration HeadlessConfig{.ListenAddress = "127.0.0.1", .Port = 0};
 		std::string ErrorProbe;
 		bool LoadAllOptionalModules = false;
@@ -355,6 +357,10 @@ namespace {
 			if (argument == "-debug-run-cpu-graphics-preflight") { state.CPUGraphicsPreflight = true; state.PreflightOnly = true; }
 			if (argument == "-debug-run-headless-content") { state.HeadlessContentPreflight = true; state.CPUGraphicsPreflight = true; state.PreflightOnly = true; }
 			if (argument == "-debug-run-headless-simulation") { state.HeadlessSimulationPreflight = true; state.HeadlessContentPreflight = true; state.CPUGraphicsPreflight = true; state.PreflightOnly = true; }
+			if (argument == "-debug-run-delivery-validation") {
+				state.DeliveryValidationTest = true;
+				state.HeadlessSimulationPreflight = state.HeadlessContentPreflight = state.CPUGraphicsPreflight = state.PreflightOnly = true;
+			}
 			if (argument == "-debug-run-headless-server") {
 				state.HeadlessServerPreflight = true;
 				state.HeadlessSimulationPreflight = state.HeadlessContentPreflight = state.CPUGraphicsPreflight = state.PreflightOnly = true;
@@ -2632,6 +2638,12 @@ int main(int argc, char** argv) {
 					MOPixel* probeParticle = nullptr;
 					if (started) {
 						g_ActivityMan.ResumeActivity();
+						if (GetDebugRunState().DeliveryValidationTest) {
+							auto* activity = dynamic_cast<GameActivity*>(g_ActivityMan.GetActivity());
+							const bool passed = activity && RunDeliveryValidationTest(*activity, GetDebugRunState().Log);
+							GetDebugRunState().Log << "delivery_validation=" << (passed ? "passed" : "failed") << '\n' << std::flush;
+							contentPassed = contentPassed && passed;
+						}
 						if (const Entity* preset = g_PresetMan.GetEntityPreset("MOPixel", "Gold Particle", "Base.rte")) {
 							probeParticle = dynamic_cast<MOPixel*>(preset->Clone());
 						}
