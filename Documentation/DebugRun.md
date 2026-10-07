@@ -14,6 +14,17 @@ The process exits with code 0 only when the smoke run completes successfully. Pe
 
 Gameplay diagnostics load the ten official data modules by default and skip the optional-module directory scan, ZIP extraction and userdata modules. Add `-module <Name.rte>` to load one selected mod after official content, or use `-debug-run-all-mods` to enable the normal full scan of all enabled Mods and userdata modules. The latter is intended for compatibility runs and can take several minutes with a large Mods folder. Normal non-debug launches still load modules using the existing full behavior.
 
+On Windows, `Tools/RunWorldStateSmoke.ps1` runs the two-process checks with one command:
+
+```powershell
+.\Tools\RunWorldStateSmoke.ps1 -Scenario Transition
+.\Tools\RunWorldStateSmoke.ps1 -Scenario Equipment -OutputPrefix EquipmentSmoke
+```
+
+The script uses `Cortex Command.exe` by default; `-ExecutablePath '.\Cortex Command.debug.minimal.exe'` selects the debug executable. It chooses an available local UDP port unless `-Port` is supplied, waits for the host's self-test and initial screenshot before launching the client, then requires both process exit codes to be zero and both fresh reports to contain `result=passed`. `-TimeoutSeconds` defaults to 600. Reports go to `ScreenShots/<OutputPrefix>-Host/` and `ScreenShots/<OutputPrefix>-Client/`; rerunning the same prefix uses the engine's normal cleanup of its diagnostic files. On failure or timeout the script stops only the processes it started and preserves their reports. Both binaries must support the same protocol version; the wrapper uses one executable for both peers.
+
+Before launching, the wrapper removes its two existing `DebugRun.log` files and rejects reparse-point output directories. It then checks report contents instead of modification times, which Windows can retain while a recreated log is open. On 2026-10-07 the Windows PowerShell 5.1 wrapper passed the Transition scenario with the rebuilt Final v8 executable. A corrected rerun using the same `V8FinalPair` prefix also passed; both output directories contained seven files after completion, replacing the previous diagnostic outputs without creating more run directories.
+
 Use `-debug-run-preflight-only` to run the UTF-8 text/path checks, a Cyrillic ZIP create/open/read/delete round trip, and the local world-state protocol/transport checks, then exit before SDL, content loading, simulation and rendering. This is useful for automated checks on Windows sessions without an interactive display. It does not count as a gameplay or rendering smoke test and creates no screenshots:
 
 ```powershell
