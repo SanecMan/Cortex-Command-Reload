@@ -247,6 +247,26 @@ Windows Final configuration evidence: a BOM UTF-8 `сервер.ini` containing 
 
 The separate Windows console binary and the client's --server mode use the same headless content/step functions as the diagnostics. The persistent mode does not run debug fixtures or require clients to exit successfully; it runs until console/signal shutdown. See DedicatedServer.md for build, CLI/configuration, runtime limits and the real two-client console-server verification. After the extraction, RunHeadlessWorldStateSmoke also passed again in 70.66 seconds.
 
+## Inventory hierarchy check
+
+`Tools/RunDedicatedServerSmoke.ps1 -CheckInventory` runs two clients against the
+console server using protocol v14. The server creates nested passenger/pistol
+inventories, waits for both clients to check their native representation, then
+changes ammunition, adds an item and reorders passengers. Client reports include
+`world_state_inventory_initial` and the final `world_state_inventory` result;
+network logs show applied counts, clone counts and native inventory equality.
+Run it separately from purchase and administrative-funds fixtures. It requires
+matching rebuilt client and server binaries, and uses a disposable server session.
+
+Windows Final v14 verification passed for both clients after correcting the
+fixture's transport lifetime and a dangling module-name string_view in the
+replica identity helper. Final reports are under `ScreenShots/InventoryV14Final-*`;
+the server stayed alive for 65 updates after disconnection. Repeated snapshots
+show `inventory_spawned=0` and `inventory_matches=1`. Purchase-pricing and Control
+regressions also passed. These checks cover native ownership, ordering, nesting,
+health and magazine counts; background hands and complete attachments are not
+part of the verified inventory representation.
+
 ## Remote catalog policy check
 
 Protocol v13 additionally supports `-CheckPurchasePricing` in the same wrapper.

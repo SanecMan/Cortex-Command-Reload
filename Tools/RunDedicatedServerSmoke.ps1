@@ -9,6 +9,7 @@ param(
     [switch]$CheckBuyMenu,
     [switch]$CheckPurchasePolicy,
     [switch]$CheckPurchasePricing,
+    [switch]$CheckInventory,
     [ValidateRange(60, 600)]
     [int]$TimeoutSeconds = 360
 )
@@ -17,6 +18,7 @@ if ($CheckPurchasePricing) { $CheckPurchasePolicy=$true }
 if ($CheckPurchasePolicy) { $CheckBuyMenu=$true }
 if ($CheckPurchases -and $CheckTeamFunds) { throw 'Run purchase and administrative funds fixtures separately.' }
 if ($CheckBuyMenu -and ($CheckPurchases -or $CheckTeamFunds)) { throw 'Run the buy-menu fixture separately.' }
+if ($CheckInventory -and ($CheckBuyMenu -or $CheckPurchases -or $CheckTeamFunds)) { throw 'Run the inventory fixture separately.' }
 if (!$ServerExecutablePath) { $ServerExecutablePath = Join-Path $PSScriptRoot '..\CortexCommandServer.exe' }
 if (!$ClientExecutablePath) { $ClientExecutablePath = Join-Path $PSScriptRoot '..\Cortex Command.exe' }
 $serverBinary = (Resolve-Path -LiteralPath $ServerExecutablePath).Path
@@ -84,6 +86,7 @@ try {
 		if ($CheckBuyMenu) { $purchaseArguments = @('-debug-run-world-state-buy-menu') }
 		if ($CheckPurchasePolicy) { $purchaseArguments = @('-debug-run-world-state-purchase-policy') }
 		if ($CheckPurchasePricing) { $purchaseArguments = @('-debug-run-world-state-purchase-pricing') }
+		if ($CheckInventory) { $purchaseArguments = @('-debug-run-world-state-inventory') }
         $client = Start-Process -FilePath $clientBinary -WorkingDirectory (Split-Path -Parent $clientBinary) -WindowStyle Hidden -PassThru -ArgumentList (@(
             '-debug-run','600','-debug-run-output',"$OutputPrefix-Client$index",'-world-state-client','127.0.0.1',"$port"
         )+$purchaseArguments)
@@ -92,9 +95,27 @@ try {
     }
     $fundsChanged = $false
     $policyChanged = $false
+    $inventoryMutated = $false
+    $inventoryCreated = $false
     while (@($clients | Where-Object { !$_.HasExited }).Count -gt 0) {
         Check-Time
         if ($server.HasExited) { throw 'Server stopped while clients were running.' }
+        if ($CheckInventory -and !$inventoryCreated) {
+            $inventoryClientsReady=$true
+            foreach ($index in 1..2) {
+                $inventoryNetwork=Join-Path (Split-Path -Parent $clientBinary) "ScreenShots\$OutputPrefix-Client$index\WorldStateClient.log"
+                $inventoryClientsReady=$inventoryClientsReady -and (Read-Report $inventoryNetwork) -match '(?m)^snapshot='
+            }
+            if ($inventoryClientsReady) { $server.StandardInput.WriteLine('debug-inventory-create'); $server.StandardInput.Flush(); $inventoryCreated=$true }
+        }
+        if ($CheckInventory -and $inventoryCreated -and !$inventoryMutated) {
+            $initialInventorySeen=$true
+            foreach ($index in 1..2) {
+                $inventoryReport=Join-Path (Split-Path -Parent $clientBinary) "ScreenShots\$OutputPrefix-Client$index\DebugRun.log"
+                $initialInventorySeen=$initialInventorySeen -and (Read-Report $inventoryReport) -match '(?m)^world_state_inventory_initial=passed'
+            }
+            if ($initialInventorySeen) { $server.StandardInput.WriteLine('debug-inventory-mutate'); $server.StandardInput.Flush(); $inventoryMutated=$true }
+        }
         if ($CheckPurchasePolicy -and !$policyChanged) {
             $catalogReady=$false
             foreach ($index in 1..2) {
@@ -161,6 +182,7 @@ try {
         if ($CheckPurchases -and $clientReport -notmatch '(?m)^world_state_purchase=passed') { throw 'Client purchase checks failed.' }
         if ($CheckBuyMenu -and $clientReport -notmatch '(?m)^world_state_buy_menu=passed') { throw 'Client buy menu checks failed.' }
         if ($CheckPurchasePolicy -and $clientReport -notmatch '(?m)^world_state_purchase_policy=passed') { throw 'Client live policy checks failed.' }
+        if ($CheckInventory -and (!$inventoryMutated -or $clientReport -notmatch '(?m)^world_state_inventory=passed' -or $clientNetwork -match 'inventory_matches=0')) { throw 'Client inventory hierarchy/reuse checks failed.' }
         if ($clientReport -match "(?m)^buy_menu_displayed_cost=$expectedPolicyCost\r?`$") { $displayedStockPriceObserved = $true }
         if ($clientReport -notmatch '(?m)^result=passed' -or $clientNetwork -notmatch '(?m)^client_local_simulation_ticks=0' -or
             $clientNetwork -notmatch '(?m)^snapshot=\d+.*missing_presets=0' -or $clientNetwork -match 'missing_presets=[1-9]') { throw 'Client replica checks failed.' }

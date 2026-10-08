@@ -19,6 +19,10 @@ namespace RTE {
 			std::uint32_t Removed = 0;
 			std::uint32_t MissingPresets = 0;
 			std::uint32_t HumanEquipmentStatesApplied = 0;
+			std::uint32_t InventoryStatesApplied = 0, InventoryObjectsSpawned = 0;
+			bool InventoryMatches=false;
+			std::uint32_t InventoryLiveObjects=0, InventoryCachedObjects=0;
+			std::vector<std::string> InventoryMismatchDetails;
 			std::uint32_t PositionErrorsMeasured = 0;
 			double TotalPositionErrorBeforeCorrection = 0.0;
 			double MeanPositionErrorBeforeCorrection = 0.0;
@@ -36,6 +40,7 @@ namespace RTE {
 		void Forget();
 
 	private:
+		void ApplyInventory(const WorldStateProtocol::Snapshot& snapshot, ApplyResult& result);
 		struct Replica {
 			class MovableObject* Object = nullptr;
 			bool ClientOwned = false;
@@ -52,6 +57,7 @@ namespace RTE {
 		};
 
 		std::unordered_map<std::uint64_t, Replica> m_Objects;
+		std::unordered_map<std::uint64_t,class MovableObject*> m_InventoryObjects; // Borrowed: Actor inventories own these objects.
 		std::uint32_t m_LastSnapshotTick = 0;
 	};
 

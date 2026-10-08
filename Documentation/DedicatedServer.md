@@ -1,5 +1,65 @@
 # Dedicated server
 
+## Inventory diagnostic (v14)
+
+Build both executables, then run
+`Tools/RunDedicatedServerSmoke.ps1 -CheckInventory -OutputPrefix InventoryV14`.
+This fixture creates a stationary, disabled dropship containing two passenger
+actors with stored pistols. Both real clients must observe the initial native
+inventory tree. The wrapper then changes ammunition, adds a second pistol and
+swaps passenger order. Clients must match native ownership/slot order, health
+and magazine state, and observe a subsequent snapshot with no inventory clones.
+The wrapper also checks simultaneous connections and continued server updates
+after disconnection. The local console commands `debug-inventory-create` and
+`debug-inventory-mutate` are for disposable test sessions only.
+
+v14 snapshots carry actor inventory contents, including nested actors and stored
+firearm magazines. Runtime reconciliation retains existing item instances by
+network ID. World-to-inventory or inventory-to-world transfers currently recreate
+the representation in its new domain. Background-arm equipment, complete
+attachments, actor pose and Lua-local state still require additional replication.
+The codec has passed preflight checks for nested records, infinite ammunition,
+depth bounds, truncation and invalid ownership. Real-process fixture verification
+is required separately; the existence of this command is not its test result.
+
+The first real fixture run failed its inventory assertions: the dropship had
+returned and refunded its contents before clients finished loading. Both clients
+correctly showed empty inventory rather than reporting a false success. The
+fixture now waits for both clients' first snapshots before creation, pins its
+transport and delays its hatch opening. Diagnostic clients can wait up to 60
+seconds for the required inventory observations before failing. These changes
+are confined to the explicit test fixture and do not change normal craft AI.
+
+The pinned-fixture run then exposed a real identity-comparison lifetime bug.
+GetModuleName returns an owning string, while the replica identity helper kept
+a string_view to its destroyed temporary. Native module names in mismatch logs
+were corrupted, causing inventory items to be rejected and cloned repeatedly.
+The helper now stores the module string for the duration of key construction.
+This also corrects the preexisting world-object candidate identity comparison.
+Client diagnostics retain bounded mismatch details and live/cache/clone counts
+so a codec pass cannot conceal native ownership or state failures.
+
+After the identity fix, `InventoryV14IdentityFixed` passed with two separate
+Windows clients in 39.74 seconds. Both observed the original tree and the server
+mutation (passenger order, stored ammunition 7 -> 3 and an added pistol with 5
+rounds). Native inventory equality passed, and later snapshots applied all five
+records with `inventory_spawned=0`, `inventory_live=5`, `inventory_cached=5`.
+The server continued 64 updates after both disconnected and quit with code 0.
+This run used the existing v14 fixture server and the newly fixed client; a final
+server relink and regressions are checked separately. The earlier standard
+60-update local diagnostic passed, including replica spawn/removal/interpolation
+and 22 foreground equipment states (`InventoryV14Local`). Elapsed time is test
+duration, not a performance comparison.
+
+Final matching v14 binaries passed `InventoryV14Final` again in 57.83 seconds,
+with both native inventory checks passing and 65 updates after disconnection.
+The parallel `InventoryV14PriceRegression` displayed and charged 798, passed
+both client checks and continued 67 updates, in 57.33 seconds. Both servers quit
+with code 0. The v14 Control regression also passed movement, firing and scene
+transition in 71.03 seconds. These concurrent test durations are not benchmarks.
+The successful fixture's final screenshot was inspected and showed its transport
+without placing stored cargo in the world's object collections.
+
 ## Live catalog policy (v13)
 
 The client now receives server-owned stock, allow/always-allow/prohibit lists,
@@ -10,7 +70,7 @@ change and clamps landing selection against the server area. Server validation
 remains authoritative at purchase time. Empty stock in only-owned mode hides
 unavailable catalog entries while retaining always-allowed exceptions.
 
-Both executables must use v13. The rule frame includes the server's pricing
+Both executables must use the current protocol (v14). The rule frame includes the server's pricing
 module name and foreign/native multipliers. The client uses these for displayed
 prices and affordability checks, separately from its faction theme. Custom base
 preset prices and complete craft inventories are not transmitted yet.

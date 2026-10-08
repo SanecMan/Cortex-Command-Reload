@@ -1,5 +1,33 @@
 # World-state protocol
 
+## Inventory ownership (v14)
+
+After the four player-view records, a snapshot contains a u16 inventory-record
+count. Each record carries owner network ID (u64), contiguous zero-based slot
+(u16) and the same object-state encoding as world objects. Records are ordered
+so an inventory actor appears before items owned by that actor. Owner IDs must
+refer to actors in the world or earlier inventory records. IDs are unique across
+both collections. Self/cyclic/forward ownership, slot gaps and non-actor owners
+are rejected transactionally. Limits are 8192 inventory objects per snapshot,
+512 per actor, depth 16, and the existing 4 MiB total packet bound. Capture refuses
+an incomplete ownership tree instead of silently truncating its contents.
+
+HDFirearm object records additionally carry their own magazine-presence byte,
+magazine class/module/preset strings and signed round count (including -1 for
+infinite ammunition). This covers stored and loose firearms as well as the
+existing foreground equipped-weapon state on AHuman records.
+
+The client keeps inventory objects owned by their native Actor, without adding
+them to MovableMan's world collections or running their gameplay simulation.
+At reconciliation, items are detached under temporary ownership and existing
+instances are reused by network ID before restoring server order and nesting.
+Preset identity, health, team and magazine state are applied. Borrowed cached
+pointers are validated against the live ownership tree before use. Default
+clone inventories and items absent from the authoritative snapshot are removed.
+Foreground equipment remains represented by the existing actor fields; background
+hands, arbitrary attachments and Lua-local state are not covered by this section.
+Both executables must be rebuilt for v14.
+
 ## Catalog rules (v13)
 
 Message type 9 is a reliable ordered purchase-policy frame. It contains scene
@@ -26,7 +54,7 @@ menu. Ordinary non-metagame delivery uses Base.rte and multipliers 1/1. During
 a metagame the server captures the assigned player's MetaPlayer economics,
 matching GameActivity's delivery calculation. Faction theme/filter choices stay
 separate from the authoritative pricing context. Changed contexts refresh shop,
-cart, craft and total prices. v12 and v13 peers must be rebuilt together.
+cart, craft and total prices. Peers must use the same protocol version.
 
 ## Player orders (v11)
 
@@ -59,7 +87,7 @@ responses are queued with a 64-result bound. The client equipment menu uses thes
 scene revision. The RPC does not replicate complete craft inventories or provide
 cross-reconnect purchase receipts.
 
-The experimental world-state path serializes data explicitly instead of sending C++ structs or framebuffer pixels. Protocol version 13 carries a server tick, scene revision, signed Activity state, four finite team-funds values, UTF-8 Activity class/preset/module and Scene module/preset identity, then top-level actors, items and particles and four player-view records. Each object has a stable host-assigned network ID, class/module/preset identity, transform, velocity, health, sprite frame, horizontal flip, team and category. `AHuman` actor records also carry foreground equipped-device identity and, for an `HDFirearm`, inserted magazine identity and round count. Clients switch or clone those devices from locally installed `.rte` presets and apply the authoritative magazine count. Dynamic `MOPixel` objects without a preset carry material, color, mass, lifetime and sharpness so clients can recreate common transient particles. Version 13 retains the bounded terrain-patch frame with scene revision, pixel rectangle, material/foreground/background layer and indexed pixel bytes.
+The experimental world-state path serializes data explicitly instead of sending C++ structs or framebuffer pixels. Protocol version 14 carries a server tick, scene revision, signed Activity state, four finite team-funds values, UTF-8 Activity class/preset/module and Scene module/preset identity, then top-level actors, items and particles and four player-view records. Each object has a stable host-assigned network ID, class/module/preset identity, transform, velocity, health, sprite frame, horizontal flip, team and category. `AHuman` actor records also carry foreground equipped-device identity and, for an `HDFirearm`, inserted magazine identity and round count. Clients switch or clone those devices from locally installed `.rte` presets and apply the authoritative magazine count. Dynamic `MOPixel` objects without a preset carry material, color, mass, lifetime and sharpness so clients can recreate common transient particles. Version 14 retains the bounded terrain-patch frame with scene revision, pixel rectangle, material/foreground/background layer and indexed pixel bytes.
 
 The decoded packet starts with a 16-byte header: `CCR1` magic, version, message type, reserved byte, sequence and payload length, all little-endian. The decoder rejects unknown versions/types, malformed UTF-8, non-finite numeric data, duplicate or zero IDs, invalid team/category/equipment fields, invalid terrain layer/dimensions, truncated/oversized packets and counts beyond fixed bounds. Version 12 peers are required; earlier peers cannot exchange v12 frames. Each fixed player-view record contains the controlled actor's network ID (zero for no actor), a finite camera position, team and active-human flag. Nonzero actor references must resolve to an actor in the same snapshot, and inactive players cannot reference a controlled actor. Assigned clients follow their server-selected view, using the replica actor's interpolated position to smooth the camera between snapshots. The local Activity player view now binds to the selected replica actor for existing HUD identification; visual and remote-control gameplay validation remain outstanding.
 

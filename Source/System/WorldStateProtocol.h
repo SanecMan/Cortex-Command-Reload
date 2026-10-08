@@ -12,13 +12,14 @@
 #include <span>
 #include <string>
 #include <unordered_set>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
 namespace RTE::WorldStateProtocol {
 
 inline constexpr std::uint32_t c_Magic = 0x31524343; // "CCR1" on the wire.
-inline constexpr std::uint16_t c_Version = 13;
+inline constexpr std::uint16_t c_Version = 14;
 inline constexpr std::size_t c_TeamCount = 4;
 inline constexpr std::int8_t c_NoActivity = -1;
 inline constexpr std::int8_t c_MaxActivityState = 6;
@@ -87,6 +88,10 @@ struct ObjectState {
 	std::string EquippedDeviceMagazineModuleName;
 	std::string EquippedDeviceMagazinePresetName;
 	std::int32_t EquippedDeviceMagazineRounds = 0;
+	bool HasOwnMagazine=false;
+	std::string OwnMagazineClassName, OwnMagazineModuleName, OwnMagazinePresetName;
+	std::int32_t OwnMagazineRounds=0;
+	bool operator==(const ObjectState&) const = default;
 };
 
 struct PlayerState {
@@ -97,6 +102,14 @@ struct PlayerState {
 	bool ActiveHuman = false;
 	bool operator==(const PlayerState&) const = default;
 };
+
+struct InventoryItemState {
+	std::uint64_t ParentNetworkId=0;
+	std::uint16_t Slot=0;
+	ObjectState Object;
+	bool operator==(const InventoryItemState&) const = default;
+};
+inline constexpr std::size_t c_MaxInventoryItems=8192, c_MaxActorInventory=512, c_MaxInventoryDepth=16;
 
 struct Snapshot {
 	std::uint32_t Tick = 0;
@@ -109,6 +122,8 @@ struct Snapshot {
 	std::string SceneModuleName;
 	std::string ScenePreset;
 	std::vector<ObjectState> Objects;
+	std::vector<InventoryItemState> Inventory;
+	bool InventoryComplete=true; // Capture rejects oversized/malformed ownership trees instead of truncating them.
 	std::array<PlayerState, c_PlayerSlotCount> Players{};
 };
 
@@ -408,10 +423,145 @@ inline bool DecodeInputCommand(std::span<const std::uint8_t> packet, InputComman
 	return true;
 }
 
+namespace Detail {
+inline bool WriteObject(std::vector<std::uint8_t>& packet, const ObjectState& object) {
+	if (!ValidObject(object)) return false;
+	if ((object.HasOwnMagazine && object.ClassName!="HDFirearm") || (!object.HasOwnMagazine &&
+	    (!object.OwnMagazineClassName.empty() || !object.OwnMagazineModuleName.empty() || !object.OwnMagazinePresetName.empty() || object.OwnMagazineRounds!=0))) return false;
+	Detail::WriteUnsigned(packet, object.NetworkId, sizeof(object.NetworkId));
+	if (!Detail::WriteString(packet, object.ClassName) || !Detail::WriteString(packet, object.ModuleName) || !Detail::WriteString(packet, object.PresetName)) {
+		return false;
+	}
+	Detail::WriteFloat(packet, object.PositionX);
+	Detail::WriteFloat(packet, object.PositionY);
+	Detail::WriteFloat(packet, object.VelocityX);
+	Detail::WriteFloat(packet, object.VelocityY);
+	Detail::WriteFloat(packet, object.Rotation);
+	Detail::WriteFloat(packet, object.AngularVelocity);
+	Detail::WriteFloat(packet, object.Health);
+	Detail::WriteUnsigned(packet, object.SpriteFrame, sizeof(object.SpriteFrame));
+	Detail::WriteUnsigned(packet, static_cast<std::uint16_t>(object.Team), sizeof(object.Team));
+	Detail::WriteUnsigned(packet, object.Flags, sizeof(object.Flags));
+	Detail::WriteUnsigned(packet, object.HFlipped ? 1 : 0, sizeof(std::uint8_t));
+	if (object.Flags == c_ObjectFlagTransientPixel) {
+		Detail::WriteUnsigned(packet, object.PixelMaterialId, sizeof(object.PixelMaterialId));
+		Detail::WriteUnsigned(packet, object.PixelColorIndex, sizeof(object.PixelColorIndex));
+		Detail::WriteFloat(packet, object.PixelMass);
+		Detail::WriteUnsigned(packet, object.PixelLifetime, sizeof(object.PixelLifetime));
+		Detail::WriteFloat(packet, object.PixelSharpness);
+	}
+	if (object.Flags == c_ObjectFlagActor) {
+		Detail::WriteUnsigned(packet, object.HasEquippedDevice ? 1 : 0, sizeof(std::uint8_t));
+		if (object.HasEquippedDevice) {
+		if (!Detail::WriteString(packet, object.EquippedDeviceClassName) || !Detail::WriteString(packet, object.EquippedDeviceModuleName) ||
+		    !Detail::WriteString(packet, object.EquippedDevicePresetName)) {
+			return false;
+		}
+		Detail::WriteUnsigned(packet, object.HasEquippedDeviceMagazine ? 1 : 0, sizeof(std::uint8_t));
+		if (object.HasEquippedDeviceMagazine) {
+			if (!Detail::WriteString(packet, object.EquippedDeviceMagazineClassName) || !Detail::WriteString(packet, object.EquippedDeviceMagazineModuleName) ||
+			    !Detail::WriteString(packet, object.EquippedDeviceMagazinePresetName)) {
+			return false;
+			}
+			Detail::WriteUnsigned(packet, std::bit_cast<std::uint32_t>(object.EquippedDeviceMagazineRounds), sizeof(std::uint32_t));
+		}
+		}
+	}
+	if (object.ClassName=="HDFirearm") {
+		Detail::WriteUnsigned(packet,object.HasOwnMagazine,1);
+		if (object.HasOwnMagazine) {
+			if (object.OwnMagazineClassName!="Magazine" || object.OwnMagazineModuleName.empty() || object.OwnMagazinePresetName.empty() || object.OwnMagazineRounds < -1 ||
+			    !Detail::WriteString(packet,object.OwnMagazineClassName) || !Detail::WriteString(packet,object.OwnMagazineModuleName) || !Detail::WriteString(packet,object.OwnMagazinePresetName)) return false;
+			Detail::WriteUnsigned(packet,std::bit_cast<std::uint32_t>(object.OwnMagazineRounds),4);
+		}
+	}
+	if (packet.size() > c_MaxPacketSize) {
+		return false;
+	}
+	return true;
+}
+inline bool ReadObject(std::span<const std::uint8_t> packet, std::size_t& offset, ObjectState& object) {
+	std::uint64_t value=0;
+	if (!Detail::ReadUnsigned(packet, offset, sizeof(object.NetworkId), value)) return false;
+	object.NetworkId = value;
+	if (!Detail::ReadString(packet, offset, object.ClassName) || !Detail::ReadString(packet, offset, object.ModuleName) || !Detail::ReadString(packet, offset, object.PresetName) ||
+	    !Detail::ReadFloat(packet, offset, object.PositionX) || !Detail::ReadFloat(packet, offset, object.PositionY) ||
+	    !Detail::ReadFloat(packet, offset, object.VelocityX) || !Detail::ReadFloat(packet, offset, object.VelocityY) ||
+	    !Detail::ReadFloat(packet, offset, object.Rotation) || !Detail::ReadFloat(packet, offset, object.AngularVelocity) ||
+	    !Detail::ReadFloat(packet, offset, object.Health) || !Detail::ReadUnsigned(packet, offset, sizeof(object.SpriteFrame), value)) {
+		return false;
+	}
+	object.SpriteFrame = static_cast<std::uint16_t>(value);
+	if (!Detail::ReadUnsigned(packet, offset, sizeof(object.Team), value)) return false;
+	object.Team = std::bit_cast<std::int16_t>(static_cast<std::uint16_t>(value));
+	if (!Detail::ReadUnsigned(packet, offset, sizeof(object.Flags), value)) return false;
+	object.Flags = static_cast<std::uint16_t>(value);
+	if (!Detail::ReadUnsigned(packet, offset, sizeof(std::uint8_t), value) || value > 1) return false;
+	object.HFlipped = value != 0;
+	if (object.Flags == c_ObjectFlagTransientPixel) {
+		if (!Detail::ReadUnsigned(packet, offset, sizeof(object.PixelMaterialId), value)) return false;
+		object.PixelMaterialId = static_cast<std::uint8_t>(value);
+		if (!Detail::ReadUnsigned(packet, offset, sizeof(object.PixelColorIndex), value)) return false;
+		object.PixelColorIndex = static_cast<std::uint16_t>(value);
+		if (!Detail::ReadFloat(packet, offset, object.PixelMass) || !Detail::ReadUnsigned(packet, offset, sizeof(object.PixelLifetime), value)) return false;
+		object.PixelLifetime = static_cast<std::uint32_t>(value);
+		if (!Detail::ReadFloat(packet, offset, object.PixelSharpness)) return false;
+	}
+	if (object.Flags == c_ObjectFlagActor) {
+		if (!Detail::ReadUnsigned(packet, offset, sizeof(std::uint8_t), value) || value > 1) return false;
+		object.HasEquippedDevice = value != 0;
+		if (object.HasEquippedDevice) {
+		if (!Detail::ReadString(packet, offset, object.EquippedDeviceClassName) || !Detail::ReadString(packet, offset, object.EquippedDeviceModuleName) ||
+		    !Detail::ReadString(packet, offset, object.EquippedDevicePresetName) || !Detail::ReadUnsigned(packet, offset, sizeof(std::uint8_t), value) || value > 1) {
+			return false;
+		}
+		object.HasEquippedDeviceMagazine = value != 0;
+		if (object.HasEquippedDeviceMagazine) {
+			if (!Detail::ReadString(packet, offset, object.EquippedDeviceMagazineClassName) || !Detail::ReadString(packet, offset, object.EquippedDeviceMagazineModuleName) ||
+			    !Detail::ReadString(packet, offset, object.EquippedDeviceMagazinePresetName) || !Detail::ReadUnsigned(packet, offset, sizeof(std::uint32_t), value)) {
+			return false;
+			}
+			object.EquippedDeviceMagazineRounds = std::bit_cast<std::int32_t>(static_cast<std::uint32_t>(value));
+		}
+		}
+	}
+	if (object.ClassName=="HDFirearm") {
+		if (!Detail::ReadUnsigned(packet,offset,1,value) || value>1) return false; object.HasOwnMagazine=value!=0;
+		if (object.HasOwnMagazine) {
+			if (!Detail::ReadString(packet,offset,object.OwnMagazineClassName) || object.OwnMagazineClassName!="Magazine" ||
+			    !Detail::ReadString(packet,offset,object.OwnMagazineModuleName) || object.OwnMagazineModuleName.empty() ||
+			    !Detail::ReadString(packet,offset,object.OwnMagazinePresetName) || object.OwnMagazinePresetName.empty() || !Detail::ReadUnsigned(packet,offset,4,value)) return false;
+			object.OwnMagazineRounds=std::bit_cast<std::int32_t>(static_cast<std::uint32_t>(value)); if (object.OwnMagazineRounds < -1) return false;
+		}
+	}
+	return ValidObject(object);
+}
+inline bool ValidInventory(const Snapshot& snapshot) {
+	if (!snapshot.InventoryComplete || snapshot.Inventory.size()>c_MaxInventoryItems || snapshot.Objects.size()>c_MaxObjects) return false;
+	if (snapshot.Inventory.empty()) return true; // Root IDs are already checked by the ordinary object codec.
+	std::unordered_set<std::uint64_t> ids;
+	std::unordered_map<std::uint64_t,std::pair<std::size_t,std::size_t>> parents;
+	for (const auto& object:snapshot.Objects) {
+		if (!ids.insert(object.NetworkId).second) return false;
+		if (object.Flags==c_ObjectFlagActor) parents.emplace(object.NetworkId,std::pair<std::size_t,std::size_t>{0,0});
+	}
+	for (const auto& item:snapshot.Inventory) {
+		auto parent=parents.find(item.ParentNetworkId);
+		if (!ValidObject(item.Object) || !ids.insert(item.Object.NetworkId).second || parent==parents.end() ||
+		    parent->second.first>=c_MaxInventoryDepth || parent->second.second>=c_MaxActorInventory || item.Slot!=parent->second.second) return false;
+		const auto depth=parent->second.first+1;
+		++parent->second.second;
+		if (item.Object.Flags==c_ObjectFlagActor) parents.emplace(item.Object.NetworkId,std::pair<std::size_t,std::size_t>{depth,0});
+	}
+	return true;
+}
+} // namespace Detail
+
 inline bool EncodeSnapshot(const Snapshot& snapshot, std::uint32_t sequence, std::vector<std::uint8_t>& packet, std::vector<std::uint64_t>& networkIds) {
 	packet.clear();
 	// Transport callers retain this scratch vector so its storage can be reused between snapshots.
 	networkIds.clear();
+	if (!Detail::ValidInventory(snapshot)) return false;
 	for (float funds : snapshot.TeamFunds) if (!std::isfinite(funds)) return false;
 	if (snapshot.ActivityState < c_NoActivity || snapshot.ActivityState > c_MaxActivityState ||
 	    snapshot.Objects.size() > c_MaxObjects || snapshot.ActivityClassName.size() > c_MaxStringBytes || snapshot.ActivityPreset.size() > c_MaxStringBytes ||
@@ -435,52 +585,8 @@ inline bool EncodeSnapshot(const Snapshot& snapshot, std::uint32_t sequence, std
 	}
 	Detail::WriteUnsigned(packet, snapshot.Objects.size(), sizeof(std::uint32_t));
 	for (const ObjectState& object : snapshot.Objects) {
-		if (!Detail::ValidObject(object)) {
-			return false;
-		}
+		if (!Detail::WriteObject(packet,object)) return false;
 		networkIds.push_back(object.NetworkId);
-		Detail::WriteUnsigned(packet, object.NetworkId, sizeof(object.NetworkId));
-		if (!Detail::WriteString(packet, object.ClassName) || !Detail::WriteString(packet, object.ModuleName) || !Detail::WriteString(packet, object.PresetName)) {
-			return false;
-		}
-		Detail::WriteFloat(packet, object.PositionX);
-		Detail::WriteFloat(packet, object.PositionY);
-		Detail::WriteFloat(packet, object.VelocityX);
-		Detail::WriteFloat(packet, object.VelocityY);
-		Detail::WriteFloat(packet, object.Rotation);
-		Detail::WriteFloat(packet, object.AngularVelocity);
-		Detail::WriteFloat(packet, object.Health);
-		Detail::WriteUnsigned(packet, object.SpriteFrame, sizeof(object.SpriteFrame));
-		Detail::WriteUnsigned(packet, static_cast<std::uint16_t>(object.Team), sizeof(object.Team));
-		Detail::WriteUnsigned(packet, object.Flags, sizeof(object.Flags));
-		Detail::WriteUnsigned(packet, object.HFlipped ? 1 : 0, sizeof(std::uint8_t));
-		if (object.Flags == c_ObjectFlagTransientPixel) {
-			Detail::WriteUnsigned(packet, object.PixelMaterialId, sizeof(object.PixelMaterialId));
-			Detail::WriteUnsigned(packet, object.PixelColorIndex, sizeof(object.PixelColorIndex));
-			Detail::WriteFloat(packet, object.PixelMass);
-			Detail::WriteUnsigned(packet, object.PixelLifetime, sizeof(object.PixelLifetime));
-			Detail::WriteFloat(packet, object.PixelSharpness);
-		}
-		if (object.Flags == c_ObjectFlagActor) {
-			Detail::WriteUnsigned(packet, object.HasEquippedDevice ? 1 : 0, sizeof(std::uint8_t));
-			if (object.HasEquippedDevice) {
-				if (!Detail::WriteString(packet, object.EquippedDeviceClassName) || !Detail::WriteString(packet, object.EquippedDeviceModuleName) ||
-				    !Detail::WriteString(packet, object.EquippedDevicePresetName)) {
-					return false;
-				}
-				Detail::WriteUnsigned(packet, object.HasEquippedDeviceMagazine ? 1 : 0, sizeof(std::uint8_t));
-				if (object.HasEquippedDeviceMagazine) {
-					if (!Detail::WriteString(packet, object.EquippedDeviceMagazineClassName) || !Detail::WriteString(packet, object.EquippedDeviceMagazineModuleName) ||
-					    !Detail::WriteString(packet, object.EquippedDeviceMagazinePresetName)) {
-						return false;
-					}
-					Detail::WriteUnsigned(packet, std::bit_cast<std::uint32_t>(object.EquippedDeviceMagazineRounds), sizeof(std::uint32_t));
-				}
-			}
-		}
-		if (packet.size() > c_MaxPacketSize) {
-			return false;
-		}
 	}
 	std::sort(networkIds.begin(), networkIds.end());
 	if (std::adjacent_find(networkIds.begin(), networkIds.end()) != networkIds.end()) {
@@ -497,6 +603,11 @@ inline bool EncodeSnapshot(const Snapshot& snapshot, std::uint32_t sequence, std
 		Detail::WriteFloat(packet, player.CameraY);
 		Detail::WriteUnsigned(packet, static_cast<std::uint16_t>(player.Team), sizeof(player.Team));
 		Detail::WriteUnsigned(packet, player.ActiveHuman ? 1 : 0, sizeof(std::uint8_t));
+	}
+	Detail::WriteUnsigned(packet,snapshot.Inventory.size(),2);
+	for (const auto& item:snapshot.Inventory) {
+		Detail::WriteUnsigned(packet,item.ParentNetworkId,8); Detail::WriteUnsigned(packet,item.Slot,2);
+		if (!Detail::WriteObject(packet,item.Object)) return false;
 	}
 	if (packet.size() > c_MaxPacketSize) return false;
 
@@ -557,50 +668,7 @@ inline bool DecodeSnapshot(std::span<const std::uint8_t> packet, Snapshot& snaps
 	networkIds.reserve(static_cast<std::size_t>(objectCount));
 	for (std::uint64_t index = 0; index < objectCount; ++index) {
 		ObjectState object;
-		if (!Detail::ReadUnsigned(packet, offset, sizeof(object.NetworkId), value)) return false;
-		object.NetworkId = value;
-		if (!Detail::ReadString(packet, offset, object.ClassName) || !Detail::ReadString(packet, offset, object.ModuleName) || !Detail::ReadString(packet, offset, object.PresetName) ||
-		    !Detail::ReadFloat(packet, offset, object.PositionX) || !Detail::ReadFloat(packet, offset, object.PositionY) ||
-		    !Detail::ReadFloat(packet, offset, object.VelocityX) || !Detail::ReadFloat(packet, offset, object.VelocityY) ||
-		    !Detail::ReadFloat(packet, offset, object.Rotation) || !Detail::ReadFloat(packet, offset, object.AngularVelocity) ||
-		    !Detail::ReadFloat(packet, offset, object.Health) || !Detail::ReadUnsigned(packet, offset, sizeof(object.SpriteFrame), value)) {
-			return false;
-		}
-		object.SpriteFrame = static_cast<std::uint16_t>(value);
-		if (!Detail::ReadUnsigned(packet, offset, sizeof(object.Team), value)) return false;
-		object.Team = std::bit_cast<std::int16_t>(static_cast<std::uint16_t>(value));
-		if (!Detail::ReadUnsigned(packet, offset, sizeof(object.Flags), value)) return false;
-		object.Flags = static_cast<std::uint16_t>(value);
-		if (!Detail::ReadUnsigned(packet, offset, sizeof(std::uint8_t), value) || value > 1) return false;
-		object.HFlipped = value != 0;
-		if (object.Flags == c_ObjectFlagTransientPixel) {
-			if (!Detail::ReadUnsigned(packet, offset, sizeof(object.PixelMaterialId), value)) return false;
-			object.PixelMaterialId = static_cast<std::uint8_t>(value);
-			if (!Detail::ReadUnsigned(packet, offset, sizeof(object.PixelColorIndex), value)) return false;
-			object.PixelColorIndex = static_cast<std::uint16_t>(value);
-			if (!Detail::ReadFloat(packet, offset, object.PixelMass) || !Detail::ReadUnsigned(packet, offset, sizeof(object.PixelLifetime), value)) return false;
-			object.PixelLifetime = static_cast<std::uint32_t>(value);
-			if (!Detail::ReadFloat(packet, offset, object.PixelSharpness)) return false;
-		}
-		if (object.Flags == c_ObjectFlagActor) {
-			if (!Detail::ReadUnsigned(packet, offset, sizeof(std::uint8_t), value) || value > 1) return false;
-			object.HasEquippedDevice = value != 0;
-			if (object.HasEquippedDevice) {
-				if (!Detail::ReadString(packet, offset, object.EquippedDeviceClassName) || !Detail::ReadString(packet, offset, object.EquippedDeviceModuleName) ||
-				    !Detail::ReadString(packet, offset, object.EquippedDevicePresetName) || !Detail::ReadUnsigned(packet, offset, sizeof(std::uint8_t), value) || value > 1) {
-					return false;
-				}
-				object.HasEquippedDeviceMagazine = value != 0;
-				if (object.HasEquippedDeviceMagazine) {
-					if (!Detail::ReadString(packet, offset, object.EquippedDeviceMagazineClassName) || !Detail::ReadString(packet, offset, object.EquippedDeviceMagazineModuleName) ||
-					    !Detail::ReadString(packet, offset, object.EquippedDeviceMagazinePresetName) || !Detail::ReadUnsigned(packet, offset, sizeof(std::uint32_t), value)) {
-						return false;
-					}
-					object.EquippedDeviceMagazineRounds = std::bit_cast<std::int32_t>(static_cast<std::uint32_t>(value));
-				}
-			}
-		}
-		if (!Detail::ValidObject(object) || !networkIds.insert(object.NetworkId).second) return false;
+		if (!Detail::ReadObject(packet,offset,object) || !networkIds.insert(object.NetworkId).second) return false;
 		decoded.Objects.push_back(std::move(object));
 	}
 	for (PlayerState& player : decoded.Players) {
@@ -617,6 +685,17 @@ inline bool DecodeSnapshot(std::span<const std::uint8_t> packet, Snapshot& snaps
 			return object.NetworkId == player.ControlledActorId && object.Flags == c_ObjectFlagActor;
 		})) return false;
 	}
+	if (!Detail::ReadUnsigned(packet,offset,2,value) || value>c_MaxInventoryItems) return false;
+	const auto inventoryCount=static_cast<std::size_t>(value);
+	decoded.Inventory.reserve(inventoryCount);
+	for (std::size_t index=0;index<inventoryCount;++index) {
+		InventoryItemState item;
+		if (!Detail::ReadUnsigned(packet,offset,8,value)) return false; item.ParentNetworkId=value;
+		if (!Detail::ReadUnsigned(packet,offset,2,value)) return false; item.Slot=static_cast<std::uint16_t>(value);
+		if (!Detail::ReadObject(packet,offset,item.Object)) return false;
+		decoded.Inventory.push_back(std::move(item));
+	}
+	if (!Detail::ValidInventory(decoded)) return false;
 	if (offset != packet.size()) {
 		return false;
 	}

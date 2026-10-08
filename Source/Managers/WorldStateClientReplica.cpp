@@ -30,6 +30,8 @@
 #include <string_view>
 #include <unordered_set>
 #include <vector>
+#include <memory>
+#include <functional>
 
 namespace {
 	// Compare identities only: the replica can already have been removed externally.
@@ -47,6 +49,7 @@ namespace {
 void RTE::WorldStateClientReplica::Forget() {
 	for (const auto& [id, replica] : m_Objects) ClearReplicaControlLinks(replica.Object);
 	m_Objects.clear();
+	m_InventoryObjects.clear();
 	m_LastSnapshotTick = 0;
 }
 
@@ -56,7 +59,9 @@ namespace {
 	using CandidateBuckets = std::unordered_map<std::string, std::deque<MovableObject*>>;
 
 	std::string MakeIdentityKey(const MovableObject& object) {
-		const std::array<std::string_view, 3> identity = {object.GetClassName(), object.GetModuleName(), object.GetPresetName()};
+		// GetModuleName returns an owning string; keep it alive while using its view.
+		const std::string moduleName=object.GetModuleName();
+		const std::array<std::string_view, 3> identity = {object.GetClassName(), moduleName, object.GetPresetName()};
 		std::string key;
 		for (const std::string_view part : identity) {
 			key += std::to_string(part.size()) + ':';
@@ -105,6 +110,21 @@ namespace {
 		return object;
 	}
 
+	bool ApplyOwnMagazine(HDFirearm& firearm, const WorldStateProtocol::ObjectState& state) {
+		if (!state.HasOwnMagazine) { firearm.SetMagazine(nullptr); return firearm.GetMagazine()==nullptr; }
+		Magazine* magazine=firearm.GetMagazine();
+		auto matches=[&]() { return magazine && magazine->GetClassName()==state.OwnMagazineClassName &&
+		    magazine->GetModuleName()==state.OwnMagazineModuleName && magazine->GetPresetName()==state.OwnMagazinePresetName; };
+		if (!matches()) {
+			const int module=g_PresetMan.GetModuleID(state.OwnMagazineModuleName);
+			const Entity* preset=module>=0 ? g_PresetMan.GetEntityPreset(state.OwnMagazineClassName,state.OwnMagazinePresetName,module) : nullptr;
+			std::unique_ptr<Entity> clone(preset ? preset->Clone() : nullptr);
+			if (auto* replacement=dynamic_cast<Magazine*>(clone.get())) { firearm.SetMagazine(replacement); clone.release(); magazine=replacement; }
+		}
+		if (!matches()) return false;
+		magazine->SetRoundCount(state.OwnMagazineRounds); return magazine->GetRoundCount()==state.OwnMagazineRounds;
+	}
+
 	bool ApplyFields(MovableObject& target, const WorldStateProtocol::ObjectState& state) {
 		target.SetPos(Vector(state.PositionX, state.PositionY));
 		target.SetPrevPos(target.GetPos());
@@ -122,6 +142,7 @@ namespace {
 		if (Actor* actor = dynamic_cast<Actor*>(&target)) {
 			actor->SetHealth(state.Health);
 		}
+		if (auto* firearm=dynamic_cast<HDFirearm*>(&target)) return ApplyOwnMagazine(*firearm,state);
 		if (auto* human = dynamic_cast<AHuman*>(&target)) {
 			HeldDevice* equippedDevice = human->GetEquippedItem();
 			const bool equippedDeviceMatches = equippedDevice && equippedDevice->GetClassName() == state.EquippedDeviceClassName &&
@@ -201,6 +222,86 @@ namespace {
 		}
 	}
 } // namespace
+
+void WorldStateClientReplica::ApplyInventory(const WorldStateProtocol::Snapshot& snapshot, ApplyResult& result) {
+	// Validate borrowed pointers against the live ownership tree before consulting cached IDs.
+	std::unordered_set<MovableObject*> live;
+	std::function<void(Actor&,std::size_t)> collect=[&](Actor& actor,std::size_t depth) {
+		if (depth>WorldStateProtocol::c_MaxInventoryDepth) return;
+		for (MovableObject* item:*actor.GetInventory()) if (item && live.insert(item).second)
+			if (auto* child=dynamic_cast<Actor*>(item)) collect(*child,depth+1);
+	};
+	std::unordered_map<std::uint64_t,Actor*> parents;
+	for (const auto& state:snapshot.Objects) {
+		const auto root=m_Objects.find(state.NetworkId);
+		if (root!=m_Objects.end()) if (auto* actor=dynamic_cast<Actor*>(root->second.Object)) {
+			parents.emplace(state.NetworkId,actor); collect(*actor,0);
+		}
+	}
+	std::unordered_map<MovableObject*,std::uint64_t> cachedIds;
+	for (const auto& [id,item]:m_InventoryObjects) if (live.contains(item)) cachedIds.emplace(item,id);
+	result.InventoryLiveObjects=static_cast<std::uint32_t>(live.size());
+	result.InventoryCachedObjects=static_cast<std::uint32_t>(cachedIds.size());
+	m_InventoryObjects.clear();
+	// Drain children before their parent. This keeps every reusable item independently owned
+	// while transferring between inventories, including cargo actors with their own inventory.
+	std::unordered_map<std::uint64_t,std::unique_ptr<MovableObject>> pool;
+	std::vector<std::unique_ptr<MovableObject>> unmatched;
+	std::function<void(Actor&,std::size_t,bool)> drain=[&](Actor& actor,std::size_t depth,bool reuse) {
+		if (depth>WorldStateProtocol::c_MaxInventoryDepth) return;
+		while (actor.GetInventorySize()>0) {
+			MovableObject* item=actor.RemoveInventoryItemAtIndex(actor.GetInventorySize()-1);
+			if (!item) continue;
+			if (auto* child=dynamic_cast<Actor*>(item)) drain(*child,depth+1,reuse);
+			const auto cached=cachedIds.find(item);
+			if (reuse && cached!=cachedIds.end()) pool.emplace(cached->second,std::unique_ptr<MovableObject>(item));
+			else unmatched.emplace_back(item);
+		}
+	};
+	for (const auto& [id,parent]:parents) drain(*parent,0,true);
+	for (const auto& state:snapshot.Inventory) {
+		const auto parent=parents.find(state.ParentNetworkId);
+		if (parent==parents.end()) { ++result.MissingPresets; continue; }
+		std::unique_ptr<MovableObject> item;
+		if (auto existing=pool.find(state.Object.NetworkId); existing!=pool.end()) item=std::move(existing->second);
+		if (item && MakeIdentityKey(*item)!=MakeIdentityKey(state.Object)) { item->DestroyScriptState(); item.reset(); }
+		if (!item) {
+			std::string reason;
+			item.reset(CloneObject(state.Object,reason));
+			if (!item) { ++result.MissingPresets; continue; }
+			if (auto* actor=dynamic_cast<Actor*>(item.get())) drain(*actor,0,false);
+			++result.InventoryObjectsSpawned;
+		}
+		if (!ApplyFields(*item,state.Object)) ++result.MissingPresets;
+		if (!parent->second->AddToInventoryBack(item.get())) { item->DestroyScriptState(); ++result.MissingPresets; continue; }
+		MovableObject* adopted=item.release();
+		m_InventoryObjects.emplace(state.Object.NetworkId,adopted);
+		if (auto* actor=dynamic_cast<Actor*>(adopted)) parents.emplace(state.Object.NetworkId,actor);
+		++result.InventoryStatesApplied;
+	}
+	for (auto& [id,item]:pool) if (item) item->DestroyScriptState();
+	for (auto& item:unmatched) item->DestroyScriptState();
+	result.InventoryMatches=result.InventoryStatesApplied==snapshot.Inventory.size();
+	auto mismatch=[&](std::string detail) { result.InventoryMatches=false; if (result.InventoryMismatchDetails.size()<8) result.InventoryMismatchDetails.push_back(std::move(detail)); };
+	std::unordered_map<std::uint64_t,std::size_t> expectedSizes;
+	for (const auto& state:snapshot.Inventory) {
+		++expectedSizes[state.ParentNetworkId];
+		const auto parent=parents.find(state.ParentNetworkId);
+		const auto item=m_InventoryObjects.find(state.Object.NetworkId);
+		if (parent==parents.end() || item==m_InventoryObjects.end() || state.Slot>=parent->second->GetInventory()->size() ||
+		    parent->second->GetInventory()->at(state.Slot)!=item->second) mismatch("slot id="+std::to_string(state.Object.NetworkId)+" parent="+std::to_string(state.ParentNetworkId)+" slot="+std::to_string(state.Slot));
+		if (item!=m_InventoryObjects.end()) {
+			if (MakeIdentityKey(*item->second)!=MakeIdentityKey(state.Object) || item->second->GetTeam()!=state.Object.Team) mismatch("identity id="+std::to_string(state.Object.NetworkId)+" actual="+MakeIdentityKey(*item->second)+" expected="+MakeIdentityKey(state.Object)+" team="+std::to_string(item->second->GetTeam())+" expected_team="+std::to_string(state.Object.Team));
+			if (auto* actor=dynamic_cast<Actor*>(item->second); actor && actor->GetHealth()!=state.Object.Health) mismatch("health id="+std::to_string(state.Object.NetworkId)+" actual="+std::to_string(actor->GetHealth())+" expected="+std::to_string(state.Object.Health));
+			if (auto* firearm=dynamic_cast<HDFirearm*>(item->second)) {
+				const Magazine* magazine=firearm->GetMagazine();
+				if (state.Object.HasOwnMagazine ? (!magazine || magazine->GetRoundCount()!=state.Object.OwnMagazineRounds ||
+				    magazine->GetModuleName()!=state.Object.OwnMagazineModuleName || magazine->GetPresetName()!=state.Object.OwnMagazinePresetName) : magazine!=nullptr) mismatch("magazine id="+std::to_string(state.Object.NetworkId)+" actual_rounds="+std::to_string(magazine ? magazine->GetRoundCount() : -2)+" expected_rounds="+std::to_string(state.Object.OwnMagazineRounds));
+			}
+		}
+	}
+	for (const auto& [id,parent]:parents) if (parent->GetInventory()->size()!=expectedSizes[id]) mismatch("size parent="+std::to_string(id)+" actual="+std::to_string(parent->GetInventorySize())+" expected="+std::to_string(expectedSizes[id]));
+}
 
 bool WorldStateClientReplica::AdjustCameraForInterpolation(std::uint64_t networkId, Vector& camera) const {
 	const auto replica = m_Objects.find(networkId);
@@ -324,7 +425,7 @@ WorldStateClientReplica::ApplyResult WorldStateClientReplica::Apply(const WorldS
 			if (state.ClassName == "AHuman") {
 				if (fieldsApplied) ++result.HumanEquipmentStatesApplied;
 				else ++result.MissingPresets;
-			}
+			} else if (!fieldsApplied) ++result.MissingPresets;
 			if (!g_MovableMan.AddMO(object)) {
 				object->DestroyScriptState();
 				delete object;
@@ -347,7 +448,7 @@ WorldStateClientReplica::ApplyResult WorldStateClientReplica::Apply(const WorldS
 			if (state.ClassName == "AHuman") {
 				if (fieldsApplied) ++result.HumanEquipmentStatesApplied;
 				else ++result.MissingPresets;
-			}
+			} else if (!fieldsApplied) ++result.MissingPresets;
 			if (wasTrackedReplica) {
 				object->SetPos(interpolationStartPosition);
 				object->SetPrevPos(interpolationStartPosition);
@@ -381,6 +482,7 @@ WorldStateClientReplica::ApplyResult WorldStateClientReplica::Apply(const WorldS
 		}
 	}
 	if (authoritativeWorld) {
+		ApplyInventory(snapshot,result);
 		if (Activity* activity = g_ActivityMan.GetActivity()) {
 			activity->SetActivityState(static_cast<Activity::ActivityState>(snapshot.ActivityState));
 			for (int team = 0; team < Activity::MaxTeamCount; ++team) activity->SetTeamFunds(snapshot.TeamFunds[team], team);

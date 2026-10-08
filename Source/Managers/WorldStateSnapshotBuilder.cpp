@@ -76,6 +76,8 @@ WorldStateProtocol::Snapshot WorldStateSnapshotBuilder::Capture(std::uint32_t ti
 	std::unordered_map<const Actor*, std::uint64_t> actorNetworkIds;
 	liveRuntimeIds.reserve(objects.size());
 	snapshot.Objects.reserve(objects.size());
+	struct InventoryParent { std::uint64_t Id; std::uint16_t Slot; std::size_t Depth; };
+	std::unordered_map<const MovableObject*,InventoryParent> inventoryParents;
 	for (const SceneObject* sceneObject : objects) {
 		const auto* movableObject = dynamic_cast<const MovableObject*>(sceneObject);
 		if (!movableObject) {
@@ -114,7 +116,7 @@ WorldStateProtocol::Snapshot WorldStateSnapshotBuilder::Capture(std::uint32_t ti
 			object.HFlipped = sprite->IsHFlipped();
 		}
 		if (const auto* actor = dynamic_cast<const Actor*>(movableObject)) {
-			actorNetworkIds.emplace(actor, networkId);
+			if (!inventoryParents.contains(actor)) actorNetworkIds.emplace(actor, networkId);
 			object.Health = actor->GetHealth();
 			object.Flags = WorldStateProtocol::c_ObjectFlagActor;
 			if (const auto* human = dynamic_cast<const AHuman*>(actor)) {
@@ -137,6 +139,10 @@ WorldStateProtocol::Snapshot WorldStateSnapshotBuilder::Capture(std::uint32_t ti
 		} else if (dynamic_cast<const HeldDevice*>(movableObject)) {
 			object.Flags = WorldStateProtocol::c_ObjectFlagItem;
 		} else if (const auto* pixel = dynamic_cast<const MOPixel*>(movableObject); pixel && (object.PresetName.empty() || object.PresetName == "None")) {
+			if (!pixel->GetMaterial()) {
+				if (inventoryParents.contains(pixel)) snapshot.InventoryComplete=false;
+				continue;
+			}
 			object.Flags = WorldStateProtocol::c_ObjectFlagTransientPixel;
 			object.PixelMaterialId = pixel->GetMaterial()->GetIndex();
 			object.PixelColorIndex = static_cast<std::uint16_t>(pixel->GetColorIndex());
@@ -147,7 +153,26 @@ WorldStateProtocol::Snapshot WorldStateSnapshotBuilder::Capture(std::uint32_t ti
 			object.Flags = WorldStateProtocol::c_ObjectFlagParticle;
 		}
 		object.Team = static_cast<std::int16_t>(movableObject->GetTeam());
-		snapshot.Objects.push_back(std::move(object));
+		if (const auto* firearm=dynamic_cast<const HDFirearm*>(movableObject)) if (const Magazine* magazine=firearm->GetMagazine()) {
+			object.HasOwnMagazine=true; object.OwnMagazineClassName=magazine->GetClassName(); object.OwnMagazineModuleName=magazine->GetModuleName();
+			object.OwnMagazinePresetName=magazine->GetPresetName(); object.OwnMagazineRounds=magazine->GetRoundCount();
+		}
+		const auto parent=inventoryParents.find(movableObject);
+		const std::size_t depth=parent==inventoryParents.end() ? 0 : parent->second.Depth;
+		if (parent==inventoryParents.end()) snapshot.Objects.push_back(std::move(object));
+		else snapshot.Inventory.push_back({parent->second.Id,parent->second.Slot,std::move(object)});
+		if (const auto* actor=dynamic_cast<const Actor*>(movableObject)) {
+			const auto* inventory=actor->GetInventory();
+			if (inventory->size()>WorldStateProtocol::c_MaxActorInventory ||
+			    (depth>=WorldStateProtocol::c_MaxInventoryDepth && !inventory->empty())) { snapshot.InventoryComplete=false; continue; }
+			std::uint16_t slot=0;
+			for (const MovableObject* item:*inventory) {
+				if (!item || item->GetUniqueID()<=0 || inventoryParents.size()>=WorldStateProtocol::c_MaxInventoryItems ||
+				    includedObjectIds.contains(m_NetworkIdsByRuntimeId.contains(item->GetUniqueID()) ? m_NetworkIdsByRuntimeId.at(item->GetUniqueID()) : 0) ||
+				    !inventoryParents.emplace(item,InventoryParent{networkId,slot++,depth+1}).second) { snapshot.InventoryComplete=false; break; }
+				objects.push_back(const_cast<MovableObject*>(item));
+			}
+		}
 	}
 	if (activity) {
 		for (int slot = Players::PlayerOne; slot < Players::MaxPlayerCount; ++slot) {

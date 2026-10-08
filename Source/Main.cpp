@@ -77,6 +77,7 @@
 #include "System/DeliveryValidationTest.h"
 #include "System/WorldStatePurchaseTest.h"
 #include "System/WorldStateBuyMenu.h"
+#include "System/WorldStateInventoryTest.h"
 #include "WorldStateCompression.h"
 #include "WorldStateTransport.h"
 #include "WorldStateSnapshotBuilder.h"
@@ -240,6 +241,7 @@ namespace {
 		bool RequestPurchaseTest = false;
 		bool RequestBuyMenuTest = false;
 		bool RequirePurchasePolicyTest = false, PurchasePolicyTestObserved = false, RequirePurchasePricingTest = false;
+		bool RequestInventoryTest=false, InventoryInitialObserved=false, InventoryMutationObserved=false, InventoryReuseObserved=false;
 		int BuyMenuTestStage = 0;
 		bool BuyMenuTestPassed = false, BuyMenuCatalogCaptured = false, BuyMenuLandingCaptured = false;
 		float BuyMenuInitialFunds = 0, BuyMenuDisplayedCost = 0;
@@ -368,6 +370,7 @@ namespace {
 			if (argument == "-debug-run-world-state-buy-menu") state.RequestBuyMenuTest = true;
 			if (argument == "-debug-run-world-state-purchase-policy") { state.RequestBuyMenuTest=true; state.RequirePurchasePolicyTest=true; }
 			if (argument == "-debug-run-world-state-purchase-pricing") { state.RequestBuyMenuTest=true; state.RequirePurchasePolicyTest=true; state.RequirePurchasePricingTest=true; }
+			if (argument == "-debug-run-world-state-inventory") state.RequestInventoryTest=true;
 			if (argument == "-debug-run-cpu-graphics-preflight") { state.CPUGraphicsPreflight = true; state.PreflightOnly = true; }
 			if (argument == "-debug-run-headless-content") { state.HeadlessContentPreflight = true; state.CPUGraphicsPreflight = true; state.PreflightOnly = true; }
 			if (argument == "-debug-run-headless-simulation") { state.HeadlessSimulationPreflight = true; state.HeadlessContentPreflight = true; state.CPUGraphicsPreflight = true; state.PreflightOnly = true; }
@@ -466,6 +469,9 @@ namespace {
 		const std::string utf8Probe = "Aя🙂";
 		const bool purchaseCodecPassed=TestPurchaseCodec();
 		const bool policyCodecPassed=WorldStateProtocol::TestPurchasePolicyCodec();
+		const bool inventoryCodecPassed=TestWorldStateInventoryCodec();
+		state.Log << "world_state_inventory_codec=" << (inventoryCodecPassed ? "passed" : "failed") << '\n' << std::flush;
+		if (!inventoryCodecPassed) return false;
 		state.Log << "world_state_purchase_policy_codec=" << (policyCodecPassed ? "passed" : "failed") << '\n' << std::flush;
 		if (!policyCodecPassed) return false;
 		state.Log << "world_state_purchase_codec=" << (purchaseCodecPassed ? "passed" : "failed") << '\n' << std::flush;
@@ -1595,6 +1601,11 @@ namespace {
 		          state.HostSessionTestPassed && worldIdentityStable && replicaSmokePassed && transientPixelReplicaPassed && terrainPatchApplyPassed &&
 		          networkInputApplicationPassed && worldSnapshotPassed && snapshotCompressionPassed && liveSnapshotTransportPassed;
 		const double elapsedSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - state.StartTime).count();
+		if (state.RequestInventoryTest) {
+			const bool inventoryPassed=state.InventoryInitialObserved && state.InventoryMutationObserved && state.InventoryReuseObserved;
+			state.Log << "world_state_inventory=" << (inventoryPassed ? "passed" : "failed") << '\n' << std::flush;
+			success=success && inventoryPassed;
+		}
 		if (state.RequestBuyMenuTest) {
 			if (state.RequirePurchasePolicyTest) {
 				const bool passed=state.PurchasePolicyTestObserved || (worldStateBuyMenu && worldStateBuyMenu->IsSpectator());
@@ -1690,7 +1701,9 @@ namespace {
 		const bool requiredClientTransitionComplete = !state.RequireWorldStateTransition || state.WorldStateTransitionApplied;
 		const bool requiredTransitionsComplete = requiredHostTransitionComplete && requiredClientTransitionComplete &&
 		    (!state.HostControlSmoke || (state.HostControlPassed && state.SimulationUpdates >= state.HostControlPassedUpdate + 180)) &&
-		    (!state.ClientControlSmoke || state.ClientControlPassed);
+		    (!state.ClientControlSmoke || state.ClientControlPassed) &&
+		    (!state.RequestInventoryTest || (state.InventoryInitialObserved && state.InventoryMutationObserved && state.InventoryReuseObserved) ||
+		     std::chrono::steady_clock::now()-state.SimulationStartTime>std::chrono::seconds(60));
 		if (!state.FinalScreenshotCaptured && state.SimulationUpdates >= state.UpdateLimit && requiredTransitionsComplete) {
 			state.FinalScreenshotCaptured = true;
 			capture("final");
@@ -1812,6 +1825,8 @@ int RunPersistentHeadlessServer(const ServerConfiguration& config) {
 		for (const std::string& command : console.Poll()) {
 			if (command == "quit" || command == "exit" || command == "stop") ServerConsole::StopRequested.store(true);
 			else if (command == "status") log("INFO status tick=" + std::to_string(tick) + " clients=" + std::to_string(session.GetConnectedClientCount()) + " actors=" + std::to_string(g_MovableMan.GetActorCount()));
+			else if (command == "debug-inventory-create") log(CreateWorldStateInventoryFixture() ? "INFO debug_inventory=create_passed" : "ERROR debug_inventory=create_failed");
+			else if (command == "debug-inventory-mutate") log(MutateWorldStateInventoryFixture() ? "INFO debug_inventory=mutation_passed" : "ERROR debug_inventory=mutation_failed");
 			else if (command == "debug-purchase-policy" || command == "debug-purchase-pricing") {
 				auto* activity=dynamic_cast<GameActivity*>(g_ActivityMan.GetActivity());
 				BuyMenuGUI* menu=activity ? activity->GetBuyGUI(0) : nullptr;
@@ -2364,6 +2379,17 @@ void RunGameLoop() {
 						debugRunState.PreviousMagazineRoundsByNetworkId = std::move(currentMagazineRounds);
 					}
 					const WorldStateClientReplica::ApplyResult applied = worldStateClientReplica.Apply(receivedSnapshot, true);
+					if (debugRunState.RequestInventoryTest && applied.InventoryMatches && applied.MissingPresets==0) {
+						const int observed=ObserveWorldStateInventoryFixture(receivedSnapshot);
+						if (observed==1 && !debugRunState.InventoryInitialObserved) {
+							debugRunState.InventoryInitialObserved=true;
+							debugRunState.Log << "world_state_inventory_initial=passed\n" << std::flush;
+						}
+						if (observed==2) {
+							debugRunState.InventoryMutationObserved=true;
+							if (applied.InventoryObjectsSpawned==0) debugRunState.InventoryReuseObserved=true;
+						}
+					}
 					g_MovableMan.CommitPendingAdditions();
 					if (debugRunState.Enabled) {
 						Activity* activity = g_ActivityMan.GetActivity();
@@ -2389,6 +2415,8 @@ void RunGameLoop() {
 						                    << " funds_team0=" << std::to_string(receivedSnapshot.TeamFunds[0])
 						                    << " funds_team1=" << std::to_string(receivedSnapshot.TeamFunds[1])
 						                    << " missing_presets=" << applied.MissingPresets << " human_equipment_applied=" << applied.HumanEquipmentStatesApplied
+						                    << " inventory_applied=" << applied.InventoryStatesApplied << " inventory_spawned=" << applied.InventoryObjectsSpawned << " inventory_matches=" << applied.InventoryMatches
+						                    << " inventory_live=" << applied.InventoryLiveObjects << " inventory_cached=" << applied.InventoryCachedObjects
 						                    << " position_error_samples=" << applied.PositionErrorsMeasured
 						                    << " mean_position_error_before_correction_px=" << applied.MeanPositionErrorBeforeCorrection
 						                    << " max_position_error_before_correction_px=" << applied.MaxPositionErrorBeforeCorrection << '\n'
@@ -2396,6 +2424,7 @@ void RunGameLoop() {
 						for (const std::string& detail : applied.MissingPresetDetails) {
 							worldStateClientLog << "missing=" << detail << '\n';
 						}
+						for (const std::string& detail : applied.InventoryMismatchDetails) worldStateClientLog << "inventory_mismatch=" << detail << '\n';
 						worldStateClientLog.flush();
 						worldStateClientLastLoggedSnapshotCount = snapshotCount;
 					}
