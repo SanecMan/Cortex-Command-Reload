@@ -292,6 +292,8 @@ std::string PresetMan::GetFullModulePath(const std::string& modulePath) const {
 	// Since Windows supports both forward and backslash separators it's safe to replace all backslashes with forward slashes.
 	std::string modulePathGeneric = UTF8::PathToString(UTF8::PathFromString(UTF8::PreserveLegacyWindows1251Path(modulePath)));
 	std::replace(modulePathGeneric.begin(), modulePathGeneric.end(), '\\', '/');
+	// Absolute resource paths already identify their location; do not prepend Mods/.
+	if (UTF8::PathFromString(modulePathGeneric).is_absolute()) return modulePathGeneric;
 
 	const std::string pathTopDir = modulePathGeneric.substr(0, modulePathGeneric.find_first_of("/") + 1);
 	const std::string moduleName = GetModuleNameFromPath(modulePathGeneric);
