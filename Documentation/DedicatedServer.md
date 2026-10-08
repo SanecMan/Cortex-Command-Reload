@@ -32,9 +32,21 @@ real clients, nested inventory and background-hand changes, zero client
 simulation updates and 67 server updates after disconnect. The server reported
 `video_initialized=0` and ran with an invalid SDL video driver. The separate
 `MesonPortable_Ёжик` run passed 60 diagnostic updates using a Unicode output path.
-These are runtime verification results, not performance benchmarks. The Meson
-link currently warns about conflicting CRT defaults (LNK4098); the successful
-smoke runs do not establish safety of every third-party allocation boundary.
+These are runtime verification results, not performance benchmarks.
+
+The initial Meson link warned about conflicting CRT defaults (LNK4098). The
+legacy prebuilt zlib-ng archive used `/MT`, whereas the Meson engine uses `/MD`.
+Meson now builds zlib-ng from its checked-in sources with the selected runtime,
+the existing compatibility API and runtime SIMD dispatch. Both executables
+relinked without LNK4098. `meson test -C build 'zlib round-trip'` verifies 40
+combinations of data sizes, compression levels and repetitive/random data,
+including checksums and rejection of truncated streams. This change applies
+to Meson; the Visual Studio dependency projects are unchanged.
+`ZlibSource_Ёжик` passed the 60-update engine diagnostic with the rebuilt library.
+`SourceZlibPair` passed nested inventory/background-hand replication with two
+clients in 40.31 seconds, then observed 71 server updates after disconnect.
+The earlier binary remains the user's MSBuild Final game; these Meson tests run
+from their separate build directory.
 
 A compile of the POSIX entry branch with a stub engine proved argument forwarding
 and forced server mode; it is not a Linux engine build or runtime test. Linux
