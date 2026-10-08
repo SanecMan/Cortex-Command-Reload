@@ -1,6 +1,7 @@
 #pragma once
 
 #include "UTF8.h"
+#include "WorldStateAttachment.h"
 
 #include <algorithm>
 #include <array>
@@ -19,7 +20,7 @@
 namespace RTE::WorldStateProtocol {
 
 inline constexpr std::uint32_t c_Magic = 0x31524343; // "CCR1" on the wire.
-inline constexpr std::uint16_t c_Version = 15;
+inline constexpr std::uint16_t c_Version = 16;
 inline constexpr std::size_t c_TeamCount = 4;
 inline constexpr std::int8_t c_NoActivity = -1;
 inline constexpr std::int8_t c_MaxActivityState = 6;
@@ -101,6 +102,10 @@ struct ObjectState {
 	std::string OwnMagazineClassName, OwnMagazineModuleName, OwnMagazinePresetName;
 	std::int32_t OwnMagazineRounds=0;
 	HandDeviceState BackgroundDevice;
+	bool HasAttachmentState = false;
+	std::vector<AttachmentState> Attachments;
+	float AimAngle = 0;
+	std::uint8_t ActorStatus = 0;
 	bool operator==(const ObjectState&) const = default;
 };
 
@@ -256,7 +261,11 @@ namespace Detail {
 		       UTF8::IsValid(object.ClassName) && UTF8::IsValid(object.ModuleName) && UTF8::IsValid(object.PresetName) &&
 		       std::isfinite(object.PositionX) && std::isfinite(object.PositionY) && std::isfinite(object.VelocityX) &&
 		       std::isfinite(object.VelocityY) && std::isfinite(object.Rotation) && std::isfinite(object.AngularVelocity) &&
-		       std::isfinite(object.Health) && object.Team >= c_NoTeam && object.Team < c_MaxTeamCount &&
+		       std::isfinite(object.Health) && std::isfinite(object.AimAngle) && object.ActorStatus <= 4 &&
+		       (object.Flags == c_ObjectFlagActor || (object.AimAngle == 0 && object.ActorStatus == 0)) &&
+		       (object.HasAttachmentState ? ValidAttachmentTree(object.Attachments, c_MaxStringBytes) : object.Attachments.empty()) &&
+		       (object.Flags != c_ObjectFlagTransientPixel || !object.HasAttachmentState) &&
+		       object.Team >= c_NoTeam && object.Team < c_MaxTeamCount &&
 		       (object.Flags == c_ObjectFlagActor || object.Flags == c_ObjectFlagItem || object.Flags == c_ObjectFlagParticle || object.Flags == c_ObjectFlagTransientPixel) &&
 		       object.PixelColorIndex <= 255 && std::isfinite(object.PixelMass) && object.PixelMass >= 0.0F && std::isfinite(object.PixelSharpness) && equipmentFieldsValid &&
 		       ValidHandDevice(object.BackgroundDevice) &&
@@ -449,6 +458,55 @@ inline bool DecodeInputCommand(std::span<const std::uint8_t> packet, InputComman
 }
 
 namespace Detail {
+inline bool WriteAttachments(std::vector<std::uint8_t>& packet, const ObjectState& object) {
+	WriteUnsigned(packet, object.HasAttachmentState, 1);
+	if (!object.HasAttachmentState) return true;
+	WriteUnsigned(packet, object.Attachments.size(), 2);
+	for (const auto& node : object.Attachments) {
+		WriteUnsigned(packet, node.Parent, 2);
+		WriteUnsigned(packet, node.Slot, 2);
+		WriteUnsigned(packet, static_cast<std::uint8_t>(node.Role), 1);
+		if (!WriteString(packet, node.ClassName) || !WriteString(packet, node.ModuleName) || !WriteString(packet, node.PresetName)) return false;
+		for (float number : {node.ParentOffsetX, node.ParentOffsetY, node.JointOffsetX, node.JointOffsetY,
+		                    node.RotationFromRoot, node.HandOffsetX, node.HandOffsetY}) WriteFloat(packet, number);
+		WriteUnsigned(packet, node.SpriteFrame, 2);
+		WriteUnsigned(packet, (node.HFlipped ? 1 : 0) | (node.DrawAfterParent ? 2 : 0), 1);
+		WriteUnsigned(packet, std::bit_cast<std::uint32_t>(node.MagazineRounds), 4);
+		if (packet.size() > c_MaxPacketSize) return false;
+	}
+	return true;
+}
+inline bool ReadAttachments(std::span<const std::uint8_t> packet, std::size_t& offset, ObjectState& object) {
+	std::uint64_t value = 0;
+	if (!ReadUnsigned(packet, offset, 1, value) || value > 1) return false;
+	object.HasAttachmentState = value != 0;
+	object.Attachments.clear();
+	if (!object.HasAttachmentState) return true;
+	if (!ReadUnsigned(packet, offset, 2, value) || value > c_MaxAttachments) return false;
+	const auto count = static_cast<std::size_t>(value);
+	object.Attachments.reserve(count);
+	for (std::size_t index = 0; index < count; ++index) {
+		AttachmentState node;
+		if (!ReadUnsigned(packet, offset, 2, value)) return false;
+		node.Parent = static_cast<std::uint16_t>(value);
+		if (!ReadUnsigned(packet, offset, 2, value)) return false;
+		node.Slot = static_cast<std::uint16_t>(value);
+		if (!ReadUnsigned(packet, offset, 1, value)) return false;
+		node.Role = static_cast<AttachmentRole>(value);
+		if (!ReadString(packet, offset, node.ClassName) || !ReadString(packet, offset, node.ModuleName) || !ReadString(packet, offset, node.PresetName)) return false;
+		for (float* number : {&node.ParentOffsetX, &node.ParentOffsetY, &node.JointOffsetX, &node.JointOffsetY,
+		                     &node.RotationFromRoot, &node.HandOffsetX, &node.HandOffsetY})
+			if (!ReadFloat(packet, offset, *number)) return false;
+		if (!ReadUnsigned(packet, offset, 2, value)) return false;
+		node.SpriteFrame = static_cast<std::uint16_t>(value);
+		if (!ReadUnsigned(packet, offset, 1, value) || value > 3) return false;
+		node.HFlipped = (value & 1) != 0; node.DrawAfterParent = (value & 2) != 0;
+		if (!ReadUnsigned(packet, offset, 4, value)) return false;
+		node.MagazineRounds = std::bit_cast<std::int32_t>(static_cast<std::uint32_t>(value));
+		object.Attachments.push_back(std::move(node));
+	}
+	return ValidAttachmentTree(object.Attachments, c_MaxStringBytes);
+}
 inline bool WriteObject(std::vector<std::uint8_t>& packet, const ObjectState& object) {
 	if (!ValidObject(object)) return false;
 	if ((object.HasOwnMagazine && object.ClassName!="HDFirearm") || (!object.HasOwnMagazine &&
@@ -476,6 +534,8 @@ inline bool WriteObject(std::vector<std::uint8_t>& packet, const ObjectState& ob
 		Detail::WriteFloat(packet, object.PixelSharpness);
 	}
 	if (object.Flags == c_ObjectFlagActor) {
+		Detail::WriteFloat(packet, object.AimAngle);
+		Detail::WriteUnsigned(packet, object.ActorStatus, 1);
 		Detail::WriteUnsigned(packet, object.HasEquippedDevice ? 1 : 0, sizeof(std::uint8_t));
 		if (object.HasEquippedDevice) {
 		if (!Detail::WriteString(packet, object.EquippedDeviceClassName) || !Detail::WriteString(packet, object.EquippedDeviceModuleName) ||
@@ -514,7 +574,7 @@ inline bool WriteObject(std::vector<std::uint8_t>& packet, const ObjectState& ob
 			Detail::WriteUnsigned(packet,std::bit_cast<std::uint32_t>(object.OwnMagazineRounds),4);
 		}
 	}
-	if (packet.size() > c_MaxPacketSize) {
+	if (!WriteAttachments(packet, object) || packet.size() > c_MaxPacketSize) {
 		return false;
 	}
 	return true;
@@ -547,6 +607,8 @@ inline bool ReadObject(std::span<const std::uint8_t> packet, std::size_t& offset
 		if (!Detail::ReadFloat(packet, offset, object.PixelSharpness)) return false;
 	}
 	if (object.Flags == c_ObjectFlagActor) {
+		if (!Detail::ReadFloat(packet, offset, object.AimAngle) || !Detail::ReadUnsigned(packet, offset, 1, value)) return false;
+		object.ActorStatus = static_cast<std::uint8_t>(value);
 		if (!Detail::ReadUnsigned(packet, offset, sizeof(std::uint8_t), value) || value > 1) return false;
 		object.HasEquippedDevice = value != 0;
 		if (object.HasEquippedDevice) {
@@ -588,7 +650,7 @@ inline bool ReadObject(std::span<const std::uint8_t> packet, std::size_t& offset
 			object.OwnMagazineRounds=std::bit_cast<std::int32_t>(static_cast<std::uint32_t>(value)); if (object.OwnMagazineRounds < -1) return false;
 		}
 	}
-	return ValidObject(object);
+	return ReadAttachments(packet, offset, object) && ValidObject(object);
 }
 inline bool ValidInventory(const Snapshot& snapshot) {
 	if (!snapshot.InventoryComplete || snapshot.Inventory.size()>c_MaxInventoryItems || snapshot.Objects.size()>c_MaxObjects) return false;

@@ -1,5 +1,49 @@
 # Dedicated server
 
+## Attachment and pose replication (v16)
+
+The v16 protocol carries an attachment tree on each rotating world/inventory
+object. Records include parent indices, native pointer-slot roles, class/module/
+preset identity, parent and joint offsets, rotation relative to the root, sprite
+frame, horizontal flip, draw order, arm hand offsets and magazine round counts.
+Actor records also carry aim angle and status. Client and server must have the
+same wire version; this does not change `.rte` syntax or the Lua API.
+
+The native roles cover human limbs/head/jetpack, crab limbs/turret/jetpack,
+rocket legs/thrusters, dropship thrusters/hatches, feet, held devices, firearm
+magazines/flashes and mounted turret devices. Other attachables use numbered
+generic slots. Reconciliation uses the existing ownership setters, immediately
+retires absent/replaced objects under callback suppression and restores the
+authoritative draw order. Existing instances with matching slot and identity
+are retained. Interpolation reapplies server pose without local physics/Lua.
+
+Trees are limited to 256 nodes and 16 levels per rotating object, with bounded
+UTF-8 identity strings and finite numeric fields. Truncated data, invalid parent
+indices, repeated slots and invalid role values are rejected. Exceeding a capture
+limit rejects the snapshot rather than silently removing server attachments.
+Wound emitters, emission/flash activation timing and arbitrary
+Lua-local state are not represented by this tree and remain separate work.
+
+Windows x64 Meson validation on 2026-10-08:
+
+- Both targets compiled and linked. The standalone codec check passed valid
+  round trips, all packet truncations and malformed tree/number/string cases.
+- `AttachmentV16Pose_Ёжик` passed 60 simulation updates, native arm pose, weapon/
+  magazine instance retention, infinite ammunition, limb removal/restoration,
+  callback isolation and the existing terrain/object tests.
+- `AttachmentV16PosePair` passed with two real clients in 53.72 seconds. The
+  server fixture changes native arm offsets/angles and aim, removes a foreground
+  arm, changes the other passenger's pose, and mutates nested inventory/weapons.
+  Each client verifies its actual native attachment trees and numeric poses
+  against received records, with zero attachment mismatches. The headless server
+  continued 65 updates after disconnect. Diagnostic pose comparison runs only
+  under `-debug-run`, not during ordinary gameplay.
+- `AttachmentV16Control` passed movement, firing and scene transition in 65.25
+  seconds. These durations describe verification, not controlled benchmarks.
+
+The tests used the separate Meson build directory. Linux and broad mod visual/
+Lua HUD compatibility have not been verified by these runs.
+
 ## Portable build targets
 
 Meson provides `build_client` (default true) and `build_server` (default false).

@@ -78,11 +78,13 @@
 #include "System/WorldStatePurchaseTest.h"
 #include "System/WorldStateBuyMenu.h"
 #include "System/WorldStateInventoryTest.h"
+#include "System/WorldStateAttachmentTest.h"
 #include "WorldStateCompression.h"
 #include "WorldStateTransport.h"
 #include "WorldStateSnapshotBuilder.h"
 #include "WorldStateClientSession.h"
 #include "WorldStateClientReplica.h"
+#include "WorldStateAttachments.h"
 #include "WorldStateServerSession.h"
 #include "NetworkMessages.h"
 #include "DiscordPresence.h"
@@ -470,6 +472,9 @@ namespace {
 		const bool purchaseCodecPassed=TestPurchaseCodec();
 		const bool policyCodecPassed=WorldStateProtocol::TestPurchasePolicyCodec();
 		const bool inventoryCodecPassed=TestWorldStateInventoryCodec();
+		const bool attachmentCodecPassed=TestWorldStateAttachmentCodec();
+		state.Log << "world_state_attachment_codec=" << (attachmentCodecPassed ? "passed" : "failed") << '\n' << std::flush;
+		if (!attachmentCodecPassed) return false;
 		state.Log << "world_state_inventory_codec=" << (inventoryCodecPassed ? "passed" : "failed") << '\n' << std::flush;
 		if (!inventoryCodecPassed) return false;
 		state.Log << "world_state_purchase_policy_codec=" << (policyCodecPassed ? "passed" : "failed") << '\n' << std::flush;
@@ -1372,6 +1377,8 @@ namespace {
 		const bool objectCallbacksPassed = WorldStateClientReplica::TestObjectScriptCallbacks(state.OutputDirectory, replayCallbacks);
 		state.Log << "world_state_object_callback_smoke=" << (objectCallbacksPassed ? "passed" : "failed") << " callbacks=" << replayCallbacks << '\n' << std::flush;
 		const bool backgroundEquipmentPassed = WorldStateClientReplica::TestBackgroundEquipment();
+		const bool attachmentsPassed = WorldStateAttachments::TestNative();
+		state.Log << "world_state_attachments_smoke=" << (attachmentsPassed ? "passed" : "failed") << '\n' << std::flush;
 		state.Log << "world_state_background_equipment_smoke=" << (backgroundEquipmentPassed ? "passed" : "failed") << '\n' << std::flush;
 		const WorldStateClientReplica::ApplyResult firstApply = replicaSmoke.Apply(worldSnapshot);
 		Vector cameraProbe(320.0F, 240.0F);
@@ -1603,7 +1610,7 @@ namespace {
 			success = success && state.ClientDisconnectWhilePausedObserved;
 		}
 		success = success && utf8GlyphRenderPassed && worldStateTransitionPassed && remoteTerrainMutationPassed && hostTerrainMutationPassed && hostEquipmentMutationPassed && remoteEquipmentMutationPassed &&
-		          state.HostSessionTestPassed && worldIdentityStable && replicaSmokePassed && backgroundEquipmentPassed && objectCallbacksPassed && transientPixelReplicaPassed && terrainPatchApplyPassed &&
+		          state.HostSessionTestPassed && worldIdentityStable && replicaSmokePassed && backgroundEquipmentPassed && attachmentsPassed && objectCallbacksPassed && transientPixelReplicaPassed && terrainPatchApplyPassed &&
 		          networkInputApplicationPassed && worldSnapshotPassed && snapshotCompressionPassed && liveSnapshotTransportPassed;
 		const double elapsedSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - state.StartTime).count();
 		if (state.RequestInventoryTest) {
@@ -2384,7 +2391,7 @@ void RunGameLoop() {
 						debugRunState.PreviousMagazineRoundsByNetworkId = std::move(currentMagazineRounds);
 					}
 					const WorldStateClientReplica::ApplyResult applied = worldStateClientReplica.Apply(receivedSnapshot, true);
-					if (debugRunState.RequestInventoryTest && applied.InventoryMatches && applied.MissingPresets==0) {
+					if (debugRunState.RequestInventoryTest && applied.InventoryMatches && applied.MissingPresets==0 && applied.AttachmentStatesChecked>0 && applied.AttachmentMismatches==0) {
 						const int observed=ObserveWorldStateInventoryFixture(receivedSnapshot);
 						if (observed==1 && !debugRunState.InventoryInitialObserved) {
 							debugRunState.InventoryInitialObserved=true;
@@ -2421,6 +2428,7 @@ void RunGameLoop() {
 						                    << " funds_team1=" << std::to_string(receivedSnapshot.TeamFunds[1])
 						                    << " missing_presets=" << applied.MissingPresets << " human_equipment_applied=" << applied.HumanEquipmentStatesApplied
 						                    << " inventory_applied=" << applied.InventoryStatesApplied << " inventory_spawned=" << applied.InventoryObjectsSpawned << " inventory_matches=" << applied.InventoryMatches
+						                    << " attachment_states_checked=" << applied.AttachmentStatesChecked << " attachment_mismatches=" << applied.AttachmentMismatches
 						                    << " inventory_live=" << applied.InventoryLiveObjects << " inventory_cached=" << applied.InventoryCachedObjects
 						                    << " position_error_samples=" << applied.PositionErrorsMeasured
 						                    << " mean_position_error_before_correction_px=" << applied.MeanPositionErrorBeforeCorrection

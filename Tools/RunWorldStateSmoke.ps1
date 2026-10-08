@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
     [string]$ExecutablePath,
+    [string]$GameDirectory,
     [ValidateSet('Transition', 'Equipment', 'Control')]
     [string]$Scenario = 'Transition',
     [ValidatePattern('^[A-Za-z0-9_-]{1,48}$')]
@@ -14,7 +15,8 @@ param(
 $ErrorActionPreference = 'Stop'
 if (!$ExecutablePath) { $ExecutablePath = Join-Path $PSScriptRoot '..\Cortex Command.exe' }
 $executable = (Resolve-Path -LiteralPath $ExecutablePath).Path
-$gameDirectory = Split-Path -Parent $executable
+if (!$GameDirectory) { $GameDirectory = Split-Path -Parent $executable }
+$gameDirectory = (Resolve-Path -LiteralPath $GameDirectory).Path
 $hostOutput = "$OutputPrefix-Host"
 $clientOutput = "$OutputPrefix-Client"
 $hostReportPath = Join-Path $gameDirectory "ScreenShots\$hostOutput\DebugRun.log"

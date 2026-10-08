@@ -81,7 +81,12 @@ inline bool CreateWorldStateInventoryFixture() {
 		if (!passenger || !gun) return false;
 		while (passenger->GetInventorySize()) delete passenger->RemoveInventoryItemAtIndex(0);
 		passenger->SetTeam(0); passenger->SetHealth(42.25F+index);
-		if (!passenger->GetBGArm()) return false;
+		if (!passenger->GetBGArm() || !passenger->GetFGArm()) return false;
+		passenger->SetRotAngle(-0.15F * (index + 1)); passenger->SetAimAngle(0.3F + index * 0.2F);
+		passenger->GetFGArm()->SetInheritsRotAngle(false);
+		passenger->GetFGArm()->SetRotAngle(0.8F + index * 0.3F);
+		passenger->GetFGArm()->SetParentOffset(Vector(3 + index, 2));
+		passenger->GetFGArm()->SetHandCurrentOffset(Vector(7, -2));
 		if (index == 0) {
 			const Entity* shieldPreset = g_PresetMan.GetEntityPreset("HeldDevice", "Combat Shield", "Coalition.rte");
 			std::unique_ptr<Entity> shield(shieldPreset ? shieldPreset->Clone() : nullptr);
@@ -93,6 +98,7 @@ inline bool CreateWorldStateInventoryFixture() {
 			if (!background) return false;
 			passenger->GetBGArm()->SetHeldDevice(background.release());
 		}
+		passenger->CorrectAttachableAndWoundPositionsAndRotations();
 		if (!passenger->AddToInventoryBack(gun.get())) return false;
 		gun.release();
 		if (!carrier->AddToInventoryBack(passenger)) return false;
@@ -112,21 +118,40 @@ inline bool MutateWorldStateInventoryFixture() {
 	added.release(); gun->GetMagazine()->SetRoundCount(3);
 	auto* second = dynamic_cast<AHuman*>(InventoryFixtureCarrier->GetInventory()->at(1));
 	std::unique_ptr<HDFirearm> background(CloneInventoryFixtureGun(4));
-	if (!background || !passenger->GetBGArm() || !second || !second->GetBGArm()) return false;
+	if (!background || !passenger->GetBGArm() || !second || !second->GetBGArm() || !second->GetFGArm()) return false;
 	passenger->GetBGArm()->SetHeldDevice(background.release());
 	second->GetBGArm()->SetHeldDevice(nullptr);
+	if (!passenger->GetFGArm()) return false;
+	Arm* removedArm = passenger->GetFGArm();
+	removedArm->SetDeleteWhenRemovedFromParent(false); removedArm->SetGibWhenRemovedFromParent(false); removedArm->SetToDelete(false);
+	std::unique_ptr<Attachable> retiredArm(passenger->RemoveAttachable(removedArm, false, false));
+	if (retiredArm) retiredArm->DestroyScriptState();
+	passenger->SetAimAngle(-0.4F);
+	second->GetFGArm()->SetRotAngle(-0.7F);
+	passenger->CorrectAttachableAndWoundPositionsAndRotations(); second->CorrectAttachableAndWoundPositionsAndRotations();
 	return InventoryFixtureCarrier->SwapInventoryItemsByIndex(0,1);
 }
 inline int ObserveWorldStateInventoryFixture(const WorldStateProtocol::Snapshot& snapshot) {
 	for (const auto& root:snapshot.Objects) if (root.ClassName=="ACDropShip" && root.Health==73.375F) {
 		std::uint64_t passenger=0; bool initialOrder=false, swappedOrder=false, backgroundInitial=false, backgroundChanged=false, secondInitial=false, secondRemoved=false;
+		bool initialPose=false, removedArm=false, secondPoseChanged=false;
 		for (const auto& item:snapshot.Inventory) if (item.ParentNetworkId==root.NetworkId) {
 			const auto& background = item.Object.BackgroundDevice;
 			if (item.Object.Health==42.25F) {
+				const auto& object = item.Object;
+				const auto arm = std::find_if(object.Attachments.begin(), object.Attachments.end(), [](const auto& node) {
+					return node.Parent == WorldStateProtocol::c_AttachmentRoot && node.Role == WorldStateProtocol::AttachmentRole::HumanFGArm;
+				});
+				initialPose = object.HasAttachmentState && arm != object.Attachments.end() &&
+				    std::abs(arm->RotationFromRoot - 0.95F) < 0.0001F && std::abs(object.AimAngle - 0.3F) < 0.0001F;
+				removedArm = object.HasAttachmentState && arm == object.Attachments.end() && std::abs(object.AimAngle + 0.4F) < 0.0001F;
 				passenger=item.Object.NetworkId; initialOrder=item.Slot==0; swappedOrder=item.Slot==1;
 				backgroundInitial=background.Present && background.ClassName=="HeldDevice" && background.PresetName=="Combat Shield";
 				backgroundChanged=background.Present && background.ClassName=="HDFirearm" && background.HasMagazine && background.MagazineRounds==4;
 			} else if (item.Object.Health==43.25F) {
+				secondPoseChanged = item.Object.HasAttachmentState && std::any_of(item.Object.Attachments.begin(), item.Object.Attachments.end(), [](const auto& node) {
+					return node.Parent == WorldStateProtocol::c_AttachmentRoot && node.Role == WorldStateProtocol::AttachmentRole::HumanFGArm && std::abs(node.RotationFromRoot + 0.4F) < 0.0001F;
+				});
 				secondInitial=background.Present && background.HasMagazine && background.MagazineRounds==9;
 				secondRemoved=!background.Present;
 			}
@@ -135,8 +160,8 @@ inline int ObserveWorldStateInventoryFixture(const WorldStateProtocol::Snapshot&
 		for (const auto& item:snapshot.Inventory) if (item.ParentNetworkId==passenger && item.Object.ClassName=="HDFirearm") {
 			++guns; seven=seven || item.Object.OwnMagazineRounds==7; three=three || item.Object.OwnMagazineRounds==3; five=five || item.Object.OwnMagazineRounds==5;
 		}
-		if (initialOrder && guns==1 && seven && backgroundInitial && secondInitial) return 1;
-		if (swappedOrder && guns==2 && three && five && backgroundChanged && secondRemoved) return 2;
+		if (initialOrder && guns==1 && seven && backgroundInitial && secondInitial && initialPose) return 1;
+		if (swappedOrder && guns==2 && three && five && backgroundChanged && secondRemoved && removedArm && secondPoseChanged) return 2;
 	}
 	return 0;
 }

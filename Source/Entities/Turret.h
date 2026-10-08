@@ -56,6 +56,7 @@ namespace RTE {
 		/// Gets the vector of mounted HeldDevices for this Turret.
 		/// @return The vector of mounted HeldDevices for this Turret.
 		const std::vector<HeldDevice*>& GetMountedDevices() const { return m_MountedDevices; }
+		bool SetReplicaMountedDeviceOrder(const std::vector<HeldDevice*>& order);
 
 		/// Adds a HeldDevice to be mounted on this Turret. Ownership IS transferred!
 		/// Will not remove any other HeldDevices mounted on this Turret.

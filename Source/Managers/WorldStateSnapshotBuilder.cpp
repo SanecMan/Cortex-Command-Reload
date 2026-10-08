@@ -1,4 +1,5 @@
 #include "WorldStateSnapshotBuilder.h"
+#include "WorldStateAttachments.h"
 
 #include "Activity.h"
 #include "ActivityMan.h"
@@ -118,6 +119,8 @@ WorldStateProtocol::Snapshot WorldStateSnapshotBuilder::Capture(std::uint32_t ti
 		if (const auto* actor = dynamic_cast<const Actor*>(movableObject)) {
 			if (!inventoryParents.contains(actor)) actorNetworkIds.emplace(actor, networkId);
 			object.Health = actor->GetHealth();
+			object.AimAngle = actor->GetAimAngle(false);
+			object.ActorStatus = static_cast<std::uint8_t>(actor->GetStatus());
 			object.Flags = WorldStateProtocol::c_ObjectFlagActor;
 			if (const auto* human = dynamic_cast<const AHuman*>(actor)) {
 				if (const HeldDevice* device = human->GetEquippedBGItem()) {
@@ -173,6 +176,8 @@ WorldStateProtocol::Snapshot WorldStateSnapshotBuilder::Capture(std::uint32_t ti
 			object.HasOwnMagazine=true; object.OwnMagazineClassName=magazine->GetClassName(); object.OwnMagazineModuleName=magazine->GetModuleName();
 			object.OwnMagazinePresetName=magazine->GetPresetName(); object.OwnMagazineRounds=magazine->GetRoundCount();
 		}
+		if (const auto* rotating = dynamic_cast<const MOSRotating*>(movableObject))
+			if (!WorldStateAttachments::Capture(*rotating, object)) snapshot.InventoryComplete = false;
 		const auto parent=inventoryParents.find(movableObject);
 		const std::size_t depth=parent==inventoryParents.end() ? 0 : parent->second.Depth;
 		if (parent==inventoryParents.end()) snapshot.Objects.push_back(std::move(object));

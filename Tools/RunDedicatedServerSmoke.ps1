@@ -185,6 +185,7 @@ try {
         if ($CheckBuyMenu -and $clientReport -notmatch '(?m)^world_state_buy_menu=passed') { throw 'Client buy menu checks failed.' }
         if ($CheckPurchasePolicy -and $clientReport -notmatch '(?m)^world_state_purchase_policy=passed') { throw 'Client live policy checks failed.' }
         if ($CheckInventory -and (!$inventoryMutated -or $clientReport -notmatch '(?m)^world_state_inventory=passed' -or $clientNetwork -match 'inventory_matches=0')) { throw 'Client inventory hierarchy/reuse checks failed.' }
+        if ($CheckInventory -and ($clientNetwork -notmatch 'attachment_states_checked=[1-9][0-9]*' -or $clientNetwork -match 'attachment_mismatches=[1-9]')) { throw 'Client native attachment/pose checks failed.' }
         if ($clientReport -match "(?m)^buy_menu_displayed_cost=$expectedPolicyCost\r?`$") { $displayedStockPriceObserved = $true }
         if ($clientReport -notmatch '(?m)^result=passed' -or $clientNetwork -notmatch '(?m)^client_local_simulation_ticks=0' -or
             $clientNetwork -notmatch '(?m)^snapshot=\d+.*missing_presets=0' -or $clientNetwork -match 'missing_presets=[1-9]') { throw 'Client replica checks failed.' }

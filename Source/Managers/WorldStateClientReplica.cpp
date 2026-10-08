@@ -1,4 +1,6 @@
 #include "WorldStateClientReplica.h"
+#include "WorldStateAttachments.h"
+#include "System.h"
 
 #include "Actor.h"
 #include "Activity.h"
@@ -200,6 +202,12 @@ namespace {
 		}
 		if (Actor* actor = dynamic_cast<Actor*>(&target)) {
 			actor->SetHealth(state.Health);
+			actor->SetAimAngle(state.AimAngle);
+			actor->SetStatus(static_cast<Actor::Status>(state.ActorStatus));
+		}
+		if (state.HasAttachmentState) {
+			auto* rotating = dynamic_cast<MOSRotating*>(&target);
+			return rotating && WorldStateAttachments::Apply(*rotating, state);
 		}
 		if (auto* firearm=dynamic_cast<HDFirearm*>(&target)) return ApplyOwnMagazine(*firearm,state);
 		if (auto* human = dynamic_cast<AHuman*>(&target)) {
@@ -591,8 +599,13 @@ WorldStateClientReplica::ApplyResult WorldStateClientReplica::Apply(const WorldS
 			++result.Updated;
 		}
 		mappedObjects.insert(object);
-		if (auto* rotating = dynamic_cast<MOSRotating*>(object)) rotating->CorrectAttachableAndWoundPositionsAndRotations();
+		if (auto* rotating = dynamic_cast<MOSRotating*>(object)) {
+			if (state.HasAttachmentState) WorldStateAttachments::ApplyPose(*rotating, state.Attachments);
+			else rotating->CorrectAttachableAndWoundPositionsAndRotations();
+		}
 		Replica& replica = m_Objects[state.NetworkId];
+		replica.HasAttachmentState = state.HasAttachmentState;
+		replica.Attachments = state.Attachments;
 		replica.Object = object;
 		replica.ClientOwned = clientOwned || authoritativeWorld;
 		replica.AuthoritativeX = state.PositionX;
@@ -632,6 +645,25 @@ WorldStateClientReplica::ApplyResult WorldStateClientReplica::Apply(const WorldS
 			}
 		}
 	}
+	if (System::IsDebugRun()) {
+		auto checkPose = [&](const WorldStateProtocol::ObjectState& state, MovableObject* target) {
+			if (!state.HasAttachmentState) return;
+			++result.AttachmentStatesChecked;
+			auto* rotating = dynamic_cast<MOSRotating*>(target);
+			bool matches = rotating && WorldStateAttachments::Matches(*rotating, state.Attachments);
+			if (const auto* actor = dynamic_cast<const Actor*>(target))
+				matches = matches && std::abs(actor->GetAimAngle(false) - state.AimAngle) < 0.0001F && actor->GetStatus() == state.ActorStatus;
+			if (!matches) ++result.AttachmentMismatches;
+		};
+		for (const auto& state : snapshot.Objects) {
+			const auto target = m_Objects.find(state.NetworkId);
+			checkPose(state, target == m_Objects.end() ? nullptr : target->second.Object);
+		}
+		for (const auto& state : snapshot.Inventory) {
+			const auto target = m_InventoryObjects.find(state.Object.NetworkId);
+			checkPose(state.Object, target == m_InventoryObjects.end() ? nullptr : target->second);
+		}
+	}
 	m_LastSnapshotTick = snapshot.Tick;
 	if (result.PositionErrorsMeasured > 0) {
 		result.MeanPositionErrorBeforeCorrection = result.TotalPositionErrorBeforeCorrection / result.PositionErrorsMeasured;
@@ -655,7 +687,10 @@ std::uint32_t WorldStateClientReplica::AdvanceInterpolation() {
 		g_SceneMan.WrapPosition(interpolatedPosition);
 		replica.Object->SetPos(interpolatedPosition);
 		replica.Object->SetRotAngle(replica.InterpolationStartRotation + replica.InterpolationDeltaRotation * progress);
-		if (auto* rotating = dynamic_cast<MOSRotating*>(replica.Object)) rotating->CorrectAttachableAndWoundPositionsAndRotations();
+		if (auto* rotating = dynamic_cast<MOSRotating*>(replica.Object)) {
+			if (replica.HasAttachmentState) WorldStateAttachments::ApplyPose(*rotating, replica.Attachments);
+			else rotating->CorrectAttachableAndWoundPositionsAndRotations();
+		}
 		++advancedObjects;
 		if (replica.InterpolationElapsedTicks == replica.InterpolationDurationTicks) {
 			replica.InterpolationDurationTicks = 0;

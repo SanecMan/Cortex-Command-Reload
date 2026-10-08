@@ -25,6 +25,7 @@ sources += files(
 'UInputMan.cpp',
 'WorldStateTransport.cpp',
 'WorldStateSnapshotBuilder.cpp',
+'WorldStateAttachments.cpp',
 'WorldStateClientSession.cpp',
 'WorldStateClientReplica.cpp',
 'WorldStateServerSession.cpp',

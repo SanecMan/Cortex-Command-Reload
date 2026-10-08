@@ -1218,6 +1218,9 @@
     <ClCompile Include="Source\Managers\WorldStateClientReplica.cpp">
       <Filter>Managers</Filter>
     </ClCompile>
+    <ClCompile Include="Source\Managers\WorldStateAttachments.cpp">
+      <Filter>Managers</Filter>
+    </ClCompile>
     <ClCompile Include="Source\Menus\PauseMenuGUI.cpp">
       <Filter>Menus</Filter>
     </ClCompile>

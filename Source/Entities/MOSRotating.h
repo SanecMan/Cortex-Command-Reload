@@ -234,6 +234,10 @@ namespace RTE {
 		/// @return The list of Attachables on this MOSRotating.
 		const std::list<Attachable*>& GetAttachables() const { return m_Attachables; }
 
+		// Reorders an existing ownership set for authoritative replica drawing.
+		// No object is added, removed or reparented.
+		bool SetReplicaAttachmentOrder(const std::vector<Attachable*>& order);
+
 		/// Gets whether or not the given Attachable is a hardcoded Attachable (e.g. an Arm, Leg, Turret, etc.)
 		/// @param attachableToCheck The Attachable to check.
 		/// @return Whether or not the Attachable is hardcoded.

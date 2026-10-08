@@ -113,6 +113,16 @@ void Turret::AddMountedDevice(HeldDevice* newMountedDevice) {
 	newMountedDevice->SetSupportAvailable(true);
 }
 
+bool Turret::SetReplicaMountedDeviceOrder(const std::vector<HeldDevice*>& order) {
+	if (order.size() != m_MountedDevices.size()) return false;
+	for (const auto* device : order) {
+		if (!device || std::count(order.begin(), order.end(), device) != 1 ||
+		    std::find(m_MountedDevices.begin(), m_MountedDevices.end(), device) == m_MountedDevices.end()) return false;
+	}
+	m_MountedDevices = order;
+	return true;
+}
+
 void Turret::Update() {
 	for (HeldDevice* mountedDevice: m_MountedDevices) {
 		mountedDevice->SetMountedRotAngleOffset(m_MountedDeviceRotationOffset);

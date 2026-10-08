@@ -18,6 +18,7 @@
 #include "RTEError.h"
 
 #include <cstdint>
+#include <unordered_set>
 
 using namespace RTE;
 
@@ -1482,6 +1483,18 @@ void MOSRotating::AddAttachable(Attachable* attachable) {
 	if (attachable) {
 		AddAttachable(attachable, attachable->GetParentOffset());
 	}
+}
+
+bool MOSRotating::SetReplicaAttachmentOrder(const std::vector<Attachable*>& order) {
+	if (order.size() != m_Attachables.size()) return false;
+	if (std::equal(order.begin(), order.end(), m_Attachables.begin())) return true;
+	std::unordered_set<Attachable*> unique;
+	for (Attachable* child : order)
+		if (!child || !unique.insert(child).second || std::find(m_Attachables.begin(), m_Attachables.end(), child) == m_Attachables.end()) return false;
+	std::list<Attachable*> sorted;
+	for (Attachable* child : order) sorted.splice(sorted.end(), m_Attachables, std::find(m_Attachables.begin(), m_Attachables.end(), child));
+	m_Attachables.swap(sorted);
+	return true;
 }
 
 void MOSRotating::AddAttachable(Attachable* attachable, const Vector& parentOffsetToSet) {

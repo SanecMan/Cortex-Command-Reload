@@ -19,6 +19,7 @@ namespace RTE {
 			std::uint32_t Removed = 0;
 			std::uint32_t MissingPresets = 0;
 			std::uint32_t HumanEquipmentStatesApplied = 0;
+			std::uint32_t AttachmentStatesChecked = 0, AttachmentMismatches = 0;
 			std::uint32_t InventoryStatesApplied = 0, InventoryObjectsSpawned = 0;
 			bool InventoryMatches=false;
 			std::uint32_t InventoryLiveObjects=0, InventoryCachedObjects=0;
@@ -46,6 +47,8 @@ namespace RTE {
 		struct Replica {
 			class MovableObject* Object = nullptr;
 			bool ClientOwned = false;
+			bool HasAttachmentState = false;
+			std::vector<WorldStateProtocol::AttachmentState> Attachments;
 			float AuthoritativeX = 0.0F;
 			float AuthoritativeY = 0.0F;
 			float InterpolationStartX = 0.0F;
