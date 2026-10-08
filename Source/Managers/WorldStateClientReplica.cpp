@@ -4,6 +4,7 @@
 #include "Activity.h"
 #include "ActivityMan.h"
 #include "AHuman.h"
+#include "Arm.h"
 #include "Atom.h"
 #include "Constants.h"
 #include "HeldDevice.h"
@@ -125,6 +126,38 @@ namespace {
 		magazine->SetRoundCount(state.OwnMagazineRounds); return magazine->GetRoundCount()==state.OwnMagazineRounds;
 	}
 
+	bool ApplyBackgroundDevice(AHuman& human, const WorldStateProtocol::HandDeviceState& state) {
+		Arm* arm = human.GetBGArm();
+		if (!arm) return !state.Present;
+		HeldDevice* device = arm->GetHeldDevice();
+		if (!state.Present) {
+			if (device) arm->SetHeldDevice(nullptr);
+			return arm->GetHeldDevice() == nullptr;
+		}
+		if (!device || device->GetClassName() != state.ClassName || device->GetModuleName() != state.ModuleName || device->GetPresetName() != state.PresetName) {
+			const int module = g_PresetMan.GetModuleID(state.ModuleName);
+			const Entity* preset = module >= 0 ? g_PresetMan.GetEntityPreset(state.ClassName, state.PresetName, module) : nullptr;
+			std::unique_ptr<Entity> clone(preset ? preset->Clone() : nullptr);
+			auto* replacement = dynamic_cast<HeldDevice*>(clone.get());
+			if (!replacement || replacement->GetClassName() != state.ClassName || replacement->GetModuleName() != state.ModuleName ||
+			    replacement->GetPresetName() != state.PresetName) return false;
+			arm->SetHeldDevice(replacement);
+			clone.release();
+			device = replacement;
+		}
+		device->SetTeam(human.GetTeam());
+		if (auto* firearm = dynamic_cast<HDFirearm*>(device)) {
+			WorldStateProtocol::ObjectState magazine;
+			magazine.HasOwnMagazine = state.HasMagazine;
+			magazine.OwnMagazineClassName = state.MagazineClassName;
+			magazine.OwnMagazineModuleName = state.MagazineModuleName;
+			magazine.OwnMagazinePresetName = state.MagazinePresetName;
+			magazine.OwnMagazineRounds = state.MagazineRounds;
+			return ApplyOwnMagazine(*firearm, magazine);
+		}
+		return !state.HasMagazine;
+	}
+
 	bool ApplyFields(MovableObject& target, const WorldStateProtocol::ObjectState& state) {
 		target.SetPos(Vector(state.PositionX, state.PositionY));
 		target.SetPrevPos(target.GetPos());
@@ -144,6 +177,7 @@ namespace {
 		}
 		if (auto* firearm=dynamic_cast<HDFirearm*>(&target)) return ApplyOwnMagazine(*firearm,state);
 		if (auto* human = dynamic_cast<AHuman*>(&target)) {
+			const bool foregroundApplied = [&]() {
 			HeldDevice* equippedDevice = human->GetEquippedItem();
 			const bool equippedDeviceMatches = equippedDevice && equippedDevice->GetClassName() == state.EquippedDeviceClassName &&
 			                                  equippedDevice->GetModuleName() == state.EquippedDeviceModuleName &&
@@ -205,6 +239,11 @@ namespace {
 				}
 				return !state.HasEquippedDeviceMagazine;
 			}
+			}();
+			// Foreground equipment selection can automatically equip a shield.
+			// Apply the authoritative background state after those side effects.
+			const bool backgroundApplied = ApplyBackgroundDevice(*human, state.BackgroundDevice);
+			return foregroundApplied && backgroundApplied;
 		}
 		return true;
 	}
@@ -222,6 +261,63 @@ namespace {
 		}
 	}
 } // namespace
+
+bool WorldStateClientReplica::TestBackgroundEquipment() {
+	const Entity* body = g_PresetMan.GetEntityPreset("AHuman", "Fat Culled Clone", "Base.rte");
+	const Entity* gunPreset = g_PresetMan.GetEntityPreset("HDFirearm", "Auto Pistol", "Coalition.rte");
+	const auto* gun = dynamic_cast<const HDFirearm*>(gunPreset);
+	if (!body || !gun || !gun->GetMagazine()) return false;
+	WorldStateProtocol::Snapshot snapshot;
+	WorldStateProtocol::ObjectState state;
+	state.NetworkId = std::numeric_limits<std::uint64_t>::max() - 10;
+	state.ClassName = body->GetClassName(); state.ModuleName = body->GetModuleName(); state.PresetName = body->GetPresetName();
+	state.Flags = WorldStateProtocol::c_ObjectFlagActor; state.Team = 0; state.Health = 42;
+	state.PositionX = 100000; state.PositionY = 100000;
+	state.BackgroundDevice = {true, gun->GetClassName(), gun->GetModuleName(), gun->GetPresetName(), true,
+	    gun->GetMagazine()->GetClassName(), gun->GetMagazine()->GetModuleName(), gun->GetMagazine()->GetPresetName(), 17};
+	WorldStateClientReplica replica;
+	auto apply = [&]() -> AHuman* {
+		snapshot.Objects = {state}; ++snapshot.Tick;
+		std::vector<std::uint8_t> packet; WorldStateProtocol::Snapshot decoded;
+		if (!WorldStateProtocol::EncodeSnapshot(snapshot, snapshot.Tick, packet) || !WorldStateProtocol::DecodeSnapshot(packet, decoded)) return nullptr;
+		const auto result = replica.Apply(decoded);
+		const auto found = replica.m_Objects.find(state.NetworkId);
+		if (result.MissingPresets || found == replica.m_Objects.end()) return nullptr;
+		return dynamic_cast<AHuman*>(found->second.Object);
+	};
+	bool passed = true;
+	AHuman* human = apply();
+	auto* original = human ? dynamic_cast<HDFirearm*>(human->GetEquippedBGItem()) : nullptr;
+	passed = original && original->GetMagazine() && original->GetMagazine()->GetRoundCount() == 17;
+	for (const int rounds : {3, -1}) {
+		state.BackgroundDevice.MagazineRounds = rounds;
+		human = apply();
+		auto* current = human ? dynamic_cast<HDFirearm*>(human->GetEquippedBGItem()) : nullptr;
+		passed = passed && current == original && current && current->GetMagazine() && current->GetMagazine()->GetRoundCount() == rounds;
+	}
+	state.BackgroundDevice.HasMagazine = false;
+	state.BackgroundDevice.MagazineClassName.clear(); state.BackgroundDevice.MagazineModuleName.clear(); state.BackgroundDevice.MagazinePresetName.clear();
+	state.BackgroundDevice.MagazineRounds = 0;
+	human = apply();
+	auto* unloaded = human ? dynamic_cast<HDFirearm*>(human->GetEquippedBGItem()) : nullptr;
+	passed = passed && unloaded == original && unloaded && !unloaded->GetMagazine();
+	state.BackgroundDevice = {true, "HeldDevice", "Coalition.rte", "Combat Shield"};
+	human = apply();
+	passed = passed && human && human->GetEquippedBGItem() && human->GetEquippedBGItem()->GetPresetName() == "Combat Shield";
+	// PresetMan can fall back to another official module. Reject that substitute.
+	state.BackgroundDevice.ModuleName = "Base.rte";
+	snapshot.Objects = {state}; ++snapshot.Tick;
+	const auto incompatible = replica.Apply(snapshot);
+	passed = passed && incompatible.MissingPresets == 1 && human && human->GetEquippedBGItem() &&
+	    human->GetEquippedBGItem()->GetModuleName() == "Coalition.rte";
+	state.BackgroundDevice = {};
+	human = apply();
+	passed = passed && human && !human->GetEquippedBGItem();
+	snapshot.Objects.clear();
+	const auto removed = replica.Apply(snapshot);
+	replica.Forget();
+	return passed && removed.Removed == 1;
+}
 
 void WorldStateClientReplica::ApplyInventory(const WorldStateProtocol::Snapshot& snapshot, ApplyResult& result) {
 	// Validate borrowed pointers against the live ownership tree before consulting cached IDs.

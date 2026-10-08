@@ -1,13 +1,31 @@
 # Dedicated server
 
-## Inventory diagnostic (v14)
+### v15 Windows verification (2026-10-08)
+
+Both Final x64 binaries were rebuilt from the same core. `BackgroundV15Pair`
+passed the expanded inventory/background-hand fixture with two real clients in
+40.04 seconds. Both native initial/mutated states and repeated inventory reuse
+passed with no missing presets; the headless server continued 64 updates after
+the last disconnect and exited normally. `BackgroundV15PriceRegression` passed
+catalog/server purchase pricing and two-client lifecycle in 86.46 seconds,
+including 70 updates after disconnect. `BackgroundV15Control` passed movement,
+firing and scene transition in 95.56 seconds. The last two runs overlapped and
+these timings are verification durations, not performance benchmarks.
+`BackgroundV15ValidationLocal` passed 60 simulation updates and the explicit
+native background-hand/codec checks with exit code 0. Results are in the matching
+`ScreenShots/` directories. This does not validate complete mod/Lua UI replication
+or Linux operation.
+
+## Inventory and background-hand diagnostic (v15)
 
 Build both executables, then run
-`Tools/RunDedicatedServerSmoke.ps1 -CheckInventory -OutputPrefix InventoryV14`.
+`Tools/RunDedicatedServerSmoke.ps1 -CheckInventory -OutputPrefix InventoryV15`.
 This fixture creates a stationary, disabled dropship containing two passenger
 actors with stored pistols. Both real clients must observe the initial native
-inventory tree. The wrapper then changes ammunition, adds a second pistol and
-swaps passenger order. Clients must match native ownership/slot order, health
+inventory tree, with a Combat Shield in one passenger's background hand and a
+pistol in the other's. The wrapper replaces the shield with a four-round pistol,
+clears the other background hand, changes stored ammunition, adds a second
+stored pistol and swaps passenger order. Clients must match native ownership/slot order, health
 and magazine state, and observe a subsequent snapshot with no inventory clones.
 The wrapper also checks simultaneous connections and continued server updates
 after disconnection. The local console commands `debug-inventory-create` and
@@ -16,8 +34,9 @@ after disconnection. The local console commands `debug-inventory-create` and
 v14 snapshots carry actor inventory contents, including nested actors and stored
 firearm magazines. Runtime reconciliation retains existing item instances by
 network ID. World-to-inventory or inventory-to-world transfers currently recreate
-the representation in its new domain. Background-arm equipment, complete
-attachments, actor pose and Lua-local state still require additional replication.
+the representation in its new domain. v15 adds background-arm equipment and
+magazines. Complete attachments, actor pose and Lua-local state still require
+additional replication.
 The codec has passed preflight checks for nested records, infinite ammunition,
 depth bounds, truncation and invalid ownership. Real-process fixture verification
 is required separately; the existence of this command is not its test result.
@@ -70,7 +89,7 @@ change and clamps landing selection against the server area. Server validation
 remains authoritative at purchase time. Empty stock in only-owned mode hides
 unavailable catalog entries while retaining always-allowed exceptions.
 
-Both executables must use the current protocol (v14). The rule frame includes the server's pricing
+Both executables must use the current protocol (v15). The rule frame includes the server's pricing
 module name and foreign/native multipliers. The client uses these for displayed
 prices and affordability checks, separately from its faction theme. Custom base
 preset prices and complete craft inventories are not transmitted yet.

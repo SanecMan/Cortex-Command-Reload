@@ -120,6 +120,22 @@ WorldStateProtocol::Snapshot WorldStateSnapshotBuilder::Capture(std::uint32_t ti
 			object.Health = actor->GetHealth();
 			object.Flags = WorldStateProtocol::c_ObjectFlagActor;
 			if (const auto* human = dynamic_cast<const AHuman*>(actor)) {
+				if (const HeldDevice* device = human->GetEquippedBGItem()) {
+					auto& background = object.BackgroundDevice;
+					background.Present = true;
+					background.ClassName = device->GetClassName();
+					background.ModuleName = device->GetModuleName();
+					background.PresetName = device->GetPresetName();
+					if (const auto* firearm = dynamic_cast<const HDFirearm*>(device)) {
+						if (const Magazine* magazine = firearm->GetMagazine()) {
+							background.HasMagazine = true;
+							background.MagazineClassName = magazine->GetClassName();
+							background.MagazineModuleName = magazine->GetModuleName();
+							background.MagazinePresetName = magazine->GetPresetName();
+							background.MagazineRounds = magazine->GetRoundCount();
+						}
+					}
+				}
 				if (const HeldDevice* device = human->GetEquippedItem()) {
 					object.HasEquippedDevice = true;
 					object.EquippedDeviceClassName = device->GetClassName();

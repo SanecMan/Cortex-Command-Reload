@@ -1,5 +1,16 @@
 # Automated debug run
 
+The ordinary gameplay debug run includes `world_state_background_equipment_smoke`.
+It passes actual native AHuman/Arm objects through the snapshot codec and replica
+application while changing background ammunition (17, 3, -1), removing the
+magazine, replacing the weapon with a Combat Shield and clearing the hand.
+It checks that ammo-only changes retain the same weapon instance and removes
+the disposable actor afterward. Failure makes the complete debug run fail.
+It also rejects official-module fallback when the resolved item's module differs
+from the snapshot identity, retaining the current item and reporting a missing preset.
+`Tools/RunDedicatedServerSmoke.ps1 -CheckInventory` additionally verifies
+background equipment on nested passengers over a real two-client connection.
+
 `Tools/RunDedicatedServerSmoke.ps1 -CheckBuyMenu` runs the client equipment menu
 fixture with an active player and spectator. The player opens the real catalog,
 selects an official loadout through GUI APIs, confirms a landing point and waits

@@ -1,5 +1,26 @@
 # World-state protocol
 
+## Background hand (v15)
+
+Each AHuman object record now includes a background-hand presence byte after
+its foreground equipment block. A present device carries bounded UTF-8
+class/module/preset strings, a magazine-presence byte and, when present,
+magazine class/module/preset and signed round count (minimum -1).
+Absent devices must have no residual data; non-human records cannot carry this
+state. Both world actors and actors nested in inventories use the same encoding.
+This is a wire-format change: rebuild client and server together.
+
+Clients apply the background hand after foreground selection, which can
+automatically equip a shield. Matching devices are retained; replacements are
+cloned from installed presets and adopted by the existing Arm ownership API.
+Removal deletes the replica device instead of moving it into inventory. The
+explicit native debug check covers repeated ammunition updates without device
+replacement, infinite ammunition, an absent magazine, shield replacement and
+device removal. The two-client inventory fixture covers shield-to-pistol
+replacement and removal of a second passenger's background pistol.
+Preset resolution must match class, module and preset exactly: the engine's
+official-module fallback cannot silently substitute another module's device.
+
 ## Inventory ownership (v14)
 
 After the four player-view records, a snapshot contains a u16 inventory-record
@@ -24,9 +45,9 @@ instances are reused by network ID before restoring server order and nesting.
 Preset identity, health, team and magazine state are applied. Borrowed cached
 pointers are validated against the live ownership tree before use. Default
 clone inventories and items absent from the authoritative snapshot are removed.
-Foreground equipment remains represented by the existing actor fields; background
-hands, arbitrary attachments and Lua-local state are not covered by this section.
-Both executables must be rebuilt for v14.
+Foreground equipment remains represented by the existing actor fields;
+background hands are added by v15 above. Arbitrary attachments and Lua-local
+state are not covered by these records.
 
 ## Catalog rules (v13)
 
@@ -84,12 +105,13 @@ latest ID, and reconnect before exhausting the u32 ID space.
 
 Client session callers send `PurchaseRequest` and drain `PurchaseResult` values;
 responses are queued with a 64-result bound. The client equipment menu uses these calls. UI callers must associate results with their pending request and
-scene revision. The RPC does not replicate complete craft inventories or provide
-cross-reconnect purchase receipts.
+scene revision. The order RPC carries preset identities; spawned craft and cargo
+inventories are synchronized by the v14+ snapshot ownership records. Purchase
+receipts are not retained across reconnects.
 
-The experimental world-state path serializes data explicitly instead of sending C++ structs or framebuffer pixels. Protocol version 14 carries a server tick, scene revision, signed Activity state, four finite team-funds values, UTF-8 Activity class/preset/module and Scene module/preset identity, then top-level actors, items and particles and four player-view records. Each object has a stable host-assigned network ID, class/module/preset identity, transform, velocity, health, sprite frame, horizontal flip, team and category. `AHuman` actor records also carry foreground equipped-device identity and, for an `HDFirearm`, inserted magazine identity and round count. Clients switch or clone those devices from locally installed `.rte` presets and apply the authoritative magazine count. Dynamic `MOPixel` objects without a preset carry material, color, mass, lifetime and sharpness so clients can recreate common transient particles. Version 14 retains the bounded terrain-patch frame with scene revision, pixel rectangle, material/foreground/background layer and indexed pixel bytes.
+The experimental world-state path serializes data explicitly instead of sending C++ structs or framebuffer pixels. Protocol version 15 carries a server tick, scene revision, signed Activity state, four finite team-funds values, UTF-8 Activity class/preset/module and Scene module/preset identity, then top-level actors, items and particles and four player-view records. Each object has a stable host-assigned network ID, class/module/preset identity, transform, velocity, health, sprite frame, horizontal flip, team and category. `AHuman` actor records also carry foreground equipped-device identity and, for an `HDFirearm`, inserted magazine identity and round count. Clients switch or clone those devices from locally installed `.rte` presets and apply the authoritative magazine count. Dynamic `MOPixel` objects without a preset carry material, color, mass, lifetime and sharpness so clients can recreate common transient particles. Version 15 retains the bounded terrain-patch frame with scene revision, pixel rectangle, material/foreground/background layer and indexed pixel bytes.
 
-The decoded packet starts with a 16-byte header: `CCR1` magic, version, message type, reserved byte, sequence and payload length, all little-endian. The decoder rejects unknown versions/types, malformed UTF-8, non-finite numeric data, duplicate or zero IDs, invalid team/category/equipment fields, invalid terrain layer/dimensions, truncated/oversized packets and counts beyond fixed bounds. Version 12 peers are required; earlier peers cannot exchange v12 frames. Each fixed player-view record contains the controlled actor's network ID (zero for no actor), a finite camera position, team and active-human flag. Nonzero actor references must resolve to an actor in the same snapshot, and inactive players cannot reference a controlled actor. Assigned clients follow their server-selected view, using the replica actor's interpolated position to smooth the camera between snapshots. The local Activity player view now binds to the selected replica actor for existing HUD identification; visual and remote-control gameplay validation remain outstanding.
+The decoded packet starts with a 16-byte header: `CCR1` magic, version, message type, reserved byte, sequence and payload length, all little-endian. The decoder rejects unknown versions/types, malformed UTF-8, non-finite numeric data, duplicate or zero IDs, invalid team/category/equipment fields, invalid terrain layer/dimensions, truncated/oversized packets and counts beyond fixed bounds. Version 15 peers are required; earlier peers cannot exchange v15 frames. Each fixed player-view record contains the controlled actor's network ID (zero for no actor), a finite camera position, team and active-human flag. Nonzero actor references must resolve to an actor in the same snapshot, and inactive players cannot reference a controlled actor. Assigned clients follow their server-selected view, using the replica actor's interpolated position to smooth the camera between snapshots. The local Activity player view now binds to the selected replica actor for existing HUD identification; visual and remote-control gameplay validation remain outstanding.
 
 On 2026-10-07, Windows x64 Debug Minimal rebuilt for v8. The preflight passed player-view round-trip and rejected a non-actor control reference and a non-finite camera coordinate. A 60-update gameplay smoke passed with 292 replicated objects and 22 human equipment records. Its camera check resolved the actor, rejected the removed actor, restored it, and applied the expected 20-pixel interpolation correction (`x=300`, `y=240` from an authoritative camera probe of `320,240`). The four-client assignment/input/disconnect test also passed. Artifacts are under `ScreenShots/V8ViewPreflight/` and `ScreenShots/V8ViewGameplay/`. A separate-process visual check of camera following and the player HUD remains outstanding.
 

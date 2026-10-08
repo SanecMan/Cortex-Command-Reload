@@ -1368,6 +1368,8 @@ namespace {
 		}
 		state.Log << "world_state_terrain_patch_apply_smoke=" << (terrainPatchApplyPassed ? "passed" : "unavailable-or-failed") << '\n' << std::flush;
 		WorldStateClientReplica replicaSmoke;
+		const bool backgroundEquipmentPassed = WorldStateClientReplica::TestBackgroundEquipment();
+		state.Log << "world_state_background_equipment_smoke=" << (backgroundEquipmentPassed ? "passed" : "failed") << '\n' << std::flush;
 		const WorldStateClientReplica::ApplyResult firstApply = replicaSmoke.Apply(worldSnapshot);
 		Vector cameraProbe(320.0F, 240.0F);
 		const std::uint64_t cameraActorId = worldSnapshot.Objects.empty() ? 0 : worldSnapshot.Objects.front().NetworkId;
@@ -1598,7 +1600,7 @@ namespace {
 			success = success && state.ClientDisconnectWhilePausedObserved;
 		}
 		success = success && utf8GlyphRenderPassed && worldStateTransitionPassed && remoteTerrainMutationPassed && hostTerrainMutationPassed && hostEquipmentMutationPassed && remoteEquipmentMutationPassed &&
-		          state.HostSessionTestPassed && worldIdentityStable && replicaSmokePassed && transientPixelReplicaPassed && terrainPatchApplyPassed &&
+		          state.HostSessionTestPassed && worldIdentityStable && replicaSmokePassed && backgroundEquipmentPassed && transientPixelReplicaPassed && terrainPatchApplyPassed &&
 		          networkInputApplicationPassed && worldSnapshotPassed && snapshotCompressionPassed && liveSnapshotTransportPassed;
 		const double elapsedSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - state.StartTime).count();
 		if (state.RequestInventoryTest) {

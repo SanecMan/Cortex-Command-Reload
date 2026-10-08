@@ -19,7 +19,7 @@
 namespace RTE::WorldStateProtocol {
 
 inline constexpr std::uint32_t c_Magic = 0x31524343; // "CCR1" on the wire.
-inline constexpr std::uint16_t c_Version = 14;
+inline constexpr std::uint16_t c_Version = 15;
 inline constexpr std::size_t c_TeamCount = 4;
 inline constexpr std::int8_t c_NoActivity = -1;
 inline constexpr std::int8_t c_MaxActivityState = 6;
@@ -58,6 +58,15 @@ enum class TerrainLayer : std::uint8_t {
 	Background = 2
 };
 
+struct HandDeviceState {
+	bool Present = false;
+	std::string ClassName, ModuleName, PresetName;
+	bool HasMagazine = false;
+	std::string MagazineClassName, MagazineModuleName, MagazinePresetName;
+	std::int32_t MagazineRounds = 0;
+	bool operator==(const HandDeviceState&) const = default;
+};
+
 struct ObjectState {
 	std::uint64_t NetworkId = 0;
 	std::string ClassName;
@@ -91,6 +100,7 @@ struct ObjectState {
 	bool HasOwnMagazine=false;
 	std::string OwnMagazineClassName, OwnMagazineModuleName, OwnMagazinePresetName;
 	std::int32_t OwnMagazineRounds=0;
+	HandDeviceState BackgroundDevice;
 	bool operator==(const ObjectState&) const = default;
 };
 
@@ -206,6 +216,19 @@ namespace Detail {
 		return UTF8::IsValid(value);
 	}
 
+	inline bool ValidHandDevice(const HandDeviceState& device) {
+		for (const auto* value : {&device.ClassName, &device.ModuleName, &device.PresetName,
+		                         &device.MagazineClassName, &device.MagazineModuleName, &device.MagazinePresetName}) {
+			if (value->size() > c_MaxStringBytes || !UTF8::IsValid(*value)) return false;
+		}
+		if (!device.Present) return device == HandDeviceState{};
+		if (device.ClassName.empty() || device.ModuleName.empty() || device.PresetName.empty()) return false;
+		if (!device.HasMagazine) return device.MagazineClassName.empty() && device.MagazineModuleName.empty() &&
+		    device.MagazinePresetName.empty() && device.MagazineRounds == 0;
+		return device.ClassName == "HDFirearm" && device.MagazineClassName == "Magazine" &&
+		    !device.MagazineModuleName.empty() && !device.MagazinePresetName.empty() && device.MagazineRounds >= -1;
+	}
+
 	inline bool ValidObject(const ObjectState& object) {
 		const bool equipmentIdentityValid = object.EquippedDeviceClassName.size() <= c_MaxStringBytes &&
 		                                   object.EquippedDeviceModuleName.size() <= c_MaxStringBytes &&
@@ -235,7 +258,9 @@ namespace Detail {
 		       std::isfinite(object.VelocityY) && std::isfinite(object.Rotation) && std::isfinite(object.AngularVelocity) &&
 		       std::isfinite(object.Health) && object.Team >= c_NoTeam && object.Team < c_MaxTeamCount &&
 		       (object.Flags == c_ObjectFlagActor || object.Flags == c_ObjectFlagItem || object.Flags == c_ObjectFlagParticle || object.Flags == c_ObjectFlagTransientPixel) &&
-		       object.PixelColorIndex <= 255 && std::isfinite(object.PixelMass) && object.PixelMass >= 0.0F && std::isfinite(object.PixelSharpness) && equipmentFieldsValid;
+		       object.PixelColorIndex <= 255 && std::isfinite(object.PixelMass) && object.PixelMass >= 0.0F && std::isfinite(object.PixelSharpness) && equipmentFieldsValid &&
+		       ValidHandDevice(object.BackgroundDevice) &&
+		       ((object.ClassName == "AHuman" && object.Flags == c_ObjectFlagActor) || object.BackgroundDevice == HandDeviceState{});
 	}
 } // namespace Detail
 
@@ -467,6 +492,20 @@ inline bool WriteObject(std::vector<std::uint8_t>& packet, const ObjectState& ob
 		}
 		}
 	}
+	if (object.ClassName == "AHuman") {
+		const auto& device = object.BackgroundDevice;
+		Detail::WriteUnsigned(packet, device.Present, 1);
+		if (device.Present) {
+			if (!Detail::WriteString(packet, device.ClassName) || !Detail::WriteString(packet, device.ModuleName) ||
+			    !Detail::WriteString(packet, device.PresetName)) return false;
+			Detail::WriteUnsigned(packet, device.HasMagazine, 1);
+			if (device.HasMagazine) {
+				if (!Detail::WriteString(packet, device.MagazineClassName) || !Detail::WriteString(packet, device.MagazineModuleName) ||
+				    !Detail::WriteString(packet, device.MagazinePresetName)) return false;
+				Detail::WriteUnsigned(packet, std::bit_cast<std::uint32_t>(device.MagazineRounds), 4);
+			}
+		}
+	}
 	if (object.ClassName=="HDFirearm") {
 		Detail::WriteUnsigned(packet,object.HasOwnMagazine,1);
 		if (object.HasOwnMagazine) {
@@ -523,6 +562,21 @@ inline bool ReadObject(std::span<const std::uint8_t> packet, std::size_t& offset
 			}
 			object.EquippedDeviceMagazineRounds = std::bit_cast<std::int32_t>(static_cast<std::uint32_t>(value));
 		}
+		}
+	}
+	if (object.ClassName == "AHuman") {
+		auto& device = object.BackgroundDevice;
+		if (!Detail::ReadUnsigned(packet, offset, 1, value) || value > 1) return false;
+		device.Present = value != 0;
+		if (device.Present) {
+			if (!Detail::ReadString(packet, offset, device.ClassName) || !Detail::ReadString(packet, offset, device.ModuleName) ||
+			    !Detail::ReadString(packet, offset, device.PresetName) || !Detail::ReadUnsigned(packet, offset, 1, value) || value > 1) return false;
+			device.HasMagazine = value != 0;
+			if (device.HasMagazine) {
+				if (!Detail::ReadString(packet, offset, device.MagazineClassName) || !Detail::ReadString(packet, offset, device.MagazineModuleName) ||
+				    !Detail::ReadString(packet, offset, device.MagazinePresetName) || !Detail::ReadUnsigned(packet, offset, 4, value)) return false;
+				device.MagazineRounds = std::bit_cast<std::int32_t>(static_cast<std::uint32_t>(value));
+			}
 		}
 	}
 	if (object.ClassName=="HDFirearm") {

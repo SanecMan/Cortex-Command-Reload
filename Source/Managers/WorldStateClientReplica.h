@@ -38,6 +38,7 @@ namespace RTE {
 		bool BindPlayerView(std::uint64_t networkId, int team, int localPlayer = 0) const;
 		bool ApplyTerrainPatch(const WorldStateProtocol::TerrainPatch& patch);
 		void Forget();
+		static bool TestBackgroundEquipment(); // Explicit disposable debug-session check.
 
 	private:
 		void ApplyInventory(const WorldStateProtocol::Snapshot& snapshot, ApplyResult& result);
