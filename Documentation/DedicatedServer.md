@@ -1,5 +1,19 @@
 # Dedicated server
 
+### Replica callback isolation verification (2026-10-08)
+
+Matching Final client/server binaries passed `ReplicaCallbacksPair` with two
+clients in 66.71 seconds, including nested inventory/background-hand mutation,
+zero replay callbacks, successful normal Lua controls and no leftover diagnostic
+attachments. The server continued 72 updates after both clients disconnected.
+`ReplicaCallbacksControl` passed movement, firing and scene transition in 76.68
+seconds. These two runs overlapped; their durations are not benchmark results.
+The separate `ReplicaCallbacksPrice` catalog/server pricing regression passed in
+53.73 seconds with two clients and 66 subsequent server updates. All processes
+returned exit code 0. Native arm and magazine setters remain available to normal
+gameplay; the replica reconciler bypasses their deferred deletion and script
+side effects during snapshot application.
+
 ### v15 Windows verification (2026-10-08)
 
 Both Final x64 binaries were rebuilt from the same core. `BackgroundV15Pair`

@@ -1,4 +1,5 @@
 #include "MovableObject.h"
+#include "ObjectScriptExecution.h"
 
 #include "ActivityMan.h"
 #include "PresetMan.h"
@@ -608,6 +609,7 @@ int MovableObject::ReloadScripts() {
 }
 
 int MovableObject::InitializeObjectScripts() {
+	if (ObjectScriptExecution::Suppressed) return 0;
 	std::lock_guard<std::recursive_mutex> lock(m_ThreadedLuaState->GetMutex());
 	m_ScriptObjectName = "_ScriptedObjects[\"" + std::to_string(m_UniqueID) + "\"]";
 	m_ThreadedLuaState->RegisterMO(this);
@@ -659,6 +661,7 @@ void MovableObject::EnableOrDisableAllScripts(bool enableScripts) {
 }
 
 int MovableObject::RunScriptedFunctionInAppropriateScripts(const std::string& functionName, bool runOnDisabledScripts, bool stopOnError, const std::vector<const Entity*>& functionEntityArguments, const std::vector<std::string_view>& functionLiteralArguments, const std::vector<LuabindObjectWrapper*>& functionObjectArguments) {
+	if (ObjectScriptExecution::Suppressed) return 0;
 	int status = 0;
 
 	auto itr = m_FunctionsAndScripts.find(functionName);
@@ -689,6 +692,7 @@ int MovableObject::RunScriptedFunctionInAppropriateScripts(const std::string& fu
 }
 
 int MovableObject::RunFunctionOfScript(const std::string& scriptPath, const std::string& functionName, const std::vector<const Entity*>& functionEntityArguments, const std::vector<std::string_view>& functionLiteralArguments) {
+	if (ObjectScriptExecution::Suppressed) return 0;
 	if (m_AllLoadedScripts.empty() || !ObjectScriptsInitialized()) {
 		return -1;
 	}
@@ -916,6 +920,7 @@ void MovableObject::Draw(BITMAP* targetBitmap, const Vector& targetPos, DrawMode
 }
 
 int MovableObject::UpdateScripts() {
+	if (ObjectScriptExecution::Suppressed) return 0;
 	m_SimUpdatesSinceLastScriptedUpdate++;
 
 	if (m_AllLoadedScripts.empty()) {

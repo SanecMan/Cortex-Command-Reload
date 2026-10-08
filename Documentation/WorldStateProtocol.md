@@ -10,9 +10,9 @@ Absent devices must have no residual data; non-human records cannot carry this
 state. Both world actors and actors nested in inventories use the same encoding.
 This is a wire-format change: rebuild client and server together.
 
-Clients apply the background hand after foreground selection, which can
-automatically equip a shield. Matching devices are retained; replacements are
-cloned from installed presets and adopted by the existing Arm ownership API.
+Clients reconcile both hands directly through the existing Arm ownership API,
+without inventory rotation or automatic shield selection. Matching devices are
+retained; replacements are cloned from installed presets.
 Removal deletes the replica device instead of moving it into inventory. The
 explicit native debug check covers repeated ammunition updates without device
 replacement, infinite ammunition, an absent magazine, shield replacement and
@@ -20,6 +20,23 @@ device removal. The two-client inventory fixture covers shield-to-pistol
 replacement and removal of a second passenger's background pistol.
 Preset resolution must match class, module and preset exactly: the engine's
 official-module fallback cannot silently substitute another module's device.
+
+## Object script isolation during reconciliation
+
+Native attachment changes can call OnAttach/OnDetach and lazily initialize Lua
+Create even though the client simulation loop is disabled. Snapshot application
+therefore uses a per-thread RAII suppression scope for MovableObject script
+initialization, generic callbacks, individual script functions and UpdateScripts.
+Script registry/data cleanup still runs when replicas are deleted. The scope
+restores its previous state on return, including nested use; ordinary local and
+authoritative-server simulation retains normal callbacks. This scope concerns
+object reconciliation, not every possible Activity/UI/global Lua call.
+
+Both hand and magazine replacement detach and delete retired replica-owned
+attachments immediately. Their removal flags are cleared before detaching so
+they cannot enter the normal deferred-delete queue or spawn native gibs. Client
+simulation is disabled and cannot be relied on to drain that queue. Inventory
+ownership continues to be handled by the snapshot inventory records.
 
 ## Inventory ownership (v14)
 

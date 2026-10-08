@@ -1368,6 +1368,9 @@ namespace {
 		}
 		state.Log << "world_state_terrain_patch_apply_smoke=" << (terrainPatchApplyPassed ? "passed" : "unavailable-or-failed") << '\n' << std::flush;
 		WorldStateClientReplica replicaSmoke;
+		std::uint32_t replayCallbacks = 0;
+		const bool objectCallbacksPassed = WorldStateClientReplica::TestObjectScriptCallbacks(state.OutputDirectory, replayCallbacks);
+		state.Log << "world_state_object_callback_smoke=" << (objectCallbacksPassed ? "passed" : "failed") << " callbacks=" << replayCallbacks << '\n' << std::flush;
 		const bool backgroundEquipmentPassed = WorldStateClientReplica::TestBackgroundEquipment();
 		state.Log << "world_state_background_equipment_smoke=" << (backgroundEquipmentPassed ? "passed" : "failed") << '\n' << std::flush;
 		const WorldStateClientReplica::ApplyResult firstApply = replicaSmoke.Apply(worldSnapshot);
@@ -1600,7 +1603,7 @@ namespace {
 			success = success && state.ClientDisconnectWhilePausedObserved;
 		}
 		success = success && utf8GlyphRenderPassed && worldStateTransitionPassed && remoteTerrainMutationPassed && hostTerrainMutationPassed && hostEquipmentMutationPassed && remoteEquipmentMutationPassed &&
-		          state.HostSessionTestPassed && worldIdentityStable && replicaSmokePassed && backgroundEquipmentPassed && transientPixelReplicaPassed && terrainPatchApplyPassed &&
+		          state.HostSessionTestPassed && worldIdentityStable && replicaSmokePassed && backgroundEquipmentPassed && objectCallbacksPassed && transientPixelReplicaPassed && terrainPatchApplyPassed &&
 		          networkInputApplicationPassed && worldSnapshotPassed && snapshotCompressionPassed && liveSnapshotTransportPassed;
 		const double elapsedSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - state.StartTime).count();
 		if (state.RequestInventoryTest) {

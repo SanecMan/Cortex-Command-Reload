@@ -1,5 +1,24 @@
 # Automated debug run
 
+The gameplay run also includes `world_state_object_callback_smoke`. It writes an
+owned temporary Lua probe into its output directory, loads it by absolute path
+and observes native Create/OnAttach/OnDetach/Destroy side effects while removing
+a replica-held device. Reconciliation must produce zero callbacks and no retired
+world item. An independent native control then invokes the same probe outside
+reconciliation and must produce callbacks, proving that normal script execution
+was restored. The probe file is removed. The background-equipment check also
+compares the world-object sets before and after its disposable actors/items,
+catching leaked magazines or weapons in pending-object collections.
+
+On 2026-10-08, `ReplicaCallbacksPathBaseline` reproduced two callbacks during
+replica removal and exited with code 1 as expected. After isolation and immediate
+attachment cleanup, `ReplicaCallbacks_Ёжик` passed with `callbacks=0`, a working
+outside-scope Lua control, restored world-object sets and exit code 0. Its
+Cyrillic output-directory path also verifies absolute UTF-8 script loading.
+An earlier `ReplicaCallbacksBaseline` failed to load the probe because absolute
+resource paths were incorrectly prefixed with Mods/; that run does not prove
+callback behavior. The resource resolver was fixed before the measured baseline.
+
 The ordinary gameplay debug run includes `world_state_background_equipment_smoke`.
 It passes actual native AHuman/Arm objects through the snapshot codec and replica
 application while changing background ammunition (17, 3, -1), removing the

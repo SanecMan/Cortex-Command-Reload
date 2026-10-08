@@ -39,6 +39,7 @@ namespace RTE {
 		bool ApplyTerrainPatch(const WorldStateProtocol::TerrainPatch& patch);
 		void Forget();
 		static bool TestBackgroundEquipment(); // Explicit disposable debug-session check.
+		static bool TestObjectScriptCallbacks(const std::filesystem::path& outputDirectory, std::uint32_t& observedCallbacks);
 
 	private:
 		void ApplyInventory(const WorldStateProtocol::Snapshot& snapshot, ApplyResult& result);
