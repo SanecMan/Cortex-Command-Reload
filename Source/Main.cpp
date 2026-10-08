@@ -239,7 +239,7 @@ namespace {
 		bool DeliveryValidationTest = false;
 		bool RequestPurchaseTest = false;
 		bool RequestBuyMenuTest = false;
-		bool RequirePurchasePolicyTest = false, PurchasePolicyTestObserved = false;
+		bool RequirePurchasePolicyTest = false, PurchasePolicyTestObserved = false, RequirePurchasePricingTest = false;
 		int BuyMenuTestStage = 0;
 		bool BuyMenuTestPassed = false, BuyMenuCatalogCaptured = false, BuyMenuLandingCaptured = false;
 		float BuyMenuInitialFunds = 0, BuyMenuDisplayedCost = 0;
@@ -367,6 +367,7 @@ namespace {
 			if (argument == "-debug-run-world-state-purchase") state.RequestPurchaseTest = true;
 			if (argument == "-debug-run-world-state-buy-menu") state.RequestBuyMenuTest = true;
 			if (argument == "-debug-run-world-state-purchase-policy") { state.RequestBuyMenuTest=true; state.RequirePurchasePolicyTest=true; }
+			if (argument == "-debug-run-world-state-purchase-pricing") { state.RequestBuyMenuTest=true; state.RequirePurchasePolicyTest=true; state.RequirePurchasePricingTest=true; }
 			if (argument == "-debug-run-cpu-graphics-preflight") { state.CPUGraphicsPreflight = true; state.PreflightOnly = true; }
 			if (argument == "-debug-run-headless-content") { state.HeadlessContentPreflight = true; state.CPUGraphicsPreflight = true; state.PreflightOnly = true; }
 			if (argument == "-debug-run-headless-simulation") { state.HeadlessSimulationPreflight = true; state.HeadlessContentPreflight = true; state.CPUGraphicsPreflight = true; state.PreflightOnly = true; }
@@ -1811,7 +1812,7 @@ int RunPersistentHeadlessServer(const ServerConfiguration& config) {
 		for (const std::string& command : console.Poll()) {
 			if (command == "quit" || command == "exit" || command == "stop") ServerConsole::StopRequested.store(true);
 			else if (command == "status") log("INFO status tick=" + std::to_string(tick) + " clients=" + std::to_string(session.GetConnectedClientCount()) + " actors=" + std::to_string(g_MovableMan.GetActorCount()));
-			else if (command == "debug-purchase-policy") {
+			else if (command == "debug-purchase-policy" || command == "debug-purchase-pricing") {
 				auto* activity=dynamic_cast<GameActivity*>(g_ActivityMan.GetActivity());
 				BuyMenuGUI* menu=activity ? activity->GetBuyGUI(0) : nullptr;
 				if (menu) {
@@ -1819,6 +1820,18 @@ int RunPersistentHeadlessServer(const ServerConfiguration& config) {
 					for (const char* name : {"Base.rte/Rocket MK2","Coalition.rte/Soldier Light","Coalition.rte/Assault Rifle","Coalition.rte/Auto Pistol"}) menu->AddAllowedItem(name);
 					menu->AddAlwaysAllowedItem("Base.rte/Brain Case"); menu->AddProhibitedItem("Base.rte/SMG");
 					menu->SetOwnedItemsAmount("Base.rte/Rocket MK2",1); menu->SetOwnedItemsAmount("Coalition.rte/Soldier Light",2);
+					if (command == "debug-purchase-pricing") {
+						if (g_MetaMan.GetPlayerCount()!=0) { log("ERROR debug_purchase_pricing=metagame_already_present"); continue; }
+						// Use the normal metagame data reader for a disposable, non-UI economic fixture.
+						const std::string metaData="MetaMan\n\tGameState = "+std::to_string(MetaMan::RUNACTIVITIES)+
+						    "\n\tAddPlayer = MetaPlayer\n\t\tName = Network pricing fixture\n\t\tTeam = 0\n\t\tInGamePlayer = 0\n\t\tNativeTechModule = Ronin.rte\n\t\tNativeCostMultiplier = 0.5\n\t\tForeignCostMultiplier = 2\n";
+						Reader metaReader(std::make_unique<std::istringstream>(metaData),"Base.rte/debug-purchase-pricing.ini");
+						if (g_MetaMan.Serializable::Create(metaReader,true,false)<0 || !g_MetaMan.GameInProgress() || !g_MetaMan.GetMetaPlayerOfInGamePlayer(0)) {
+							log("ERROR debug_purchase_pricing=reader_failed"); continue;
+						}
+						menu->SetOwnedItemsAmount("Base.rte/Rocket MK2",0);
+						log("INFO debug_purchase_pricing=applied");
+					}
 					menu->SetOnlyShowOwnedItems(false); menu->SetEnforceMaxMassConstraint(false); menu->SetEnforceMaxPassengersConstraint(false);
 					Scene::Area area; area.AddBox(Box(Vector(100,0),300,static_cast<float>(g_SceneMan.GetSceneHeight())));
 					activity->SetLZArea(activity->GetTeamOfPlayer(0),area);
@@ -2530,7 +2543,9 @@ void RunGameLoop() {
 					}
 					if (uiTest.RequirePurchasePolicyTest && worldStateBuyMenu->GetMenu()) {
 						BuyMenuGUI* menu=worldStateBuyMenu->GetMenu();
-						if (menu->GetOwnedItemsAmount("Coalition.rte/Soldier Light")==2 && menu->GetOwnedItemsAmount("Base.rte/Rocket MK2")==1 &&
+						const bool pricingReady=!uiTest.RequirePurchasePricingTest || (menu->GetPricingModule()==g_PresetMan.GetModuleID("Ronin.rte") &&
+						    menu->GetPricingForeignMultiplier()==2 && menu->GetPricingNativeMultiplier()==0.5F);
+						if (pricingReady && menu->GetOwnedItemsAmount("Coalition.rte/Soldier Light")==2 && menu->GetOwnedItemsAmount("Base.rte/Rocket MK2")== (uiTest.RequirePurchasePricingTest ? 0 : 1) &&
 						    menu->IsAllowedItem("Base.rte/Rocket MK2") && menu->IsProhibitedItem("Base.rte/SMG") && menu->IsAlwaysAllowedItem("Base.rte/Brain Case") &&
 						    !menu->EnforceMaxMassConstraint() && !menu->EnforceMaxPassengersConstraint() && worldStateBuyMenu->GetLandingArea().IsInsideX(250) &&
 						    !worldStateBuyMenu->GetLandingArea().IsInsideX(900)) uiTest.PurchasePolicyTestObserved=true;

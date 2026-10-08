@@ -78,6 +78,7 @@ void BuyMenuGUI::Clear() {
 	m_MetaPlayer = Players::NoPlayer;
 	m_NativeTechModule = 0;
 	m_ForeignCostMult = 4.0;
+	m_AuthoritativePricing = false;
 	int moduleCount = g_PresetMan.GetTotalModuleCount();
 	m_aExpandedModules = new bool[moduleCount];
 	for (int i = 0; i < moduleCount; ++i)
@@ -595,6 +596,31 @@ bool BuyMenuGUI::IsPurchaseAllowed(const SceneObject& item) const {
 	    (item.IsBuyable() && !item.IsBuyableInObjectPickerOnly() && !item.IsBuyableInScriptOnly() && !item.IsInGroup("Brains"));
 }
 
+void BuyMenuGUI::SetAuthoritativePricing(int module, float foreignMultiplier, float nativeMultiplier) {
+	m_AuthoritativePricing=true;
+	m_PricingModule=module;
+	m_PricingForeignMultiplier=foreignMultiplier;
+	m_PricingNativeMultiplier=nativeMultiplier;
+}
+
+void BuyMenuGUI::ForceRefresh() {
+	CategoryChange();
+	if (m_AuthoritativePricing && m_pCartList) {
+		for (GUIListPanel::Item* item : *m_pCartList->GetItemList()) {
+			if (const auto* object=dynamic_cast<const SceneObject*>(item->m_pEntity)) {
+				item->m_RightText=object->GetGoldValueString(GetPricingModule(),GetPricingForeignMultiplier(),GetPricingNativeMultiplier());
+			}
+		}
+		// Rebuild the cached cart once after all row prices changed.
+		if (!m_pCartList->GetItemList()->empty()) m_pCartList->SetItemValues(0,*m_pCartList->GetItemList()->front());
+		if (m_pSelectedCraft) {
+			const auto price=m_pSelectedCraft->GetGoldValueString(GetPricingModule(),GetPricingForeignMultiplier(),GetPricingNativeMultiplier());
+			m_pCraftBox->SetRightText(price); m_pCraftPriceLabel->SetText(price);
+		}
+	}
+	if (m_pController) UpdateTotalCostLabel(m_pController->GetTeam());
+}
+
 float BuyMenuGUI::GetTotalCost(bool includeDelivery) const {
 	float totalCost = 0;
 
@@ -612,7 +638,7 @@ float BuyMenuGUI::GetTotalCost(bool includeDelivery) const {
 				needsToBePaid = false;
 
 			if (needsToBePaid) {
-				totalCost += dynamic_cast<const MOSprite*>((*itr)->m_pEntity)->GetGoldValue(m_NativeTechModule, m_ForeignCostMult);
+				totalCost += dynamic_cast<const MOSprite*>((*itr)->m_pEntity)->GetGoldValue(GetPricingModule(), GetPricingForeignMultiplier(), GetPricingNativeMultiplier());
 			}
 		}
 
@@ -627,16 +653,16 @@ float BuyMenuGUI::GetTotalCost(bool includeDelivery) const {
 				needsToBePaid = false;
 
 			if (needsToBePaid) {
-				totalCost += dynamic_cast<const MOSprite*>(m_pSelectedCraft)->GetGoldValue(m_NativeTechModule, m_ForeignCostMult);
+				totalCost += dynamic_cast<const MOSprite*>(m_pSelectedCraft)->GetGoldValue(GetPricingModule(), GetPricingForeignMultiplier(), GetPricingNativeMultiplier());
 			}
 		}
 	} else {
 		for (std::vector<GUIListPanel::Item*>::iterator itr = m_pCartList->GetItemList()->begin(); itr != m_pCartList->GetItemList()->end(); ++itr)
-			totalCost += dynamic_cast<const MOSprite*>((*itr)->m_pEntity)->GetGoldValue(m_NativeTechModule, m_ForeignCostMult);
+			totalCost += dynamic_cast<const MOSprite*>((*itr)->m_pEntity)->GetGoldValue(GetPricingModule(), GetPricingForeignMultiplier(), GetPricingNativeMultiplier());
 
 		// Add the delivery craft's cost
 		if (m_pSelectedCraft && includeDelivery) {
-			totalCost += dynamic_cast<const MOSprite*>(m_pSelectedCraft)->GetGoldValue(m_NativeTechModule, m_ForeignCostMult);
+			totalCost += dynamic_cast<const MOSprite*>(m_pSelectedCraft)->GetGoldValue(GetPricingModule(), GetPricingForeignMultiplier(), GetPricingNativeMultiplier());
 		}
 	}
 
@@ -2065,14 +2091,14 @@ void BuyMenuGUI::CategoryChange(bool focusOnCategoryTabs) {
 								m_pShopList->AddItem((*tItr)->GetPresetName(), amount, pItemBitmap, *tItr);
 							} else {
 								if (!m_OnlyShowOwnedItems)
-									m_pShopList->AddItem((*tItr)->GetPresetName(), (*tItr)->GetGoldValueString(m_NativeTechModule, m_ForeignCostMult), pItemBitmap, *tItr);
+									m_pShopList->AddItem((*tItr)->GetPresetName(), (*tItr)->GetGoldValueString(GetPricingModule(), GetPricingForeignMultiplier(), GetPricingNativeMultiplier()), pItemBitmap, *tItr);
 								else {
 									if (m_AlwaysAllowedItems.find((*tItr)->GetModuleAndPresetName()) != m_AlwaysAllowedItems.end())
-										m_pShopList->AddItem((*tItr)->GetPresetName(), (*tItr)->GetGoldValueString(m_NativeTechModule, m_ForeignCostMult), pItemBitmap, *tItr);
+										m_pShopList->AddItem((*tItr)->GetPresetName(), (*tItr)->GetGoldValueString(GetPricingModule(), GetPricingForeignMultiplier(), GetPricingNativeMultiplier()), pItemBitmap, *tItr);
 								}
 							}
 						} else {
-							m_pShopList->AddItem((*tItr)->GetPresetName(), (*tItr)->GetGoldValueString(m_NativeTechModule, m_ForeignCostMult), pItemBitmap, *tItr);
+							m_pShopList->AddItem((*tItr)->GetPresetName(), (*tItr)->GetGoldValueString(GetPricingModule(), GetPricingForeignMultiplier(), GetPricingNativeMultiplier()), pItemBitmap, *tItr);
 						}
 					}
 				}
@@ -2139,10 +2165,10 @@ bool BuyMenuGUI::DeployLoadout(int index) {
 
 		// Take into account whether these are native or not, and multiply the cost accordingly
 		m_pCraftBox->SetText(m_pSelectedCraft->GetPresetName());
-		m_pCraftBox->SetRightText(m_pSelectedCraft->GetGoldValueString(m_NativeTechModule, m_ForeignCostMult));
+		m_pCraftBox->SetRightText(m_pSelectedCraft->GetGoldValueString(GetPricingModule(), GetPricingForeignMultiplier(), GetPricingNativeMultiplier()));
 
 		m_pCraftNameLabel->SetText(m_pSelectedCraft->GetPresetName());
-		m_pCraftPriceLabel->SetText(m_pSelectedCraft->GetGoldValueString(m_NativeTechModule, m_ForeignCostMult));
+		m_pCraftPriceLabel->SetText(m_pSelectedCraft->GetGoldValueString(GetPricingModule(), GetPricingForeignMultiplier(), GetPricingNativeMultiplier()));
 		UpdateTotalPassengersLabel(dynamic_cast<const ACraft*>(m_pSelectedCraft), m_pCraftPassengersLabel);
 		UpdateTotalMassLabel(dynamic_cast<const ACraft*>(m_pSelectedCraft), m_pCraftMassLabel);
 	}
@@ -2175,7 +2201,7 @@ bool BuyMenuGUI::DeployLoadout(int index) {
 			canAdd = true;
 
 		if (canAdd)
-			AddCartItem((*cItr)->GetPresetName(), (*cItr)->GetGoldValueString(m_NativeTechModule, m_ForeignCostMult), pItemBitmap, *cItr);
+			AddCartItem((*cItr)->GetPresetName(), (*cItr)->GetGoldValueString(GetPricingModule(), GetPricingForeignMultiplier(), GetPricingNativeMultiplier()), pItemBitmap, *cItr);
 	}
 
 	// Update labels with the new config's values
@@ -2356,7 +2382,7 @@ void BuyMenuGUI::AddPresetsToItemList() {
 		}
 
 		for (const SceneObject* sceneObject: *loadout.GetCargoList()) {
-			loadoutCost += sceneObject->GetGoldValue(m_NativeTechModule, m_ForeignCostMult);
+			loadoutCost += sceneObject->GetGoldValue(GetPricingModule(), GetPricingForeignMultiplier(), GetPricingNativeMultiplier());
 		}
 
 		// Passing in ownership of the bitmap

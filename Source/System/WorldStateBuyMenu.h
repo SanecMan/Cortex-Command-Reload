@@ -72,6 +72,9 @@ public:
 		const auto& policy=client.GetPurchasePolicy();
 		if (policy.SceneRevision==m_Revision && policy.PlayerSlot==m_Slot && policy.Team==m_Team && client.GetPurchasePolicySequence()!=m_AppliedPolicySequence) {
 			const bool firstPolicy=!m_PolicyReady;
+			const int pricingModule=g_PresetMan.GetModuleID(policy.PricingModule);
+			if (pricingModule<0) { m_PolicyReady=false; m_Status="Missing server pricing module: "+policy.PricingModule; return; }
+			m_Menu->SetAuthoritativePricing(pricingModule,policy.ForeignMultiplier,policy.NativeMultiplier);
 			m_Menu->ClearAllowedItems(); m_Menu->ClearAlwaysAllowedItems(); m_Menu->ClearProhibitedItems(); m_Menu->ClearOwnedItems();
 			for (const auto& key:policy.Allowed) m_Menu->AddAllowedItem(key);
 			for (const auto& key:policy.AlwaysAllowed) m_Menu->AddAlwaysAllowedItem(key);

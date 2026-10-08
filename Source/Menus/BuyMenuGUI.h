@@ -106,6 +106,12 @@ namespace RTE {
 		/// @param newMultiplier The scalar multiplier of the costs of foreign Tech items.
 		void SetForeignCostMultiplier(float newMultiplier) { m_ForeignCostMult = newMultiplier; }
 
+		// Remote menu pricing is separate from faction themes and local Lua menu settings.
+		void SetAuthoritativePricing(int module, float foreignMultiplier, float nativeMultiplier);
+		int GetPricingModule() const { return m_AuthoritativePricing ? m_PricingModule : m_NativeTechModule; }
+		float GetPricingForeignMultiplier() const { return m_AuthoritativePricing ? m_PricingForeignMultiplier : m_ForeignCostMult; }
+		float GetPricingNativeMultiplier() const { return m_AuthoritativePricing ? m_PricingNativeMultiplier : 1.0F; }
+
 		/// Sets whether a data module shown in the item menu should be expanded
 		/// or not.
 		/// @param whichModule The module ID to set as expanded.
@@ -246,7 +252,7 @@ namespace RTE {
 		bool IsProhibitedItem(std::string presetName) { return m_ProhibitedItems.find(presetName) != m_ProhibitedItems.end(); }
 
 		/// Forces a refresh update of the list of buy menu items
-		void ForceRefresh() { CategoryChange(); if (m_pController) UpdateTotalCostLabel(m_pController->GetTeam()); }
+		void ForceRefresh();
 
 		/// Clear the cart out of items selected for purchase
 		void ClearCartList();
@@ -423,6 +429,9 @@ namespace RTE {
 		int m_NativeTechModule;
 		// The multiplier of costs of any foreign tech items
 		float m_ForeignCostMult;
+		bool m_AuthoritativePricing=false;
+		int m_PricingModule=0;
+		float m_PricingForeignMultiplier=1, m_PricingNativeMultiplier=1;
 		// Arry of bools showing which modules that have been expanded in the item list
 		bool* m_aExpandedModules;
 		// Notification blink timer

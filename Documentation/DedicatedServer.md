@@ -1,6 +1,6 @@
 # Dedicated server
 
-## Live catalog policy (v12)
+## Live catalog policy (v13)
 
 The client now receives server-owned stock, allow/always-allow/prohibit lists,
 only-owned and transport-limit flags, and landing-area boxes. Changes made by
@@ -10,8 +10,10 @@ change and clamps landing selection against the server area. Server validation
 remains authoritative at purchase time. Empty stock in only-owned mode hides
 unavailable catalog entries while retaining always-allowed exceptions.
 
-Both executables must use v12. The rule frame does not yet transmit custom base
-preset prices or metagame pricing modifiers, nor complete craft inventories.
+Both executables must use v13. The rule frame includes the server's pricing
+module name and foreign/native multipliers. The client uses these for displayed
+prices and affordability checks, separately from its faction theme. Custom base
+preset prices and complete craft inventories are not transmitted yet.
 
 Run `Tools/RunDedicatedServerSmoke.ps1 -CheckPurchasePolicy` for the live rule
 fixture. After the client's catalog screenshot, the wrapper sends the explicit
@@ -42,8 +44,8 @@ framebuffer, and teardown clears that callback before releasing UI resources.
 
 Base preset prices and assets still come from local installed content. Server
 stock, allow/prohibit rules, transport constraints and dynamic landing areas now
-update the catalog through v12 policies. Metagame pricing modifiers and custom
-base-price differences are still outside that policy frame; complete remote
+update the catalog through policies. v13 also carries metagame pricing modifiers;
+custom base-price differences are still outside that policy frame; complete remote
 BuyMenu parity is not yet established.
 
 The stock-price regression also checks that the client's displayed order total
@@ -62,8 +64,47 @@ and exited with code 0. The servers continued 66 and 64 updates respectively
 after disconnection. Elapsed times were 62.10 and 64.15 seconds while the tests
 ran concurrently, not performance benchmarks. The normal 60-update diagnostic
 also passed (`BuyStockLocalRegression`). These runs cover duplicate soldiers
-exceeding stock and a stock-owned delivery craft; metagame multipliers still
-require separate implementation and verification.
+exceeding stock and a stock-owned delivery craft. At that v12 checkpoint,
+metagame multipliers were not yet implemented or verified.
+
+The v13 pricing fixture is `Tools/RunDedicatedServerSmoke.ps1
+-CheckPurchasePricing`. It implies the live-policy check, sends the local
+`debug-purchase-pricing` command after the catalog opens, and loads a disposable
+MetaPlayer through the engine's normal data reader. The fixture uses Ronin.rte
+as native tech, foreign multiplier 2 and native multiplier 0.5. Two Coalition
+soldiers are stock-owned, while the rocket is paid. The expected order total is
+798 (150 for the Base rocket and 648 for the remaining foreign Coalition cargo).
+The wrapper requires both the pre-submit menu total and the accepted server
+charge to match, together with normal delivery/replica/lifecycle checks.
+The command refuses to add a fixture if metagame players already exist. Use it
+only in a disposable server session; it changes that session's economic context.
+
+Windows Final v13 pricing verification passed with the rebuilt console server
+and two separate clients (`MetaPricingV13`). The real MetaPlayer context was
+loaded successfully; the active client observed module Ronin.rte, multipliers
+2/0.5 and the updated stock before confirmation. Its pre-submit total was 798,
+and the server accepted exactly one order for 798. The client also checked the
+authoritative balance at acceptance and observed the delivery craft. The
+spectator had no buy menu. The server continued 64 updates after both clients
+disconnected and quit with code 0. The ordinary v13 stock-policy regression
+(`StockPricingV13`) displayed and charged 324 and continued 65 updates.
+
+Elapsed times were 61.81 and 63.39 seconds while both tests ran concurrently;
+they are not performance benchmarks. The final pricing screenshot was inspected
+and showed the `Delivery ordered: 798.00 oz` confirmation. Its later balance
+includes normal craft-return refunds, so the final screenshot is not used as
+the deduction assertion. These tests use GUI confirmation APIs; physical mouse
+input and a complete metagame campaign remain outside their coverage. Codec
+checks rejected negative/non-finite multipliers and retained the prior decoded
+policy on failure. The standard 60-update actor/particle diagnostic also passed
+on this client (`PlayableFinalCheck`).
+
+The same v13 binaries passed the Control regression (movement, firing and scene
+transition) in 72.61 seconds (`PricingV13Control`) and the separate purchase RPC
+regression in 62.27 seconds (`PricingV13Rpc`), including changed-payload duplicate
+ID replay without a second charge. The RPC server continued 83 updates after
+disconnection and exited with code 0. These concurrently executed checks are
+functional regressions, not timing comparisons.
 
 `Tools/RunDedicatedServerSmoke.ps1 -CheckBuyMenu` enables the automated menu
 fixture. It selects an official Coalition loadout through the GUI's loadout/cart

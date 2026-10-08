@@ -8,10 +8,12 @@ param(
     [switch]$CheckPurchases,
     [switch]$CheckBuyMenu,
     [switch]$CheckPurchasePolicy,
+    [switch]$CheckPurchasePricing,
     [ValidateRange(60, 600)]
     [int]$TimeoutSeconds = 360
 )
 $ErrorActionPreference = 'Stop'
+if ($CheckPurchasePricing) { $CheckPurchasePolicy=$true }
 if ($CheckPurchasePolicy) { $CheckBuyMenu=$true }
 if ($CheckPurchases -and $CheckTeamFunds) { throw 'Run purchase and administrative funds fixtures separately.' }
 if ($CheckBuyMenu -and ($CheckPurchases -or $CheckTeamFunds)) { throw 'Run the buy-menu fixture separately.' }
@@ -81,6 +83,7 @@ try {
 		if ($CheckPurchases) { $purchaseArguments = @('-debug-run-world-state-purchase') }
 		if ($CheckBuyMenu) { $purchaseArguments = @('-debug-run-world-state-buy-menu') }
 		if ($CheckPurchasePolicy) { $purchaseArguments = @('-debug-run-world-state-purchase-policy') }
+		if ($CheckPurchasePricing) { $purchaseArguments = @('-debug-run-world-state-purchase-pricing') }
         $client = Start-Process -FilePath $clientBinary -WorkingDirectory (Split-Path -Parent $clientBinary) -WindowStyle Hidden -PassThru -ArgumentList (@(
             '-debug-run','600','-debug-run-output',"$OutputPrefix-Client$index",'-world-state-client','127.0.0.1',"$port"
         )+$purchaseArguments)
@@ -98,7 +101,10 @@ try {
                 $reportPath=Join-Path (Split-Path -Parent $clientBinary) "ScreenShots\$OutputPrefix-Client$index\DebugRun.log"
                 $catalogReady=$catalogReady -or (Read-Report $reportPath) -match 'debug-run-buy-catalog\.png result=0'
             }
-            if ($catalogReady) { $server.StandardInput.WriteLine('debug-purchase-policy'); $server.StandardInput.Flush(); $policyChanged=$true }
+            if ($catalogReady) {
+                $policyCommand = if ($CheckPurchasePricing) { 'debug-purchase-pricing' } else { 'debug-purchase-policy' }
+                $server.StandardInput.WriteLine($policyCommand); $server.StandardInput.Flush(); $policyChanged=$true
+            }
         }
         if ($CheckTeamFunds -and !$fundsChanged) {
             $clientsReady = $true
@@ -142,7 +148,8 @@ try {
     [IO.File]::WriteAllText((Join-Path $logDirectory 'StdOut.log'), $outputTask.GetAwaiter().GetResult(), [Text.UTF8Encoding]::new($false))
     [IO.File]::WriteAllText((Join-Path $logDirectory 'StdErr.log'), $errorTask.GetAwaiter().GetResult(), [Text.UTF8Encoding]::new($false))
     $networkLog = Read-Report (Join-Path $logDirectory 'WorldStateServer.log')
-    if ($CheckPurchasePolicy -and (!$policyChanged -or $networkLog -notmatch 'purchase id=1 accepted=1 charged=324\.000000')) { throw 'Server stock-price policy checks failed.' }
+    $expectedPolicyCost = if ($CheckPurchasePricing) { 798 } else { 324 }
+    if ($CheckPurchasePolicy -and (!$policyChanged -or $networkLog -notmatch "purchase id=1 accepted=1 charged=$expectedPolicyCost\.000000")) { throw 'Server stock-price policy checks failed.' }
     if ($CheckBuyMenu -and ([regex]::Matches($networkLog, 'purchase id=\d+ accepted=1').Count -ne 1)) { throw 'Expected exactly one accepted menu purchase.' }
     if ($CheckPurchases -and ($networkLog -notmatch 'purchase id=3 accepted=1 charged=500\.000000' -or
         $networkLog -notmatch 'purchase replay id=3' -or ([regex]::Matches($networkLog, 'purchase id=3 accepted=1').Count -ne 1))) { throw 'Purchase/replay server checks failed.' }
@@ -154,7 +161,7 @@ try {
         if ($CheckPurchases -and $clientReport -notmatch '(?m)^world_state_purchase=passed') { throw 'Client purchase checks failed.' }
         if ($CheckBuyMenu -and $clientReport -notmatch '(?m)^world_state_buy_menu=passed') { throw 'Client buy menu checks failed.' }
         if ($CheckPurchasePolicy -and $clientReport -notmatch '(?m)^world_state_purchase_policy=passed') { throw 'Client live policy checks failed.' }
-        if ($clientReport -match '(?m)^buy_menu_displayed_cost=324\r?$') { $displayedStockPriceObserved = $true }
+        if ($clientReport -match "(?m)^buy_menu_displayed_cost=$expectedPolicyCost\r?`$") { $displayedStockPriceObserved = $true }
         if ($clientReport -notmatch '(?m)^result=passed' -or $clientNetwork -notmatch '(?m)^client_local_simulation_ticks=0' -or
             $clientNetwork -notmatch '(?m)^snapshot=\d+.*missing_presets=0' -or $clientNetwork -match 'missing_presets=[1-9]') { throw 'Client replica checks failed.' }
         if ($CheckTeamFunds -and (!$fundsChanged -or $clientReport -notmatch '(?m)^world_state_team_funds_presentation=passed' -or

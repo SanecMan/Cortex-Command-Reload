@@ -249,6 +249,14 @@ The separate Windows console binary and the client's --server mode use the same 
 
 ## Remote catalog policy check
 
+Protocol v13 additionally supports `-CheckPurchasePricing` in the same wrapper.
+It creates a disposable server MetaPlayer with Ronin native tech and foreign/
+native multipliers 2/0.5 after the remote catalog opens. The fixture requires
+the displayed order total to match the real authoritative charge (798), rather
+than testing only codec round trips. It also keeps the stock, restriction and
+landing-area checks. This test changes the server's metagame economic context;
+use a fresh disposable session. Both client and server must be rebuilt for v13.
+
 Run `Tools/RunDedicatedServerSmoke.ps1 -CheckPurchasePolicy` to check live
 server-owned stock, item restrictions, mass/passenger flags and landing areas.
 The wrapper changes these rules through the server console after the client's

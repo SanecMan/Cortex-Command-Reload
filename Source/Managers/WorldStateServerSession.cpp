@@ -9,6 +9,7 @@
 #include "PresetMan.h"
 #include "ThreadMan.h"
 #include "BuyMenuGUI.h"
+#include "MetaMan.h"
 #include "NetworkMessages.h"
 #include "SceneMan.h"
 #include "SLTerrain.h"
@@ -384,6 +385,10 @@ void WorldStateServerSession::PublishPurchasePolicies(std::uint32_t tick) {
 		WorldStateProtocol::PurchasePolicy policy;
 		policy.SceneRevision=revision; policy.PlayerSlot=static_cast<std::int8_t>(slot);
 		policy.Team=static_cast<std::int8_t>(team);
+		if (MetaPlayer* meta=g_MetaMan.GetMetaPlayerOfInGamePlayer(slot); g_MetaMan.GameInProgress() && meta) {
+			policy.PricingModule=g_PresetMan.GetDataModuleName(meta->GetNativeTechModule());
+			policy.ForeignMultiplier=meta->GetForeignCostMultiplier(); policy.NativeMultiplier=meta->GetNativeCostMultiplier();
+		}
 		policy.OnlyOwned=menu->GetOnlyShowOwnedItems(); policy.EnforceMass=menu->EnforceMaxMassConstraint(); policy.EnforcePassengers=menu->EnforceMaxPassengersConstraint();
 		for (const auto& entry:menu->GetAllowedItems()) policy.Allowed.push_back(entry.first);
 		for (const auto& entry:menu->GetAlwaysAllowedItems()) policy.AlwaysAllowed.push_back(entry.first);
