@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" ToolsVersion="12.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug Full|Win32">
@@ -1479,6 +1479,7 @@
     <ClCompile Include="Source\Menus\ScenarioGUI.cpp" />
     <ClCompile Include="Source\Menus\SceneEditorGUI.cpp" />
     <ClCompile Include="Source\Main.cpp" />
+    <ClCompile Include="Source\ClientEntry.cpp" />
   </ItemGroup>
   <ItemGroup>
     <Image Include="Resources\ccicon.ico" />

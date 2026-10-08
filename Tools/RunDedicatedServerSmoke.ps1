@@ -2,6 +2,7 @@
 param(
     [string]$ServerExecutablePath,
     [string]$ClientExecutablePath,
+    [string]$GameDirectory,
     [ValidatePattern('^[A-Za-z0-9_-]{1,48}$')]
     [string]$OutputPrefix = 'DedicatedServerSmoke',
     [switch]$CheckTeamFunds,
@@ -23,7 +24,8 @@ if (!$ServerExecutablePath) { $ServerExecutablePath = Join-Path $PSScriptRoot '.
 if (!$ClientExecutablePath) { $ClientExecutablePath = Join-Path $PSScriptRoot '..\Cortex Command.exe' }
 $serverBinary = (Resolve-Path -LiteralPath $ServerExecutablePath).Path
 $clientBinary = (Resolve-Path -LiteralPath $ClientExecutablePath).Path
-$gameDirectory = Split-Path -Parent $serverBinary
+if (!$GameDirectory) { $GameDirectory = Split-Path -Parent $serverBinary }
+$gameDirectory = (Resolve-Path -LiteralPath $GameDirectory).Path
 $logDirectory = Join-Path $gameDirectory "ScreenShots\$OutputPrefix-Host"
 $timer = [Diagnostics.Stopwatch]::StartNew()
 $processes = [Collections.Generic.List[Diagnostics.Process]]::new()
@@ -87,7 +89,7 @@ try {
 		if ($CheckPurchasePolicy) { $purchaseArguments = @('-debug-run-world-state-purchase-policy') }
 		if ($CheckPurchasePricing) { $purchaseArguments = @('-debug-run-world-state-purchase-pricing') }
 		if ($CheckInventory) { $purchaseArguments = @('-debug-run-world-state-inventory') }
-        $client = Start-Process -FilePath $clientBinary -WorkingDirectory (Split-Path -Parent $clientBinary) -WindowStyle Hidden -PassThru -ArgumentList (@(
+        $client = Start-Process -FilePath $clientBinary -WorkingDirectory $gameDirectory -WindowStyle Hidden -PassThru -ArgumentList (@(
             '-debug-run','600','-debug-run-output',"$OutputPrefix-Client$index",'-world-state-client','127.0.0.1',"$port"
         )+$purchaseArguments)
         $processes.Add($client)
@@ -103,7 +105,7 @@ try {
         if ($CheckInventory -and !$inventoryCreated) {
             $inventoryClientsReady=$true
             foreach ($index in 1..2) {
-                $inventoryNetwork=Join-Path (Split-Path -Parent $clientBinary) "ScreenShots\$OutputPrefix-Client$index\WorldStateClient.log"
+                $inventoryNetwork=Join-Path $gameDirectory "ScreenShots\$OutputPrefix-Client$index\WorldStateClient.log"
                 $inventoryClientsReady=$inventoryClientsReady -and (Read-Report $inventoryNetwork) -match '(?m)^snapshot='
             }
             if ($inventoryClientsReady) { $server.StandardInput.WriteLine('debug-inventory-create'); $server.StandardInput.Flush(); $inventoryCreated=$true }
@@ -111,7 +113,7 @@ try {
         if ($CheckInventory -and $inventoryCreated -and !$inventoryMutated) {
             $initialInventorySeen=$true
             foreach ($index in 1..2) {
-                $inventoryReport=Join-Path (Split-Path -Parent $clientBinary) "ScreenShots\$OutputPrefix-Client$index\DebugRun.log"
+                $inventoryReport=Join-Path $gameDirectory "ScreenShots\$OutputPrefix-Client$index\DebugRun.log"
                 $initialInventorySeen=$initialInventorySeen -and (Read-Report $inventoryReport) -match '(?m)^world_state_inventory_initial=passed'
             }
             if ($initialInventorySeen) { $server.StandardInput.WriteLine('debug-inventory-mutate'); $server.StandardInput.Flush(); $inventoryMutated=$true }
@@ -119,7 +121,7 @@ try {
         if ($CheckPurchasePolicy -and !$policyChanged) {
             $catalogReady=$false
             foreach ($index in 1..2) {
-                $reportPath=Join-Path (Split-Path -Parent $clientBinary) "ScreenShots\$OutputPrefix-Client$index\DebugRun.log"
+                $reportPath=Join-Path $gameDirectory "ScreenShots\$OutputPrefix-Client$index\DebugRun.log"
                 $catalogReady=$catalogReady -or (Read-Report $reportPath) -match 'debug-run-buy-catalog\.png result=0'
             }
             if ($catalogReady) {
@@ -130,7 +132,7 @@ try {
         if ($CheckTeamFunds -and !$fundsChanged) {
             $clientsReady = $true
             foreach ($index in 1..2) {
-                $networkPath = Join-Path (Split-Path -Parent $clientBinary) "ScreenShots\$OutputPrefix-Client$index\WorldStateClient.log"
+                $networkPath = Join-Path $gameDirectory "ScreenShots\$OutputPrefix-Client$index\WorldStateClient.log"
                 $clientsReady = $clientsReady -and (Read-Report $networkPath) -match '(?m)^snapshot='
             }
             if ($clientsReady) {
@@ -176,7 +178,7 @@ try {
         $networkLog -notmatch 'purchase replay id=3' -or ([regex]::Matches($networkLog, 'purchase id=3 accepted=1').Count -ne 1))) { throw 'Purchase/replay server checks failed.' }
     if ($networkLog -notmatch '\(2 connected, input slot') { throw 'Two simultaneous connections not observed.' }
     foreach ($index in 1..2) {
-        $clientDirectory = Join-Path (Split-Path -Parent $clientBinary) "ScreenShots\$OutputPrefix-Client$index"
+        $clientDirectory = Join-Path $gameDirectory "ScreenShots\$OutputPrefix-Client$index"
         $clientReport = Read-Report (Join-Path $clientDirectory 'DebugRun.log')
         $clientNetwork = Read-Report (Join-Path $clientDirectory 'WorldStateClient.log')
         if ($CheckPurchases -and $clientReport -notmatch '(?m)^world_state_purchase=passed') { throw 'Client purchase checks failed.' }

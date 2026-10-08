@@ -1,5 +1,56 @@
 # Dedicated server
 
+## Portable build targets
+
+Meson provides `build_client` (default true) and `build_server` (default false).
+The common `CortexCommandEngine` static library is compiled once; client and
+server entry targets link all its objects so reflection-only entity factories
+are retained. It currently contains the legacy rendering/UI code as well as
+simulation. Headless operation is selected at startup, not by a second engine
+implementation; graphics/audio libraries are still link dependencies.
+
+With the Linux dependencies listed in README installed, the server target can
+be configured with:
+
+```sh
+meson setup build-server -Dbuild_client=false -Dbuild_server=true -Dinstall_runner=false --buildtype=release
+meson compile -C build-server -j 2
+./build-server/CortexCommandServer --config Server.example.ini
+```
+
+Run from the checkout (or another directory containing Data/); game content is
+resolved relative to that working directory. Config paths can also be absolute.
+
+`ClientEntry.cpp` and `ServerEntry.cpp` call the same `RunCortexCommand` startup
+and loop. Windows frontends convert UTF-16 arguments to UTF-8; the POSIX server
+entry forwards native UTF-8 arguments. The server entry adds `--server` so it
+cannot accidentally open the client menu. The argv array has its required null
+sentinel. A server-only configuration does not install desktop launchers/icons.
+
+Both Meson targets built on Windows x64. `MesonPortablePair` passed with two
+real clients, nested inventory and background-hand changes, zero client
+simulation updates and 67 server updates after disconnect. The server reported
+`video_initialized=0` and ran with an invalid SDL video driver. The separate
+`MesonPortable_Ёжик` run passed 60 diagnostic updates using a Unicode output path.
+These are runtime verification results, not performance benchmarks. The Meson
+link currently warns about conflicting CRT defaults (LNK4098); the successful
+smoke runs do not establish safety of every third-party allocation boundary.
+
+A compile of the POSIX entry branch with a stub engine proved argument forwarding
+and forced server mode; it is not a Linux engine build or runtime test. Linux
+headless, signal handling, systemd and Docker operation remain unverified while
+the test host is offline.
+
+For an out-of-tree Windows build, run the smoke test from the checkout:
+
+```powershell
+Tools/RunDedicatedServerSmoke.ps1 -ServerExecutablePath '.\build-server\CortexCommandServer.exe' -ClientExecutablePath '.\build-client\Cortex Command.exe' -GameDirectory (Get-Location).Path -CheckInventory -OutputPrefix PortableInventory
+```
+
+`GameDirectory` must contain the game content and runtime DLLs. Both binaries
+must use the same protocol version. Without this option the script uses the
+server executable's directory, preserving the normal in-checkout workflow.
+
 ### Replica callback isolation verification (2026-10-08)
 
 Matching Final client/server binaries passed `ReplicaCallbacksPair` with two

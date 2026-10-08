@@ -26,6 +26,19 @@ simulation code and requires the game's content and runtime DLLs. See
 [Dedicated server setup, verification and current limits](Documentation/DedicatedServer.md).
 Linux operation is not yet verified.
 
+Meson can build both frontends against one common engine library:
+
+```sh
+meson setup build -Dbuild_client=true -Dbuild_server=true -Dinstall_runner=false
+meson compile -C build -j 2
+```
+
+Use `-Dbuild_client=false -Dbuild_server=true` for only the server executable.
+The shared engine still links legacy graphics/audio libraries; runtime headless
+startup skips window, GPU and audio initialization. Windows x64 builds and a
+two-client headless smoke test have passed; Linux runtime is not yet verified.
+Run the binaries with the game content directory as their working directory.
+
 # How To Make Issues #
 Please feel free to add issues and bugs. It's as simple as going to the issues tab and clicking a button. Once you do that, you'll see an easy to follow template to fill in. Try to put in the appropriate category for the issue and it'll be handled from there.
 

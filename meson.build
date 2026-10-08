@@ -3,6 +3,9 @@ project('Cortex-Command-Community-Project', ['cpp','c'], subproject_dir: 'extern
 #### Build environment Setup ####
 
 compiler = meson.get_compiler('cpp')
+if not get_option('build_client') and not get_option('build_server')
+  error('Enable build_client or build_server.')
+endif
 cmake = import('cmake')
 deps=[]
 
@@ -244,20 +247,47 @@ deps += [sdl3_dep, sdl3_image_dep, allegro_dep, luajit_dep, loadpng_dep, raknet_
 
 #### Sources Setup ####
 source_inc_dirs = []
+resource_sources = []
 subdir('Source')
+source_inc_dirs += include_directories('Resources')
+if get_option('build_client')
 subdir('Resources')
+endif
 
 
 #### Target Definitions ####
+engine_core = static_library(
+  'CortexCommandEngine', ['Source/Main.cpp', sources],
+  include_directories:[source_inc_dirs, external_inc_dirs], cpp_pch:pch,
+  objects:external_objects, dependencies:deps,
+  cpp_args:[extra_args, preprocessor_flags],
+  install:false,
+)
+
+if get_option('build_client')
 cccpelf = executable(
-  elfname, ['Source/Main.cpp', sources], include_directories:[source_inc_dirs, external_inc_dirs], cpp_pch:pch, # Sources options
-  link_with:[external_libs, source_libs], objects:[external_objects], dependencies:deps,                                # Link options
+  elfname, ['Source/ClientEntry.cpp', resource_sources], include_directories:[source_inc_dirs, external_inc_dirs],
+  link_whole:engine_core,
+  link_with:[external_libs, source_libs], dependencies:deps,                                # Link options
   cpp_args:[extra_args, preprocessor_flags], link_args:[link_args], build_rpath:build_rpath,               # Compiler setup
   name_suffix:suffix,   # Executable name options
   build_by_default:true, # Meson options
   install: true, install_rpath: install_rpath, install_dir: get_option('install_runner') ? get_option('libdir')/'CortexCommand' : get_option('bindir'),
   win_subsystem:'windows', # Windows mark as GUI app
 )
+endif
+
+if get_option('build_server')
+serverelf = executable(
+  'CortexCommandServer', 'Source/ServerEntry.cpp',
+  include_directories:[source_inc_dirs, external_inc_dirs],
+  link_whole:engine_core, link_with:[external_libs, source_libs], dependencies:deps,
+  cpp_args:[extra_args, preprocessor_flags], link_args:link_args,
+  build_rpath:build_rpath, install_rpath:install_rpath,
+  name_suffix:suffix, build_by_default:true, install:true,
+  install_dir:get_option('bindir'), win_subsystem:'console',
+)
+endif
 
 
 #### Installing #####

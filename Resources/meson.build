@@ -1,5 +1,4 @@
 # User frontend
-source_inc_dirs += [include_directories('.')]
 if host_machine.system() == 'linux'
     app_id = 'io.github.cortex_command_community.Cortex-Command-Community-Project'
     desktop_file = files('cccp.desktop')
@@ -12,7 +11,7 @@ if host_machine.system() == 'linux'
 elif host_machine.system() == 'windows'
     windows = import('windows')
     winrc = windows.compile_resources('RTEA.rc', depend_files: files('resource.h', 'ccicon.ico', 'ccicon32.ico'), include_directories: '.')
-    sources += winrc
+    resource_sources += winrc
 elif host_machine.system() == 'darwin'
     install_data('ccicon.icns', install_dir : 'Contents/Resources')
     # install_data('Info.plist', install_dir : 'Contents')

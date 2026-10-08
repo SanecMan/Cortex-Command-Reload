@@ -2675,7 +2675,7 @@ static const bool RTESetExceptionHandlers = []() {
 /// <summary>
 /// Implementation of the main function.
 /// </summary>
-int main(int argc, char** argv) {
+int RunCortexCommand(int argc, char** argv) {
 	const bool serverMode = std::any_of(argv + 1, argv + argc, [](const char* arg) { return std::string_view(arg) == "--server"; });
 	const bool debugRun = !serverMode && ParseDebugRunArguments(argc, argv);
 	System::SetHeadlessServer(serverMode);
@@ -3266,32 +3266,3 @@ int main(int argc, char** argv) {
 	}
 	return (worldStateServerConfigurationFailed || (debugRun && !GetDebugRunState().Passed)) ? EXIT_FAILURE : EXIT_SUCCESS;
 }
-
-#ifdef _WIN32
-int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
-	int wideArgumentCount = 0;
-	LPWSTR* wideArguments = CommandLineToArgvW(GetCommandLineW(), &wideArgumentCount);
-	if (!wideArguments) {
-		return main(__argc, __argv);
-	}
-	std::vector<std::string> utf8Arguments;
-	utf8Arguments.reserve(static_cast<std::size_t>(wideArgumentCount));
-	for (int argumentIndex = 0; argumentIndex < wideArgumentCount; ++argumentIndex) {
-		const std::wstring_view wideArgument(wideArguments[argumentIndex]);
-		std::u16string utf16Argument;
-		utf16Argument.reserve(wideArgument.size());
-		for (const wchar_t codeUnit : wideArgument) {
-			utf16Argument.push_back(static_cast<char16_t>(codeUnit));
-		}
-		utf8Arguments.push_back(UTF8::EncodeUTF16(utf16Argument));
-	}
-	std::vector<char*> utf8Argv;
-	utf8Argv.reserve(utf8Arguments.size());
-	for (std::string& argument : utf8Arguments) {
-		utf8Argv.push_back(argument.data());
-	}
-	const int result = main(static_cast<int>(utf8Argv.size()), utf8Argv.data());
-	LocalFree(wideArguments);
-	return result;
-}
-#endif

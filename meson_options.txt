@@ -6,6 +6,8 @@ option('fmod_dir', type:'string', value:'lib/CortexCommand/', description: 'Wher
 
 option('install_data', type: 'boolean', value: true, description: 'Whether to install the data repo.')
 option('install_runner', type: 'boolean', value: true, description: 'Whether to install the runner script.')
+option('build_client', type: 'boolean', value: true, description: 'Build the graphical client.')
+option('build_server', type: 'boolean', value: false, description: 'Build the headless dedicated server.')
 
 option('dylibbundler_args', type: 'string', value: '', description: 'Additional arguments passed to the bundle_dylibs script for macos')
 
