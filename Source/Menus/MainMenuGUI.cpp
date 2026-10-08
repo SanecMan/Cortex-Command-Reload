@@ -15,6 +15,9 @@
 #include "GUICollectionBox.h"
 #include "GUIButton.h"
 #include "GUILabel.h"
+#include "GUITextBox.h"
+#include "System.h"
+#include <charconv>
 
 #include "Resources/Credits.h"
 
@@ -73,6 +76,7 @@ void MainMenuGUI::Create(AllegroScreen* guiScreen, GUIInputWrapper* guiInput) {
 	m_MainMenuButtons[MenuButton::BackToMainButton]->CenterInParent(true, false);
 
 	CreateMainScreen();
+	CreateMultiplayerScreen();
 	CreateMetaGameNoticeScreen();
 	CreateEditorsScreen();
 	CreateCreditsScreen();
@@ -91,6 +95,7 @@ void MainMenuGUI::CreateMainScreen() {
 	m_MainMenuScreens[MenuScreen::MainScreen]->CenterInParent(true, false);
 
 	m_MainMenuButtons[MenuButton::MetaGameButton] = dynamic_cast<GUIButton*>(m_MainMenuScreenGUIControlManager->GetControl("ButtonMainToMetaGame"));
+	m_MainMenuButtons[MenuButton::MultiplayerButton] = dynamic_cast<GUIButton*>(m_MainMenuScreenGUIControlManager->GetControl("ButtonMultiplayer"));
 	m_MainMenuButtons[MenuButton::ScenarioButton] = dynamic_cast<GUIButton*>(m_MainMenuScreenGUIControlManager->GetControl("ButtonMainToSkirmish"));
 	m_MainMenuButtons[MenuButton::SaveOrLoadGameButton] = dynamic_cast<GUIButton*>(m_MainMenuScreenGUIControlManager->GetControl("ButtonSaveOrLoadGame"));
 	m_MainMenuButtons[MenuButton::SettingsButton] = dynamic_cast<GUIButton*>(m_MainMenuScreenGUIControlManager->GetControl("ButtonMainToOptions"));
@@ -114,6 +119,50 @@ void MainMenuGUI::CreateMainScreen() {
 	m_VersionLabel = dynamic_cast<GUILabel*>(m_MainMenuScreenGUIControlManager->GetControl("VersionLabel"));
 	m_VersionLabel->SetText("Community Project\nv" + c_GameVersion.str());
 	m_VersionLabel->SetPositionAbs(10, g_WindowMan.GetResY() - m_VersionLabel->GetTextHeight() - 5);
+}
+
+void MainMenuGUI::CreateMultiplayerScreen() {
+	m_MainMenuScreens[MenuScreen::MultiplayerScreen] = dynamic_cast<GUICollectionBox*>(m_SubMenuScreenGUIControlManager->GetControl("MultiplayerScreen"));
+	m_MainMenuScreens[MenuScreen::MultiplayerScreen]->CenterInParent(true, true);
+	m_ServerAddress = dynamic_cast<GUITextBox*>(m_SubMenuScreenGUIControlManager->GetControl("ServerAddress"));
+	m_ServerPort = dynamic_cast<GUITextBox*>(m_SubMenuScreenGUIControlManager->GetControl("ServerPort"));
+	m_ConnectButton = dynamic_cast<GUIButton*>(m_SubMenuScreenGUIControlManager->GetControl("ButtonConnectServer"));
+	m_ConnectionStatus = dynamic_cast<GUILabel*>(m_SubMenuScreenGUIControlManager->GetControl("ConnectionStatus"));
+	m_ServerAddress->SetText("127.0.0.1");
+	m_ServerPort->SetText("8000");
+}
+
+void MainMenuGUI::ShowMultiplayerScreen() {
+	auto* panel = m_MainMenuScreens[MenuScreen::MultiplayerScreen];
+	panel->SetVisible(true);
+	panel->GUIPanel::AddChild(m_MainMenuButtons[MenuButton::BackToMainButton]);
+	m_MainMenuButtons[MenuButton::BackToMainButton]->SetVisible(true);
+	m_MainMenuButtons[MenuButton::BackToMainButton]->SetPositionRel(150, 240);
+	m_MenuScreenChange = false;
+}
+
+void MainMenuGUI::BeginMultiplayerConnection() {
+	std::string address = m_ServerAddress->GetText();
+	const auto first = address.find_first_not_of(" \t\r\n");
+	const auto last = address.find_last_not_of(" \t\r\n");
+	address = first == std::string::npos ? "" : address.substr(first, last - first + 1);
+	const std::string portText = m_ServerPort->GetText();
+	unsigned int port = 0;
+	const auto parsed = std::from_chars(portText.data(), portText.data() + portText.size(), port);
+	std::string status;
+	if (address.empty() || address.size() > 253 || address.find_first_of(" \t\r\n") != std::string::npos) {
+		status = "Enter a server IP address or hostname.";
+	} else if (parsed.ec != std::errc{} || parsed.ptr != portText.data() + portText.size() || port == 0 || port > 65535) {
+		status = "Port must be a number from 1 to 65535.";
+	} else if (!BeginConnection) {
+		status = "Network client is unavailable.";
+	} else {
+		m_Connecting = BeginConnection(address, static_cast<unsigned short>(port), status);
+	}
+	m_ConnectionStatus->SetText(status);
+	m_ConnectButton->SetEnabled(!m_Connecting);
+	m_ServerAddress->SetEnabled(!m_Connecting);
+	m_ServerPort->SetEnabled(!m_Connecting);
 }
 
 void MainMenuGUI::CreateMetaGameNoticeScreen() {
@@ -197,7 +246,7 @@ void MainMenuGUI::SetActiveMenuScreen(MenuScreen screenToShow, bool playButtonPr
 void MainMenuGUI::ShowMainScreen() {
 	m_VersionLabel->SetVisible(true);
 
-	m_MainMenuScreens[MenuScreen::MainScreen]->Resize(300, 196);
+	m_MainMenuScreens[MenuScreen::MainScreen]->Resize(300, 216);
 	m_MainMenuScreens[MenuScreen::MainScreen]->SetVisible(true);
 
 	m_MainMenuButtons[MenuButton::BackToMainButton]->SetVisible(false);
@@ -268,7 +317,7 @@ void MainMenuGUI::ShowAndBlinkResumeButton() {
 	if (!m_MainMenuButtons[MenuButton::ResumeButton]->GetVisible()) {
 		m_ResumeButtonBlinkTimer.Reset();
 		if (g_ActivityMan.GetActivity() && (g_ActivityMan.GetActivity()->GetActivityState() == Activity::Running || g_ActivityMan.GetActivity()->GetActivityState() == Activity::Editing)) {
-			m_MainMenuScreens[MenuScreen::MainScreen]->Resize(300, 220);
+			m_MainMenuScreens[MenuScreen::MainScreen]->Resize(300, 240);
 			m_MainMenuButtons[MenuButton::ResumeButton]->SetVisible(true);
 		}
 	} else {
@@ -299,6 +348,31 @@ MainMenuGUI::MainMenuUpdateResult MainMenuGUI::Update() {
 		return m_UpdateResult;
 	}
 
+	// Exercise the same controls and handlers in an explicitly requested debug run.
+	if (System::IsDebugRun() && !DebugConnectionAddress.empty()) {
+		++m_DebugMenuFrames;
+		if (m_DebugMenuFrames == 1) { DebugMenuCapture = "main-menu"; DebugMenuStage = 1; }
+		if (m_DebugMenuFrames == 20) {
+			HandleMainScreenInputEvents(m_MainMenuButtons[MenuButton::MultiplayerButton]);
+			DebugMenuCapture = "multiplayer-menu";
+			DebugMenuStage = 2;
+		}
+		if (m_DebugMenuFrames == 40) {
+			m_ServerAddress->SetText(DebugConnectionAddress);
+			m_ServerPort->SetText("65536");
+			BeginMultiplayerConnection();
+			RTEAssert(!m_Connecting && m_ConnectionStatus->GetText().find("Port must") == 0, "Menu accepted invalid port");
+			m_ServerPort->SetText(std::to_string(DebugConnectionPort));
+			BeginMultiplayerConnection();
+			RTEAssert(m_Connecting, "Menu could not begin cancellation test");
+			HandleBackNavigation(true);
+			RTEAssert(!m_Connecting, "Menu failed to cancel connection");
+			HandleMainScreenInputEvents(m_MainMenuButtons[MenuButton::MultiplayerButton]);
+			DebugMenuStage = 3;
+		}
+		if (m_DebugMenuFrames == 60) { BeginMultiplayerConnection(); DebugMenuStage = 4; }
+	}
+
 	bool backToMainMenu = false;
 
 	switch (m_ActiveMenuScreen) {
@@ -308,6 +382,25 @@ MainMenuGUI::MainMenuUpdateResult MainMenuGUI::Update() {
 			}
 			backToMainMenu = HandleInputEvents();
 			ShowAndBlinkResumeButton();
+			break;
+		case MenuScreen::MultiplayerScreen:
+			if (m_MenuScreenChange) ShowMultiplayerScreen();
+			backToMainMenu = HandleInputEvents();
+			if (!backToMainMenu && !g_UInputMan.KeyPressed(SDLK_ESCAPE) && m_Connecting && PollConnection) {
+				std::string status;
+				const int result = PollConnection(status);
+				m_ConnectionStatus->SetText(status);
+				if (result != 0) {
+					m_Connecting = false;
+					m_ConnectButton->SetEnabled(true);
+					m_ServerAddress->SetEnabled(true);
+					m_ServerPort->SetEnabled(true);
+					if (result > 0) {
+						SetActiveMenuScreen(MenuScreen::MainScreen, false);
+						m_UpdateResult = MainMenuUpdateResult::ActivityStarted;
+					}
+				}
+			}
 			break;
 		case MenuScreen::MetaGameNoticeScreen:
 			if (m_MenuScreenChange) {
@@ -355,6 +448,14 @@ MainMenuGUI::MainMenuUpdateResult MainMenuGUI::Update() {
 void MainMenuGUI::HandleBackNavigation(bool backButtonPressed) {
 	if ((!m_ActiveDialogBox || m_ActiveDialogBox == m_MainMenuScreens[MenuScreen::QuitScreen]) && (backButtonPressed || g_UInputMan.KeyPressed(SDLK_ESCAPE))) {
 		if (m_ActiveMenuScreen != MenuScreen::MainScreen) {
+			if (m_ActiveMenuScreen == MenuScreen::MultiplayerScreen && m_Connecting) {
+				if (CancelConnection) CancelConnection();
+				m_Connecting = false;
+				m_ConnectButton->SetEnabled(true);
+				m_ServerAddress->SetEnabled(true);
+				m_ServerPort->SetEnabled(true);
+				m_ConnectionStatus->SetText("Connection cancelled.");
+			}
 			if (m_ActiveMenuScreen == MenuScreen::SettingsScreen || m_ActiveMenuScreen == MenuScreen::ModManagerScreen) {
 				if (m_ActiveMenuScreen == MenuScreen::SettingsScreen) {
 					m_SettingsMenu->RefreshActiveSettingsMenuScreen();
@@ -393,6 +494,9 @@ bool MainMenuGUI::HandleInputEvents() {
 				case MenuScreen::MainScreen:
 					HandleMainScreenInputEvents(guiEvent.GetControl());
 					break;
+				case MenuScreen::MultiplayerScreen:
+					if (guiEvent.GetControl() == m_ConnectButton && !m_Connecting) BeginMultiplayerConnection();
+					break;
 				case MenuScreen::MetaGameNoticeScreen:
 					HandleMetaGameNoticeScreenInputEvents(guiEvent.GetControl());
 					break;
@@ -422,6 +526,8 @@ void MainMenuGUI::HandleMainScreenInputEvents(const GUIControl* guiEventControl)
 		}
 	} else if (guiEventControl == m_MainMenuButtons[MenuButton::ScenarioButton]) {
 		m_UpdateResult = MainMenuUpdateResult::ScenarioStarted;
+	} else if (guiEventControl == m_MainMenuButtons[MenuButton::MultiplayerButton]) {
+		SetActiveMenuScreen(MenuScreen::MultiplayerScreen);
 	} else if (guiEventControl == m_MainMenuButtons[MenuButton::SaveOrLoadGameButton]) {
 		SetActiveMenuScreen(MenuScreen::SaveOrLoadGameScreen);
 	} else if (guiEventControl == m_MainMenuButtons[MenuButton::SettingsButton]) {

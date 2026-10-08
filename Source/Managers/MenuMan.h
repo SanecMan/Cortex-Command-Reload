@@ -36,6 +36,9 @@ namespace RTE {
 		/// Sets the appropriate TitleScreen transition before entering the menu loop.
 		void HandleTransitionIntoMenuLoop();
 
+		/// Skip the timed intro for an explicitly requested automated menu test.
+		void PrepareDebugMainMenu();
+
 		/// Updates the MenuMan state.
 		/// @return Whether the MenuMan update has reached a state where the menu loop should be exited so the simulation loop can proceed.
 		bool Update();

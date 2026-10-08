@@ -7,6 +7,7 @@
 #include "ModManagerGUI.h"
 
 #include <array>
+#include <functional>
 
 namespace RTE {
 
@@ -17,6 +18,7 @@ namespace RTE {
 	class GUIButton;
 	class GUILabel;
 	class GUIControl;
+	class GUITextBox;
 
 	/// Handling for the main menu screen composition and sub-menu interaction.
 	class MainMenuGUI {
@@ -58,10 +60,21 @@ namespace RTE {
 		void Draw();
 #pragma endregion
 
+		// Main-thread connection hooks supplied by the application; GUI owns no transport.
+		inline static std::function<bool(const std::string&, unsigned short, std::string&)> BeginConnection;
+		inline static std::function<int(std::string&)> PollConnection; // 0 pending, 1 ready, -1 failed
+		inline static std::function<void()> CancelConnection;
+
+		inline static std::string DebugConnectionAddress;
+		inline static unsigned short DebugConnectionPort = 8000;
+		inline static std::string DebugMenuCapture;
+		inline static int DebugMenuStage = 0;
+
 	private:
 		/// Enumeration for the different sub-menu screens of the main menu.
 		enum MenuScreen {
 			MainScreen,
+			MultiplayerScreen,
 			MetaGameNoticeScreen,
 			SaveOrLoadGameScreen,
 			SettingsScreen,
@@ -76,6 +89,7 @@ namespace RTE {
 		enum MenuButton {
 			MetaGameButton,
 			ScenarioButton,
+			MultiplayerButton,
 			SaveOrLoadGameButton,
 			SettingsButton,
 			ModManagerButton,
@@ -95,6 +109,16 @@ namespace RTE {
 			ActorEditorButton,
 			ButtonCount
 		};
+
+		GUITextBox* m_ServerAddress = nullptr;
+		GUITextBox* m_ServerPort = nullptr;
+		GUIButton* m_ConnectButton = nullptr;
+		GUILabel* m_ConnectionStatus = nullptr;
+		bool m_Connecting = false;
+		unsigned int m_DebugMenuFrames = 0;
+		void CreateMultiplayerScreen();
+		void ShowMultiplayerScreen();
+		void BeginMultiplayerConnection();
 
 		int m_RootBoxMaxWidth; //!< The maximum width the root CollectionBox that holds all this menu's GUI elements. This is to constrain this menu to the primary window's display (left-most) while in multi-display fullscreen, otherwise positioning can get stupid.
 

@@ -1,5 +1,41 @@
 # Dedicated server
 
+## Connect from the main menu
+
+Choose **Multiplayer** in the main menu, enter the server's IPv4 address or
+hostname and UDP port (default `8000`), then click **Connect**. The menu remains
+responsive while it waits for the first valid world snapshot (up to 15 seconds).
+**Back to Main Menu** or Escape cancels the pending connection. Invalid ports,
+connection timeout and unavailable Activity/Scene presets appear on this screen;
+you can correct the settings and retry without restarting the game.
+
+This connects to the authoritative world-state server, not the legacy streamed
+framebuffer server. Client and server must use the same protocol version and
+have matching `.rte` content installed. A successful connection replaces the
+current Activity; cancelling keeps the previous game. Starting local content
+from a paused network session stops snapshot replication.
+
+For an automated Windows check through the actual menu handlers, run
+`Tools/RunDedicatedServerSmoke.ps1 -CheckMenuConnection` with the client/server
+binary paths and `-GameDirectory` if using an out-of-tree build. This checks
+invalid port rejection, cancellation, retry, two separate clients, native
+snapshot replication and continued server ticking after disconnect. Debug
+screenshots are saved as `main-menu.png` and `multiplayer-menu.png` in each
+client's normal debug output directory. The explicit client option is
+`-debug-run 60 -debug-run-menu-connect 127.0.0.1 PORT`; normal launches never
+perform these automated menu actions.
+
+Windows validation on 2026-10-08: `MultiplayerMenuPair` passed with two clients
+using the real GUI handlers and the native world-state transport in 40.79 seconds.
+Both debug runs passed port validation, cancellation, retry, scene loading and
+snapshot replica checks. The headless server continued 65 updates after both
+clients disconnected. The two menu screenshots were visually inspected at
+960x540. This is an automated handler/visual check, not a manual mouse test.
+The native MSBuild `Final|x64` client was then rebuilt in the checkout and
+`MultiplayerMenuFinalPair` passed against the matching server binary there:
+two clients, 64 updates after disconnect, all processes exited successfully.
+Its total verification time was 167.71 seconds including startup, not a benchmark.
+
 ## Attachment and pose replication (v16)
 
 The v16 protocol carries an attachment tree on each rotating world/inventory

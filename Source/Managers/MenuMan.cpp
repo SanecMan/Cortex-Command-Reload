@@ -129,6 +129,14 @@ void MenuMan::HandleTransitionIntoMenuLoop() {
 	}
 }
 
+void MenuMan::PrepareDebugMainMenu() {
+	if (!System::IsDebugRun()) return;
+	// The existing pause transition completes a skipped intro before resuming menus.
+	m_TitleScreen->SetTitleTransitionState(TitleScreen::TitleTransition::PauseMenu);
+	m_TitleScreen->Update();
+	m_TitleScreen->SetTitleTransitionState(TitleScreen::TitleTransition::MainMenu);
+}
+
 bool MenuMan::Update() {
 	m_TitleScreen->Update();
 	SetActiveMenu();

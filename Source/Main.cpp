@@ -185,6 +185,64 @@ namespace {
 		return true;
 	}
 
+	std::unique_ptr<WorldStateClientSession> pendingMenuClient;
+	std::filesystem::path menuClientLogPath = "WorldStateClient.log";
+	std::chrono::steady_clock::time_point menuConnectionDeadline;
+	bool menuConnectionActivated = false;
+
+	void CancelMenuConnection() {
+		if (pendingMenuClient) pendingMenuClient->Disconnect();
+		pendingMenuClient.reset();
+	}
+
+	bool BeginMenuConnection(const std::string& address, unsigned short port, std::string& status) {
+		CancelMenuConnection();
+		pendingMenuClient = std::make_unique<WorldStateClientSession>();
+		if (!pendingMenuClient->Connect(address.c_str(), port)) {
+			CancelMenuConnection();
+			status = "Unable to start connection. Check the address.";
+			return false;
+		}
+		menuConnectionDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(15);
+		status = "Connecting to " + address + ":" + std::to_string(port) + "...";
+		return true;
+	}
+
+	int PollMenuConnection(std::string& status) {
+		if (!pendingMenuClient) { status = "Connection cancelled."; return -1; }
+		pendingMenuClient->Update();
+		if (pendingMenuClient->IsConnected() && pendingMenuClient->HasSnapshot()) {
+			const auto& snapshot = pendingMenuClient->GetLatestSnapshot();
+			if (!QueueWorldStateActivity(snapshot, status)) {
+				CancelMenuConnection();
+				return -1;
+			}
+			if (worldStateClient) worldStateClient->Disconnect();
+			worldStateClientReplica.Forget();
+			g_FrameMan.SetClientGUIRenderer({});
+			worldStateBuyMenu.reset();
+			worldStateClientAppliedSceneRevision = snapshot.SceneRevision;
+			worldStateClientRejectedSceneRevision = 0;
+			worldStateClientLastObservedSnapshotCount = worldStateClientLastLoggedSnapshotCount = 0;
+			worldStateClientReplicaSimulationTicks = worldStateClientLocalSimulationTicks = 0;
+			if (worldStateClientLog.is_open()) worldStateClientLog.close();
+			worldStateClientLog.open(menuClientLogPath, std::ios::out | std::ios::trunc);
+			worldStateClientLog << "connection_source=main_menu\nconnected=true\nactivity=" << snapshot.ActivityPreset
+			                    << "\nscene=" << snapshot.ScenePreset << '\n' << std::flush;
+			worldStateClient = std::move(pendingMenuClient);
+			menuConnectionActivated = true;
+			status = "Connected. Loading server scene...";
+			return 1;
+		}
+		if (std::chrono::steady_clock::now() >= menuConnectionDeadline) {
+			status = "No valid world snapshot within 15 seconds. Check address, port and server version.";
+			CancelMenuConnection();
+			return -1;
+		}
+		status = pendingMenuClient->IsConnected() ? "Connected. Waiting for world state..." : "Connecting... (Back or Escape to cancel)";
+		return 0;
+	}
+
 	bool ConfigureWorldStateHostActivity(std::string& failureReason) {
 		const bool hasActivityClass = !worldStateServerActivityClass.empty();
 		const bool hasActivityPreset = !worldStateServerActivityPreset.empty();
@@ -2011,13 +2069,18 @@ void HandleMainArgs(int argCount, char** argValue) {
 	for (int i = 0; i < argCount;) {
 		std::string currentArg = argValue[i];
 		bool lastArg = i + 1 == argCount;
-		if (currentArg == "-world-state-client" && i + 2 < argCount) {
+		if ((currentArg == "-world-state-client" || (System::IsDebugRun() && currentArg == "-debug-run-menu-connect")) && i + 2 < argCount) {
 			unsigned int port = 0;
 			const std::string_view portArgument(argValue[i + 2]);
 			const auto parsed = std::from_chars(portArgument.data(), portArgument.data() + portArgument.size(), port);
 			if (parsed.ec == std::errc{} && parsed.ptr == portArgument.data() + portArgument.size() && port > 0 && port <= 65535) {
-				worldStateClientAddress = argValue[i + 1];
-				worldStateClientPort = static_cast<unsigned short>(port);
+				if (currentArg == "-debug-run-menu-connect") {
+					MainMenuGUI::DebugConnectionAddress = argValue[i + 1];
+					MainMenuGUI::DebugConnectionPort = static_cast<unsigned short>(port);
+				} else {
+					worldStateClientAddress = argValue[i + 1];
+					worldStateClientPort = static_cast<unsigned short>(port);
+				}
 				i += 2;
 			}
 		}
@@ -2127,6 +2190,14 @@ void PollSDLEvents() {
 /// Game menus loop.
 /// </summary>
 void RunMenuLoop() {
+	menuConnectionActivated = false;
+	MainMenuGUI::BeginConnection = BeginMenuConnection;
+	MainMenuGUI::PollConnection = PollMenuConnection;
+	MainMenuGUI::CancelConnection = CancelMenuConnection;
+	const bool menuSmoke = System::IsDebugRun() && !MainMenuGUI::DebugConnectionAddress.empty();
+	const auto menuSmokeStart = std::chrono::steady_clock::now();
+	menuClientLogPath = System::IsDebugRun() ? GetDebugRunState().OutputDirectory / "WorldStateClient.log" : std::filesystem::path("WorldStateClient.log");
+	if (menuSmoke) { g_ConsoleMan.SetEnabled(false); g_MenuMan.PrepareDebugMainMenu(); }
 	g_MenuMan.SetIsInMenuScreen(true);
 	g_UInputMan.DisableKeys(false);
 	g_UInputMan.TrapMousePos(false);
@@ -2166,12 +2237,36 @@ void RunMenuLoop() {
 		g_ConsoleMan.Draw(g_FrameMan.GetBackBuffer32());
 		g_WindowMan.GetScreenBuffer()->End();
 		g_WindowMan.UploadFrame();
+		if (menuSmoke && !MainMenuGUI::DebugMenuCapture.empty()) {
+			const auto image = GetDebugRunState().OutputDirectoryName + "/" + MainMenuGUI::DebugMenuCapture + ".png";
+			const int result = g_FrameMan.SaveScreenToPNGBlocking(image);
+			GetDebugRunState().Log << "menu_capture=" << MainMenuGUI::DebugMenuCapture << " result=" << result << '\n' << std::flush;
+			MainMenuGUI::DebugMenuCapture.clear();
+		}
+		if (menuSmoke && std::chrono::steady_clock::now() - menuSmokeStart > std::chrono::seconds(40)) {
+			GetDebugRunState().Log << "menu_connection=failed reason=timeout\n" << std::flush;
+			FinishDebugRun(false);
+		}
 		if (g_SettingsMan.GetFPSLimit() > 0) {
 			const auto frameInterval = std::chrono::duration<double>(1.0 / g_SettingsMan.GetFPSLimit());
 			std::this_thread::sleep_until(frameWallStart + std::chrono::duration_cast<std::chrono::steady_clock::duration>(frameInterval));
 		}
 	}
 
+	if (menuSmoke) {
+		GetDebugRunState().Log << "menu_validation_and_cancel=" << (MainMenuGUI::DebugMenuStage >= 3 ? "passed" : "failed")
+			<< "\nmenu_connection=" << (menuConnectionActivated ? "passed" : "failed") << '\n' << std::flush;
+		MainMenuGUI::DebugConnectionAddress.clear();
+	}
+	CancelMenuConnection();
+	// Starting local content from a paused network game must stop snapshot replication.
+	if (!menuConnectionActivated && g_ActivityMan.ActivitySetToRestart() && worldStateClient) {
+		worldStateClient->Disconnect();
+		worldStateClient.reset();
+		worldStateClientReplica.Forget();
+		g_FrameMan.SetClientGUIRenderer({});
+		worldStateBuyMenu.reset();
+	}
 	g_MenuMan.SetIsInMenuScreen(false);
 }
 
@@ -3238,6 +3333,7 @@ int RunCortexCommand(int argc, char** argv) {
 			}
 		}
 
+		if (debugRun && !MainMenuGUI::DebugConnectionAddress.empty()) RunMenuLoop();
 		RunGameLoop();
 	}
 

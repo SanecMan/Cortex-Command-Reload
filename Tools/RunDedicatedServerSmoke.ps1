@@ -11,6 +11,7 @@ param(
     [switch]$CheckPurchasePolicy,
     [switch]$CheckPurchasePricing,
     [switch]$CheckInventory,
+    [switch]$CheckMenuConnection,
     [ValidateRange(60, 600)]
     [int]$TimeoutSeconds = 360
 )
@@ -90,7 +91,7 @@ try {
 		if ($CheckPurchasePricing) { $purchaseArguments = @('-debug-run-world-state-purchase-pricing') }
 		if ($CheckInventory) { $purchaseArguments = @('-debug-run-world-state-inventory') }
         $client = Start-Process -FilePath $clientBinary -WorkingDirectory $gameDirectory -WindowStyle Hidden -PassThru -ArgumentList (@(
-            '-debug-run','600','-debug-run-output',"$OutputPrefix-Client$index",'-world-state-client','127.0.0.1',"$port"
+            '-debug-run','600','-debug-run-output',"$OutputPrefix-Client$index",$(if ($CheckMenuConnection) { '-debug-run-menu-connect' } else { '-world-state-client' }),'127.0.0.1',"$port"
         )+$purchaseArguments)
         $processes.Add($client)
         $clients.Add($client)
@@ -181,6 +182,11 @@ try {
         $clientDirectory = Join-Path $gameDirectory "ScreenShots\$OutputPrefix-Client$index"
         $clientReport = Read-Report (Join-Path $clientDirectory 'DebugRun.log')
         $clientNetwork = Read-Report (Join-Path $clientDirectory 'WorldStateClient.log')
+        if ($CheckMenuConnection -and ($clientReport -notmatch '(?m)^menu_connection=passed' -or
+            $clientReport -notmatch '(?m)^menu_validation_and_cancel=passed' -or
+            $clientNetwork -notmatch '(?m)^connection_source=main_menu' -or
+            !(Test-Path (Join-Path $clientDirectory 'main-menu.png')) -or
+            !(Test-Path (Join-Path $clientDirectory 'multiplayer-menu.png')))) { throw 'Menu connection checks failed.' }
         if ($CheckPurchases -and $clientReport -notmatch '(?m)^world_state_purchase=passed') { throw 'Client purchase checks failed.' }
         if ($CheckBuyMenu -and $clientReport -notmatch '(?m)^world_state_buy_menu=passed') { throw 'Client buy menu checks failed.' }
         if ($CheckPurchasePolicy -and $clientReport -notmatch '(?m)^world_state_purchase_policy=passed') { throw 'Client live policy checks failed.' }
