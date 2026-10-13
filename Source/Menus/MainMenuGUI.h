@@ -70,6 +70,8 @@ namespace RTE {
 		inline static std::string DebugMenuCapture;
 		inline static int DebugMenuStage = 0;
 		inline static bool DebugDisconnectMenuTest = false;
+		inline static bool DebugReconnectMenuTest = false;
+		void DebugRetryDisconnectedServer();
 		inline static bool DisconnectedNetworkSession = false;
 		inline static std::string RetryServerAddress = "127.0.0.1";
 		inline static unsigned short RetryServerPort = 8000;

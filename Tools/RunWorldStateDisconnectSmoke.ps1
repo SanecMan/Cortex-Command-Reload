@@ -4,6 +4,7 @@ param(
     [string]$ClientExecutablePath = "$PSScriptRoot\..\_Bin\MesonPortableEntry\Cortex Command.exe",
     [string]$GameDirectory = "$PSScriptRoot\..",
     [ValidatePattern('^[A-Za-z0-9_-]{1,48}$')][string]$OutputPrefix = 'DisconnectMenuSmoke',
+    [switch]$CheckReconnect,
     [int]$TimeoutSeconds = 240
 )
 $ErrorActionPreference = 'Stop'
@@ -44,7 +45,7 @@ try {
     if ((Test-Path -LiteralPath $clientLogs) -and ((Get-Item -LiteralPath $clientLogs).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Reparse client diagnostic path.' }
     $report = Join-Path $clientLogs 'DebugRun.log'
     if (Test-Path -LiteralPath $report) { Remove-Item -LiteralPath $report }
-    $client = Start-Process -FilePath (Resolve-Path -LiteralPath $ClientExecutablePath).Path -WorkingDirectory $gameRoot -WindowStyle Hidden -PassThru -ArgumentList '-debug-run','6000','-debug-run-output',"$OutputPrefix-Client",'-debug-run-disconnect-menu','-world-state-client','127.0.0.1',"$port"
+    $client = Start-Process -FilePath (Resolve-Path -LiteralPath $ClientExecutablePath).Path -WorkingDirectory $gameRoot -WindowStyle Hidden -PassThru -ArgumentList '-debug-run','6000','-debug-run-output',"$OutputPrefix-Client",$(if ($CheckReconnect) { '-debug-run-reconnect-menu' } else { '-debug-run-disconnect-menu' }),'-world-state-client','127.0.0.1',"$port"
     $report = Join-Path $gameRoot "ScreenShots\$OutputPrefix-Client\DebugRun.log"
     do {
         Check-Deadline
@@ -53,6 +54,33 @@ try {
         Start-Sleep -Milliseconds 200
     } while ($true)
     $server.StandardInput.WriteLine('quit'); $server.StandardInput.Flush()
+    if ($CheckReconnect) {
+        while (!$server.HasExited -or (Read-Log $report) -notmatch '(?m)^disconnected_server_menu=passed') {
+            Check-Deadline
+            if ($client.HasExited) { throw 'Client exited before reconnect.' }
+            Start-Sleep -Milliseconds 200
+        }
+        $server.WaitForExit(); $server.Refresh()
+        if ($server.ExitCode -ne 0) { throw 'Initial server shutdown failed.' }
+        Remove-Item -LiteralPath $serverLog
+        $server.StartInfo.Arguments = '--listen 127.0.0.1 --port ' + $port + ' --players 2 --activity-class GAScripted --activity "Skirmish Defense" --scene "Ketanot Hills" --log-directory "' + $hostLogs + '"'
+        if (!$server.Start()) { throw 'Server restart failed.' }
+        do {
+            Check-Deadline
+            if ($server.HasExited -or $client.HasExited) { throw 'A process exited before restart readiness.' }
+            if ((Read-Log $serverLog) -match 'INFO ready port=(\d+) video_initialized=0') { break }
+            Start-Sleep -Milliseconds 200
+        } while ($true)
+        $server.StandardInput.WriteLine('debug-inventory-create'); $server.StandardInput.Flush()
+        while ((Read-Log $serverLog) -notmatch 'INFO debug_inventory=create_passed') {
+            Check-Deadline
+            if ($server.HasExited -or $client.HasExited -or (Read-Log $serverLog) -match 'ERROR debug_inventory=create_failed') { throw 'Restarted server fixture failed.' }
+            Start-Sleep -Milliseconds 200
+        }
+        [IO.File]::WriteAllText((Join-Path $clientLogs 'Reconnect.ready'),'ready')
+        while (!$client.HasExited) { Check-Deadline; if ($server.HasExited) { throw 'Restarted server stopped early.' }; Start-Sleep -Milliseconds 200 }
+        $server.StandardInput.WriteLine('quit'); $server.StandardInput.Flush()
+    }
     while (!$client.HasExited -or !$server.HasExited) { Check-Deadline; Start-Sleep -Milliseconds 200 }
     $client.WaitForExit(); $client.Refresh(); $server.WaitForExit(); $server.Refresh()
     if ($client.ExitCode -ne 0 -or $server.ExitCode -ne 0) { throw 'A process failed.' }
@@ -61,7 +89,8 @@ try {
     if ($text -notmatch '(?m)^disconnected_server_menu=passed' -or $text -notmatch '(?m)^result=passed' -or
         $network -notmatch '(?m)^client_local_simulation_ticks=0' -or
         !(Test-Path -LiteralPath (Join-Path $gameRoot "ScreenShots\$OutputPrefix-Client\connection-lost-menu.png"))) { throw 'Disconnect menu checks failed.' }
-    [pscustomobject]@{ Result='passed'; Port=$port; ElapsedSeconds=[Math]::Round($watch.Elapsed.TotalSeconds,2) }
+    if ($CheckReconnect -and ($text -notmatch '(?m)^world_state_menu_reconnect=passed' -or $network -notmatch '(?m)^connection_source=main_menu' -or $network -notmatch '(?m)^scene=Ketanot Hills' -or $network -notmatch 'inventory_matches=1' -or $network -match 'inventory_matches=0' -or $network -notmatch 'attachment_states_checked=[1-9]' -or $network -match 'attachment_mismatches=[1-9]')) { throw 'Restarted-world menu reconnect failed.' }
+    [pscustomobject]@{ Result='passed'; Reconnected=[bool]$CheckReconnect; Port=$port; ElapsedSeconds=[Math]::Round($watch.Elapsed.TotalSeconds,2) }
 } finally {
     foreach ($process in @($client,$server)) { if ($process) { if (!$process.HasExited) { $process.Kill(); $process.WaitForExit() }; $process.Dispose() } }
 }

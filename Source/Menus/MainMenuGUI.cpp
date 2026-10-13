@@ -132,6 +132,10 @@ void MainMenuGUI::CreateMultiplayerScreen() {
 	m_ServerPort->SetText(std::to_string(RetryServerPort));
 }
 
+void MainMenuGUI::DebugRetryDisconnectedServer() {
+	if (System::IsDebugRun() && m_ActiveMenuScreen == MenuScreen::MultiplayerScreen && !m_Connecting) BeginMultiplayerConnection();
+}
+
 void MainMenuGUI::OpenDisconnectedServer(const std::string& reason) {
 	m_ServerAddress->SetText(RetryServerAddress);
 	m_ServerPort->SetText(std::to_string(RetryServerPort));

@@ -129,6 +129,10 @@ void MenuMan::HandleTransitionIntoMenuLoop() {
 	}
 }
 
+void MenuMan::DebugRetryDisconnectedServer() {
+	if (System::IsDebugRun()) m_MainMenu->DebugRetryDisconnectedServer();
+}
+
 void MenuMan::ShowDisconnectedServer(const std::string& reason) {
 	m_TitleScreen->SetTitleTransitionState(TitleScreen::TitleTransition::PauseMenu);
 	m_TitleScreen->Update();

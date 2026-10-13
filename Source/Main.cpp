@@ -365,6 +365,9 @@ namespace {
 		int PauseSimulationAfterClientUpdate = 0;
 		std::string ExpectedTransitionActivity = "Skirmish Defense";
 		std::string ExpectedTransitionScene = "Ketanot Hills";
+		bool RequireReconnectMenuTest = false;
+		bool ReconnectMenuQueued = false;
+		bool ReconnectWorldApplied = false;
 		int UpdateLimit = 600;
 		int SimulationUpdates = 0;
 		int RenderedFrames = 0;
@@ -1721,6 +1724,10 @@ namespace {
 			          << " paused=" << state.SimulationPausedByDebugRun << " client_seen=" << state.SawClientBeforeDebugDisconnect << '\n' << std::flush;
 			success = success && state.ClientDisconnectWhilePausedObserved;
 		}
+		if (state.RequireReconnectMenuTest) {
+			state.Log << "world_state_menu_reconnect=" << (state.ReconnectWorldApplied ? "passed" : "failed") << '\n' << std::flush;
+			success = success && state.ReconnectWorldApplied;
+		}
 		success = success && utf8GlyphRenderPassed && worldStateTransitionPassed && remoteTerrainMutationPassed && hostTerrainMutationPassed && hostEquipmentMutationPassed && remoteEquipmentMutationPassed &&
 		          state.HostSessionTestPassed && clientFailurePassed && worldIdentityStable && replicaSmokePassed && backgroundEquipmentPassed && attachmentsPassed && objectCallbacksPassed && transientPixelReplicaPassed && terrainPatchApplyPassed &&
 		          networkInputApplicationPassed && worldSnapshotPassed && snapshotCompressionPassed && liveSnapshotTransportPassed;
@@ -2141,6 +2148,10 @@ void HandleMainArgs(int argCount, char** argValue) {
 			}
 		}
 		if (System::IsDebugRun() && currentArg == "-debug-run-disconnect-menu") MainMenuGUI::DebugDisconnectMenuTest = true;
+		if (System::IsDebugRun() && currentArg == "-debug-run-reconnect-menu") {
+			MainMenuGUI::DebugDisconnectMenuTest = MainMenuGUI::DebugReconnectMenuTest = true;
+			GetDebugRunState().RequireReconnectMenuTest = true;
+		}
 		if (currentArg == "-world-state-server") {
 			worldStateServerRequested = true;
 			if (!lastArg) {
@@ -2254,6 +2265,7 @@ void RunMenuLoop() {
 	const bool menuConnectSmoke = System::IsDebugRun() && !MainMenuGUI::DebugConnectionAddress.empty();
 	const bool menuSmoke = menuConnectSmoke || (System::IsDebugRun() && MainMenuGUI::DebugDisconnectMenuTest);
 	const auto menuSmokeStart = std::chrono::steady_clock::now();
+	bool debugReconnectStarted = false;
 	menuClientLogPath = System::IsDebugRun() ? GetDebugRunState().OutputDirectory / "WorldStateClient.log" : std::filesystem::path("WorldStateClient.log");
 	if (menuSmoke) g_ConsoleMan.SetEnabled(false);
 	if (menuConnectSmoke) g_MenuMan.PrepareDebugMainMenu();
@@ -2304,8 +2316,14 @@ void RunMenuLoop() {
 			if (MainMenuGUI::DebugDisconnectMenuTest && MainMenuGUI::DisconnectedNetworkSession) {
 				const bool passed = result == 0 && worldStateClient && !worldStateClient->IsConnected() && worldStateClient->HasSnapshot() && worldStateClientLocalSimulationTicks == 0;
 				GetDebugRunState().Log << "disconnected_server_menu=" << (passed ? "passed" : "failed") << '\n' << std::flush;
-				FinishDebugRun(passed);
+				if (!MainMenuGUI::DebugReconnectMenuTest || !passed) FinishDebugRun(passed);
 			}
+		}
+		if (System::IsDebugRun() && MainMenuGUI::DebugReconnectMenuTest && !debugReconnectStarted &&
+		    std::filesystem::exists(GetDebugRunState().OutputDirectory / "Reconnect.ready")) {
+			debugReconnectStarted = true;
+			g_MenuMan.DebugRetryDisconnectedServer();
+			GetDebugRunState().Log << "menu_reconnect_requested=true\n" << std::flush;
 		}
 		if (menuSmoke && std::chrono::steady_clock::now() - menuSmokeStart > std::chrono::seconds(40)) {
 			GetDebugRunState().Log << "menu_connection=failed reason=timeout\n" << std::flush;
@@ -2321,6 +2339,15 @@ void RunMenuLoop() {
 		GetDebugRunState().Log << "menu_validation_and_cancel=" << (MainMenuGUI::DebugMenuStage >= 3 ? "passed" : "failed")
 			<< "\nmenu_connection=" << (menuConnectionActivated ? "passed" : "failed") << '\n' << std::flush;
 		MainMenuGUI::DebugConnectionAddress.clear();
+	}
+	if (System::IsDebugRun() && MainMenuGUI::DebugReconnectMenuTest) {
+		auto& state = GetDebugRunState();
+		state.ReconnectMenuQueued = menuConnectionActivated && worldStateClient && worldStateClient->IsConnected() && worldStateClient->HasSnapshot();
+		state.Log << "menu_reconnect_queued=" << (state.ReconnectMenuQueued ? "passed" : "failed") << '\n' << std::flush;
+		state.UpdateLimit = state.SimulationUpdates + 120;
+		MainMenuGUI::DebugDisconnectMenuTest = MainMenuGUI::DebugReconnectMenuTest = false;
+		std::error_code markerError;
+		std::filesystem::remove(state.OutputDirectory / "Reconnect.ready", markerError);
 	}
 	CancelMenuConnection();
 	// Starting local content from a paused network game must stop snapshot replication.
@@ -2388,7 +2415,20 @@ void RunGameLoop() {
 			// Pause the clock without running Activity pause callbacks on the replica.
 			g_MenuMan.ShowDisconnectedServer(reason);
 			RunMenuLoop();
-			return;
+			if (System::IsSetToQuit()) return;
+			// RunGameLoop is the application's persistent gameplay loop. Returning
+			// after Connect would tear down the application before loading its Activity.
+			if (g_ActivityMan.ActivitySetToRestart()) {
+				g_LoadingScreen.DrawLoadingSplash();
+				g_WindowMan.UploadFrame();
+				if (!g_ActivityMan.RestartActivity()) {
+					if (System::IsDebugRun()) FinishDebugRun(false);
+					return;
+				}
+			}
+			g_TimerMan.PauseSim(false);
+			g_PerformanceMan.ResetSimUpdateTimer();
+			continue;
 		}
 		if (worldStateClient && System::IsDebugRun() && GetDebugRunState().RequestPurchaseTest)
 			GetDebugRunState().PurchaseTest.Update(*worldStateClient, GetDebugRunState().Log);
@@ -2586,6 +2626,15 @@ void RunGameLoop() {
 						debugRunState.ReplicaWorldExact = false;
 						debugRunState.Log << "replica_membership_mismatch live=" << liveReplicaObjects
 						                  << " expected=" << receivedSnapshot.Objects.size() << '\n' << std::flush;
+					}
+					if (debugRunState.RequireReconnectMenuTest && debugRunState.ReconnectMenuQueued && !debugRunState.ReconnectWorldApplied &&
+					    receivedSnapshot.ActivityPreset == "Skirmish Defense" && receivedSnapshot.ScenePreset == "Ketanot Hills" && !receivedSnapshot.Objects.empty() &&
+					    g_ActivityMan.GetActivity() && g_ActivityMan.GetActivity()->GetPresetName() == receivedSnapshot.ActivityPreset &&
+					    g_SceneMan.GetScene() && g_SceneMan.GetScene()->GetPresetName() == receivedSnapshot.ScenePreset &&
+					    applied.MissingPresets == 0 && static_cast<std::size_t>(liveReplicaObjects) == receivedSnapshot.Objects.size() &&
+					    worldStateClient->IsConnected() && worldStateClient->HasPlayerAssignment() && worldStateClientLocalSimulationTicks == 0) {
+						debugRunState.ReconnectWorldApplied = true;
+						debugRunState.Log << "menu_reconnect_world=passed activity=" << receivedSnapshot.ActivityPreset << " scene=" << receivedSnapshot.ScenePreset << '\n' << std::flush;
 					}
 					g_MovableMan.UpdateDrawMOIDs();
 					worldStateClientLastObservedSnapshotCount = snapshotCount;

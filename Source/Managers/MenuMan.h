@@ -40,6 +40,7 @@ namespace RTE {
 		/// Skip the timed intro for an explicitly requested automated menu test.
 		void PrepareDebugMainMenu();
 		void ShowDisconnectedServer(const std::string& reason);
+		void DebugRetryDisconnectedServer();
 
 		/// Updates the MenuMan state.
 		/// @return Whether the MenuMan update has reached a state where the menu loop should be exited so the simulation loop can proceed.

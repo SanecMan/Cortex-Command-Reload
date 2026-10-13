@@ -95,6 +95,39 @@ ending a repeated test early. Client screenshot/log cleanup is still performed
 by the normal debug runner. A repeated `DisconnectMenuReal` run passed after
 that harness correction in 15.43 seconds.
 
+### Reconnect to a restarted server
+
+The persistent game loop now loads the Activity selected by Connect and resumes
+its own frame loop after the disconnect menu. Returning from that frame loop
+would instead tear down the application; the end-to-end restart test exposed
+and fixed that transition bug.
+
+Run `Tools/RunWorldStateDisconnectSmoke.ps1 -CheckReconnect` to verify the full
+path in one client process. After the initial Tutorial session, the script stops
+the real server, waits for the disconnect menu, restarts the same endpoint with
+Skirmish Defense / Ketanot Hills, creates server-side craft/passenger/inventory
+objects, then requests Connect through the native menu handler. Readiness uses
+a debug-output marker, which normal launches ignore. The client checks the new
+Activity/Scene, non-empty matching replica membership, player assignment and
+zero local simulation ticks, runs 120 additional replica ticks and exits.
+The wrapper also rejects inventory/attachment mismatches. This creates a new
+server session; it does not restore the old server-side player identity.
+
+Windows Meson `ReconnectChangedWorld` passed on 2026-10-13 in 26.93 seconds:
+`menu_reconnect_queued=passed`, `menu_reconnect_world=passed`,
+`world_state_menu_reconnect=passed`, `result=passed`, and both server instances
+and the client exited 0. The new network log had matching live/expected object
+counts, matching inventories, five native attachment states checked with zero
+mismatches, 120 replica ticks and zero local simulation ticks. The duration is
+verification time, not a controlled performance benchmark.
+The native MSBuild `Final|x64` client was subsequently built in the checkout.
+`ReconnectNativeFinal` passed the stronger restart fixture against the matching
+server binary in 28.92 seconds, with the same reconnect/native inventory gates,
+120 replica ticks, zero client-local simulation ticks and exit code 0 for all
+processes. Its final screenshot was inspected and showed the Ketanot Hills
+terrain rendered. Both root executables were updated by this verification;
+this is not a manual player-control or broad mod gameplay test.
+
 ## Attachment and pose replication (v16)
 
 The v16 protocol carries an attachment tree on each rotating world/inventory
