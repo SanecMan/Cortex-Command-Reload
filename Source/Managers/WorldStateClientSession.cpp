@@ -8,6 +8,24 @@
 
 using namespace RTE;
 
+namespace {
+	// Inspect only the stable envelope; do not parse a foreign-version body.
+	bool ReadEnvelopeVersion(std::span<const std::uint8_t> packet, std::uint16_t& version) {
+		using namespace WorldStateProtocol;
+		if (packet.size() < c_HeaderSize || packet.size() > c_MaxPacketSize) return false;
+		std::size_t offset = 0;
+		std::uint64_t magic = 0, wireVersion = 0, type = 0, reserved = 0, sequence = 0, size = 0;
+		if (!Detail::ReadUnsigned(packet, offset, 4, magic) || magic != c_Magic ||
+		    !Detail::ReadUnsigned(packet, offset, 2, wireVersion) || !wireVersion ||
+		    !Detail::ReadUnsigned(packet, offset, 1, type) || !type ||
+		    !Detail::ReadUnsigned(packet, offset, 1, reserved) || reserved != 0 ||
+		    !Detail::ReadUnsigned(packet, offset, 4, sequence) ||
+		    !Detail::ReadUnsigned(packet, offset, 4, size) || size != packet.size() - c_HeaderSize) return false;
+		version = static_cast<std::uint16_t>(wireVersion);
+		return true;
+	}
+}
+
 bool WorldStateClientSession::Connect(const char* address, unsigned short port) {
 	Disconnect();
 	if (m_Transport.StartClient(address, port)) return true;
@@ -93,21 +111,32 @@ void WorldStateClientSession::Update() {
 		if (packet.Identifier != ID_CCR_WORLD_STATE) {
 			continue;
 		}
+		std::vector<std::uint8_t> decompressedPacket;
+		std::span<const std::uint8_t> snapshotPayload;
+		if (!WorldStateCompression::DecodeFromWire(packet.Payload, decompressedPacket, snapshotPayload)) continue;
+		std::uint16_t serverVersion = 0;
+		if (ReadEnvelopeVersion(snapshotPayload, serverVersion) && serverVersion != WorldStateProtocol::c_Version) {
+			m_ConnectionError = "Incompatible world-state protocol: server " + std::to_string(serverVersion) +
+				", client " + std::to_string(WorldStateProtocol::c_Version) + ". Update client and server together.";
+			m_Connected = false;
+			m_Transport.Stop();
+			return; // Retain any authoritative snapshot, just as on transport failure.
+		}
 		WorldStateProtocol::TerrainPatch terrainPatch;
 		WorldStateProtocol::PurchaseResult purchase;
 		WorldStateProtocol::PurchasePolicy policy;
 		std::uint32_t policySequence=0;
-		if (WorldStateProtocol::DecodePurchasePolicy(packet.Payload,policy,&policySequence)) {
+		if (WorldStateProtocol::DecodePurchasePolicy(snapshotPayload,policy,&policySequence)) {
 			if (!m_PolicySequence || static_cast<std::int32_t>(policySequence-m_PolicySequence)>0) { m_PolicySequence=policySequence; m_PurchasePolicy=std::move(policy); }
 			continue;
 		}
-		if (WorldStateProtocol::DecodePurchaseResult(packet.Payload, purchase)) {
+		if (WorldStateProtocol::DecodePurchaseResult(snapshotPayload, purchase)) {
 			if (m_PurchaseResults.size() >= 64) m_PurchaseResults.pop_front();
 			m_PurchaseResults.push_back(std::move(purchase));
 			continue;
 		}
 		std::uint32_t terrainSequence = 0;
-		if (WorldStateProtocol::DecodeTerrainPatch(packet.Payload, terrainPatch, &terrainSequence)) {
+		if (WorldStateProtocol::DecodeTerrainPatch(snapshotPayload, terrainPatch, &terrainSequence)) {
 			if (m_LastTerrainSequence == 0 || static_cast<std::int32_t>(terrainSequence - m_LastTerrainSequence) > 0) {
 				m_LastTerrainSequence = terrainSequence;
 				m_TerrainPatches.push_back({std::move(terrainPatch), terrainSequence});
@@ -115,14 +144,9 @@ void WorldStateClientSession::Update() {
 			continue;
 		}
 		WorldStateProtocol::ClientAssignment assignment;
-		if (WorldStateProtocol::DecodeClientAssignment(packet.Payload, assignment)) {
+		if (WorldStateProtocol::DecodeClientAssignment(snapshotPayload, assignment)) {
 			m_AssignedPlayerSlot = assignment.PlayerSlot;
 			m_HasPlayerAssignment = true;
-			continue;
-		}
-		std::vector<std::uint8_t> decompressedPacket;
-		std::span<const std::uint8_t> snapshotPayload;
-		if (!WorldStateCompression::DecodeFromWire(packet.Payload, decompressedPacket, snapshotPayload)) {
 			continue;
 		}
 		WorldStateProtocol::Snapshot snapshot;

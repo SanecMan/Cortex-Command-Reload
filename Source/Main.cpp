@@ -1413,10 +1413,45 @@ namespace {
 				reconnected = reset && receive();
 			}
 		}
-		const bool passed = ready && refused && disconnected && reset && reconnected;
+		bool versionRefused = reconnected, compressedVersionRefused = reconnected, versionRetry = false;
+		for (int trial = 0; trial < 2 && reconnected; ++trial) {
+			if (trial != 0) {
+				server.Stop();
+				if (!server.StartServer(0, 1, "127.0.0.1") || !client.Connect("127.0.0.1", server.GetBoundPort()) || !receive()) {
+					compressedVersionRefused = false;
+					break;
+				}
+			}
+			std::vector<std::uint8_t> foreign, wire;
+			const std::uint16_t version = WorldStateProtocol::c_Version + (trial == 0 ? -1 : 1);
+			bool encoded = WorldStateProtocol::EncodeSnapshot(snapshot, 2, foreign);
+			if (encoded) { foreign[4] = static_cast<std::uint8_t>(version); foreign[5] = static_cast<std::uint8_t>(version >> 8); }
+			bool compressed = false;
+			if (trial == 1) encoded = encoded && WorldStateCompression::EncodeForWire(foreign, wire, compressed) && compressed;
+			else wire = foreign;
+			const auto count = client.GetReceivedSnapshotCount();
+			const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+			while (encoded && client.GetConnectionError().empty() && std::chrono::steady_clock::now() < deadline) {
+				std::vector<WorldStateTransport::ReceivedPacket> packets;
+				server.Poll(packets); server.BroadcastWorldState(wire); client.Update();
+				std::this_thread::sleep_for(std::chrono::milliseconds(5));
+			}
+			const bool rejected = encoded && !client.IsConnected() && client.HasSnapshot() &&
+				client.GetReceivedSnapshotCount() == count &&
+				client.GetConnectionError().find("Incompatible world-state protocol: server " + std::to_string(version)) == 0;
+			(trial == 0 ? versionRefused : compressedVersionRefused) = rejected;
+		}
+		if (versionRefused && compressedVersionRefused) {
+			server.Stop();
+			versionRetry = server.StartServer(0, 1, "127.0.0.1") && client.Connect("127.0.0.1", server.GetBoundPort()) &&
+				client.GetConnectionError().empty() && !client.HasSnapshot() && receive();
+		}
+		const bool passed = ready && refused && disconnected && reset && reconnected && versionRefused && compressedVersionRefused && versionRetry;
 		log << "world_state_client_failure_smoke=" << (passed ? "passed" : "failed")
 			<< " capacity_refused=" << refused << " disconnected_frozen=" << disconnected
-			<< " reconnect_reset=" << reset << " reconnected=" << reconnected << '\n' << std::flush;
+			<< " reconnect_reset=" << reset << " reconnected=" << reconnected
+			<< " version_refused=" << versionRefused << " compressed_version_refused=" << compressedVersionRefused
+			<< " version_retry=" << versionRetry << '\n' << std::flush;
 		return passed;
 	}
 

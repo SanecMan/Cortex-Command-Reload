@@ -44,8 +44,12 @@ server shutdown and lost connection. The direct-connect menu displays that
 reason and re-enables its fields immediately instead of waiting for the generic
 15-second snapshot deadline. CLI clients also stop waiting after a terminal
 transport failure, and do not load a snapshot received just before disconnect.
-An incompatible *world-state wire version* still reaches the snapshot timeout;
-the RakNet protocol error is a separate transport response.
+A recognizable incompatible *world-state wire version* now immediately stops
+the client peer and reports both server/client versions with an instruction to
+update them together. This checks the bounded stable packet envelope before
+parsing a foreign body, including LZ4-wrapped snapshots. Unrecognizable or
+malformed envelopes remain ignored; the RakNet protocol error is a separate
+transport response. Existing replicas stay frozen until explicit retry.
 
 On an established session's failure, the peer stops and the last authoritative
 snapshot stays frozen. This deliberately prevents the current game loop from
@@ -63,6 +67,18 @@ Every normal diagnostic simulation run now includes
 `world_state_client_failure_smoke`: a real one-slot loopback server sends a
 snapshot to the first client, rejects the second as full, shuts down, and then
 accepts a fresh connection. It checks frozen-state handling and clean reconnect.
+It also sends real uncompressed older-version and compressed newer-version
+snapshots through RakNet, checks explicit refusal without replacing the last
+snapshot, and reconnects successfully to the matching version.
+Windows Meson verification on 2026-10-14: `ProtocolVersionRefusal` completed
+60 simulation updates with exit code 0. `version_refused`,
+`compressed_version_refused` and `version_retry` all reported true alongside
+the existing capacity/disconnect checks. This exercises actual loopback packets
+with altered envelope versions, rather than building historical server binaries.
+The root MSBuild `Final|x64` client and matching server then passed
+`ProtocolVersionNativeFinalPair`: two clients connected through the menu in
+31.49 seconds, all failure/retry gates passed, and the server continued 63
+updates after disconnect. No protocol version or content format was changed.
 On Windows, `ClientFailureLoopback` passed on 2026-10-13 with all four checks true
 and exit code 0. Both client/server targets built and linked in the Windows
 Meson build directory; no `.rte`, Lua API or world-state wire format changed.
