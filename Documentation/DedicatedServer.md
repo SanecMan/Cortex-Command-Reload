@@ -51,9 +51,13 @@ On an established session's failure, the peer stops and the last authoritative
 snapshot stays frozen. This deliberately prevents the current game loop from
 resuming local physics/Lua for a remote world. Explicit Disconnect/Connect
 clears old snapshots, sequence counters, player assignment, terrain patches and
-purchase data before retry. Automatic in-game recovery and reconnect UX remain
-separate work; this change exposes transport failure rather than claiming those
-features are complete.
+purchase data before retry. An established connection failure now stops simulation ticks and opens the
+Multiplayer connection screen with its reason and the remembered address/port.
+Connect and Back remain usable; Resume is hidden for the disconnected world.
+The transition pauses the clock without invoking local Activity pause callbacks.
+Starting local content clears the disconnected-session restriction; successful
+server connection clears replica caches and that restriction. Automatic retry
+and restoration of the previous server-side player identity are not implemented.
 
 Every normal diagnostic simulation run now includes
 `world_state_client_failure_smoke`: a real one-slot loopback server sends a
@@ -65,6 +69,31 @@ Meson build directory; no `.rte`, Lua API or world-state wire format changed.
 `ClientFailureMenuPair` then passed two separate clients through the main-menu
 connection flow in 28.68 seconds; both passed the failure/reconnect loopback
 check, and the headless server continued 63 updates after their disconnect.
+
+### Real server shutdown UI check
+
+`Tools/RunWorldStateDisconnectSmoke.ps1` starts an actual headless server and a
+hidden client, waits for 60 replica updates, sends the server's `quit` command,
+and checks the client's automatic menu return. The explicit debug option is
+`-debug-run-disconnect-menu` alongside `-debug-run` and `-world-state-client`.
+It saves `connection-lost-menu.png`, verifies the retained authoritative snapshot
+and zero client-local simulation ticks, then runs the normal diagnostic gates
+and exits. Normal launches never automatically exit at this menu.
+
+`DisconnectMenuReal` passed on Windows on 2026-10-13 in 15.25 seconds: both
+processes exited 0, `disconnected_server_menu=passed`, `result=passed`, and
+`client_local_simulation_ticks=0`. The 960x540 screenshot was inspected; reason,
+Connect/Back controls and the remembered endpoint were readable. This test
+covers orderly server shutdown and menu return, not a restarted server or
+silent network cable loss. Test targets are in `_Bin/MesonPortableEntry`; the
+root native Final executable is not updated by these Meson checks.
+`DisconnectMenuRegression` also passed two clients through the ordinary menu
+connection path in 29.04 seconds, with 63 server updates after disconnect.
+The shutdown script clears its known server logs and removes the previous client
+report before launching; this prevents stale `simulation_update` lines from
+ending a repeated test early. Client screenshot/log cleanup is still performed
+by the normal debug runner. A repeated `DisconnectMenuReal` run passed after
+that harness correction in 15.43 seconds.
 
 ## Attachment and pose replication (v16)
 

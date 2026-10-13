@@ -196,6 +196,8 @@ namespace {
 	}
 
 	bool BeginMenuConnection(const std::string& address, unsigned short port, std::string& status) {
+		MainMenuGUI::RetryServerAddress = address;
+		MainMenuGUI::RetryServerPort = port;
 		CancelMenuConnection();
 		pendingMenuClient = std::make_unique<WorldStateClientSession>();
 		if (!pendingMenuClient->Connect(address.c_str(), port)) {
@@ -236,6 +238,7 @@ namespace {
 			                    << "\nscene=" << snapshot.ScenePreset << '\n' << std::flush;
 			worldStateClient = std::move(pendingMenuClient);
 			menuConnectionActivated = true;
+			MainMenuGUI::DisconnectedNetworkSession = false;
 			status = "Connected. Loading server scene...";
 			return 1;
 		}
@@ -2131,10 +2134,13 @@ void HandleMainArgs(int argCount, char** argValue) {
 				} else {
 					worldStateClientAddress = argValue[i + 1];
 					worldStateClientPort = static_cast<unsigned short>(port);
+					MainMenuGUI::RetryServerAddress = worldStateClientAddress;
+					MainMenuGUI::RetryServerPort = worldStateClientPort;
 				}
 				i += 2;
 			}
 		}
+		if (System::IsDebugRun() && currentArg == "-debug-run-disconnect-menu") MainMenuGUI::DebugDisconnectMenuTest = true;
 		if (currentArg == "-world-state-server") {
 			worldStateServerRequested = true;
 			if (!lastArg) {
@@ -2245,10 +2251,12 @@ void RunMenuLoop() {
 	MainMenuGUI::BeginConnection = BeginMenuConnection;
 	MainMenuGUI::PollConnection = PollMenuConnection;
 	MainMenuGUI::CancelConnection = CancelMenuConnection;
-	const bool menuSmoke = System::IsDebugRun() && !MainMenuGUI::DebugConnectionAddress.empty();
+	const bool menuConnectSmoke = System::IsDebugRun() && !MainMenuGUI::DebugConnectionAddress.empty();
+	const bool menuSmoke = menuConnectSmoke || (System::IsDebugRun() && MainMenuGUI::DebugDisconnectMenuTest);
 	const auto menuSmokeStart = std::chrono::steady_clock::now();
 	menuClientLogPath = System::IsDebugRun() ? GetDebugRunState().OutputDirectory / "WorldStateClient.log" : std::filesystem::path("WorldStateClient.log");
-	if (menuSmoke) { g_ConsoleMan.SetEnabled(false); g_MenuMan.PrepareDebugMainMenu(); }
+	if (menuSmoke) g_ConsoleMan.SetEnabled(false);
+	if (menuConnectSmoke) g_MenuMan.PrepareDebugMainMenu();
 	g_MenuMan.SetIsInMenuScreen(true);
 	g_UInputMan.DisableKeys(false);
 	g_UInputMan.TrapMousePos(false);
@@ -2293,6 +2301,11 @@ void RunMenuLoop() {
 			const int result = g_FrameMan.SaveScreenToPNGBlocking(image);
 			GetDebugRunState().Log << "menu_capture=" << MainMenuGUI::DebugMenuCapture << " result=" << result << '\n' << std::flush;
 			MainMenuGUI::DebugMenuCapture.clear();
+			if (MainMenuGUI::DebugDisconnectMenuTest && MainMenuGUI::DisconnectedNetworkSession) {
+				const bool passed = result == 0 && worldStateClient && !worldStateClient->IsConnected() && worldStateClient->HasSnapshot() && worldStateClientLocalSimulationTicks == 0;
+				GetDebugRunState().Log << "disconnected_server_menu=" << (passed ? "passed" : "failed") << '\n' << std::flush;
+				FinishDebugRun(passed);
+			}
 		}
 		if (menuSmoke && std::chrono::steady_clock::now() - menuSmokeStart > std::chrono::seconds(40)) {
 			GetDebugRunState().Log << "menu_connection=failed reason=timeout\n" << std::flush;
@@ -2304,7 +2317,7 @@ void RunMenuLoop() {
 		}
 	}
 
-	if (menuSmoke) {
+	if (menuConnectSmoke) {
 		GetDebugRunState().Log << "menu_validation_and_cancel=" << (MainMenuGUI::DebugMenuStage >= 3 ? "passed" : "failed")
 			<< "\nmenu_connection=" << (menuConnectionActivated ? "passed" : "failed") << '\n' << std::flush;
 		MainMenuGUI::DebugConnectionAddress.clear();
@@ -2314,6 +2327,7 @@ void RunMenuLoop() {
 	if (!menuConnectionActivated && g_ActivityMan.ActivitySetToRestart() && worldStateClient) {
 		worldStateClient->Disconnect();
 		worldStateClient.reset();
+		MainMenuGUI::DisconnectedNetworkSession = false;
 		worldStateClientReplica.Forget();
 		g_FrameMan.SetClientGUIRenderer({});
 		worldStateBuyMenu.reset();
@@ -2366,6 +2380,16 @@ void RunGameLoop() {
 		// step is paused or an Activity is sitting in an editor-only state. Gameplay
 		// commands and world snapshots are still applied only on simulation ticks.
 		if (worldStateClient) worldStateClient->Update();
+		if (worldStateClient && worldStateClient->HasSnapshot() && !worldStateClient->GetConnectionError().empty() && !MainMenuGUI::DisconnectedNetworkSession) {
+			MainMenuGUI::DisconnectedNetworkSession = true;
+			const std::string reason = worldStateClient->GetConnectionError();
+			if (worldStateClientLog.is_open()) worldStateClientLog << "connection_lost=" << reason << '\n' << std::flush;
+			g_TimerMan.PauseSim(true);
+			// Pause the clock without running Activity pause callbacks on the replica.
+			g_MenuMan.ShowDisconnectedServer(reason);
+			RunMenuLoop();
+			return;
+		}
 		if (worldStateClient && System::IsDebugRun() && GetDebugRunState().RequestPurchaseTest)
 			GetDebugRunState().PurchaseTest.Update(*worldStateClient, GetDebugRunState().Log);
 		if (worldStateServer && worldStateServer->IsStarted()) worldStateServer->PollNetwork(worldStateServerSimulationTick);

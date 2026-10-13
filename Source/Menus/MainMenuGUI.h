@@ -69,6 +69,12 @@ namespace RTE {
 		inline static unsigned short DebugConnectionPort = 8000;
 		inline static std::string DebugMenuCapture;
 		inline static int DebugMenuStage = 0;
+		inline static bool DebugDisconnectMenuTest = false;
+		inline static bool DisconnectedNetworkSession = false;
+		inline static std::string RetryServerAddress = "127.0.0.1";
+		inline static unsigned short RetryServerPort = 8000;
+		void OpenDisconnectedServer(const std::string& reason);
+
 
 	private:
 		/// Enumeration for the different sub-menu screens of the main menu.

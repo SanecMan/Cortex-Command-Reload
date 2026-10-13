@@ -129,6 +129,13 @@ void MenuMan::HandleTransitionIntoMenuLoop() {
 	}
 }
 
+void MenuMan::ShowDisconnectedServer(const std::string& reason) {
+	m_TitleScreen->SetTitleTransitionState(TitleScreen::TitleTransition::PauseMenu);
+	m_TitleScreen->Update();
+	m_TitleScreen->SetTitleTransitionState(TitleScreen::TitleTransition::MainMenu);
+	m_MainMenu->OpenDisconnectedServer(reason);
+}
+
 void MenuMan::PrepareDebugMainMenu() {
 	if (!System::IsDebugRun()) return;
 	// The existing pause transition completes a skipped intro before resuming menus.

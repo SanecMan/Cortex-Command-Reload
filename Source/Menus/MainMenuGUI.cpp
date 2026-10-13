@@ -128,8 +128,21 @@ void MainMenuGUI::CreateMultiplayerScreen() {
 	m_ServerPort = dynamic_cast<GUITextBox*>(m_SubMenuScreenGUIControlManager->GetControl("ServerPort"));
 	m_ConnectButton = dynamic_cast<GUIButton*>(m_SubMenuScreenGUIControlManager->GetControl("ButtonConnectServer"));
 	m_ConnectionStatus = dynamic_cast<GUILabel*>(m_SubMenuScreenGUIControlManager->GetControl("ConnectionStatus"));
-	m_ServerAddress->SetText("127.0.0.1");
-	m_ServerPort->SetText("8000");
+	m_ServerAddress->SetText(RetryServerAddress);
+	m_ServerPort->SetText(std::to_string(RetryServerPort));
+}
+
+void MainMenuGUI::OpenDisconnectedServer(const std::string& reason) {
+	m_ServerAddress->SetText(RetryServerAddress);
+	m_ServerPort->SetText(std::to_string(RetryServerPort));
+	m_Connecting = false;
+	m_ConnectButton->SetEnabled(true);
+	m_ServerAddress->SetEnabled(true);
+	m_ServerPort->SetEnabled(true);
+	m_ConnectionStatus->SetText(reason + " Reconnect or return to the main menu.");
+	SetActiveMenuScreen(MenuScreen::MultiplayerScreen, false);
+	m_MainMenuButtons[MenuButton::ResumeButton]->SetVisible(false);
+	if (System::IsDebugRun() && DebugDisconnectMenuTest) DebugMenuCapture = "connection-lost-menu";
 }
 
 void MainMenuGUI::ShowMultiplayerScreen() {
@@ -314,6 +327,7 @@ void MainMenuGUI::ShowQuitScreenOrQuit() {
 }
 
 void MainMenuGUI::ShowAndBlinkResumeButton() {
+	if (DisconnectedNetworkSession) { m_MainMenuButtons[MenuButton::ResumeButton]->SetVisible(false); return; }
 	if (!m_MainMenuButtons[MenuButton::ResumeButton]->GetVisible()) {
 		m_ResumeButtonBlinkTimer.Reset();
 		if (g_ActivityMan.GetActivity() && (g_ActivityMan.GetActivity()->GetActivityState() == Activity::Running || g_ActivityMan.GetActivity()->GetActivityState() == Activity::Editing)) {
