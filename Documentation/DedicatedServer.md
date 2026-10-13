@@ -401,6 +401,10 @@ simultaneous processes. The rebuilt Windows RakNet library and Meson frontends
 passed headless startup/two-client checks in 19.83 seconds (134 further server
 ticks) and graphical menu/message checks in 28.53 seconds (62 ticks).
 Linux package verification must be repeated after this change.
+The delivered native Windows Final pair subsequently passed
+`PeerIdentityDeliveredMenu` in 32.44 seconds: two simultaneous clients and 62
+simulation ticks after disconnect, with clean process exits. MSBuild reported
+the RakNet source project before linking the game.
 
 The Windows solution now builds its RakNet source project as a dependency.
 Meson with prebuilt libraries still requires rebuilding that library when its
