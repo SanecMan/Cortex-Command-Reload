@@ -344,7 +344,7 @@ Lua HUD compatibility have not been verified by these runs.
 Windows or Linux. From the content checkout, run:
 
 ```sh
-python3 Tools/run_server_smoke.py --exe build-server/CortexCommandServer --game-dir . --self-test
+python3 Tools/run_server_smoke.py --exe build-server/CortexCommandServer --game-dir . --self-test --probe-clients
 ```
 
 It removes DISPLAY/WAYLAND_DISPLAY, forces invalid SDL video/audio drivers,
@@ -364,6 +364,20 @@ four graphical clients, cross-platform LAN gameplay or text glyph rendering.
 `CortexCommandServer --self-test` also runs those diagnostics directly; use
 `-debug-run-output NAME` to select a diagnostic directory. Repeat runs replace
 that directory's diagnostic outputs.
+`--probe-clients` additionally starts two separate native client processes using
+`CortexCommandServer --probe-client ADDRESS PORT`. This diagnostic mode loads no
+game content or devices: it decodes snapshots, requires a populated world that
+advances at least 60 server ticks and sends neutral input. The runner requires
+both connections to be visible simultaneously in server status, both clients to
+exit successfully, server-side application of neutral input to a player slot,
+and further simulation updates after their disconnection.
+It validates transport across processes, not graphical replica application or
+the gameplay effects of input. It can also be used against a remote test server;
+the probe disconnects after success or after a 30-second deadline.
+Windows `SeparateClientProbeWindows` passed on 2026-10-14 in 18.72 seconds:
+two simultaneous processes, populated advancing snapshots, server-side neutral
+input application and 127 more ticks after disconnect. Tutorial assigned one
+playable slot and one spectator. Invalid/missing probe ports returned exit 2.
 
 `.github/workflows/linux-server.yml` configures only the dedicated executable on
 Ubuntu 24.04 / GCC 13 with the checked-in SDL3/LuaJIT/Allegro sources. It is called
@@ -387,8 +401,16 @@ machine, and the separate Linux host remains disabled at the user's request.
 The first real Linux CI run (38448845526, 2026-10-14) passed configuration but
 failed compilation because classic minizip names its ZIP64 entry API differently
 from Windows minizip-ng. The small diagnostic ZIP entry now uses their common
-non-ZIP64 API. Linux compilation and runtime remain unverified until the repeat
-CI run passes. Windows `DedicatedSelfTestWindows` passed the expanded runner:
+non-ZIP64 API. Repeat CI run
+[38452209295](https://github.com/SanecMan/Cortex-Command-Reload/actions/runs/38452209295)
+passed Ubuntu 24.04 / GCC 13 compilation and linking, dependency checks, and
+device-free runtime in 10.13 seconds: 120 further simulation ticks, 17 actors,
+UTF-8 config/CLI, invalid configuration rejection, four native in-process clients
+receiving populated snapshots and logical sound lifetimes. It also verified
+continued operation with closed stdin and clean SIGTERM shutdown. The separate
+process probes and extracted-package check were added afterward and require a
+new CI run; this result does not prove cross-OS or LAN gameplay.
+Windows `DedicatedSelfTestWindows` passed the expanded runner:
 126 simulation ticks, 17 actors, no video initialization, four native loopback
 clients receiving a live world, and device-free sound playback lifetime checks.
 The rebuilt native Windows `Final|x64` client and matching server passed again
@@ -841,8 +863,9 @@ HUD synchronization, reconnect, broader mod/runtime regression coverage,
 long-running soak and LAN tests. The two-client Tutorial test proves simultaneous
 connections and replication, not two active Tutorial players. Rendering/audio
 dependencies are still linked, although startup avoids those devices. Linux
-build/runtime, systemd/Docker deployment and signal handling are not verified;
-the supplied Linux test machine is currently offline at the user's request.
+build/runtime and POSIX signal handling passed the CI checks described above;
+actual systemd/Docker deployment and cross-OS LAN gameplay remain unverified.
+The supplied Linux test machine is currently offline at the user's request.
 
 A malformed temporary .rte module also exercised the real Reader abort path:
 exit code 1, ServerFailure.log with the module/line error, no game dialog.

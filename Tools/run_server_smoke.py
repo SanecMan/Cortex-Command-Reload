@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Portable dedicated-server startup/config/console check; no display or client required."""
 import argparse
+import contextlib
 import json
 import os
 from pathlib import Path
@@ -16,6 +17,7 @@ def main():
     parser.add_argument('--output-prefix', default='PortableServerSmoke')
     parser.add_argument('--timeout', type=float, default=180)
     parser.add_argument('--self-test', action='store_true', help='Run the server binary device-free diagnostics before startup checks.')
+    parser.add_argument('--probe-clients', action='store_true', help='Connect two separate device-free client processes to the live server.')
     args = parser.parse_args()
     if not re.fullmatch(r'[A-Za-z0-9_-]{1,48}', args.output_prefix) or args.timeout <= 0:
         parser.error('Use a simple output prefix and a positive timeout.')
@@ -29,7 +31,7 @@ def main():
             raise RuntimeError('Diagnostic paths must not be symlinks.')
         directory.mkdir(exist_ok=True)
     # Clear only this runner's known outputs, never other workspace files.
-    for directory, names in ((root, ('сервер.ini', 'stdout.log', 'stderr.log', 'invalid-config.log', 'self-test-stdout.log', 'service-stdout.log', 'service-stderr.log', 'result.json')),
+    for directory, names in ((root, ('сервер.ini', 'stdout.log', 'stderr.log', 'invalid-config.log', 'self-test-stdout.log', 'client-0.log', 'client-1.log', 'service-stdout.log', 'service-stderr.log', 'result.json')),
                              (logs, ('Server.log', 'ServerFailure.log', 'WorldStateServer.log', 'LogLoading.txt', 'LogConsole.txt')),
                              (service_logs, ('Server.log', 'ServerFailure.log', 'WorldStateServer.log', 'LogLoading.txt', 'LogConsole.txt'))):
         for name in names:
@@ -98,6 +100,40 @@ def main():
                         raise RuntimeError('UTF-8 config/CLI override check failed.')
                     break
                 time.sleep(0.1)
+            if args.probe_clients:
+                probes = []
+                with contextlib.ExitStack() as streams:
+                    try:
+                        for index in range(2):
+                            output = streams.enter_context((root / f'client-{index}.log').open('wb'))
+                            probes.append(subprocess.Popen([str(binary), '--probe-client', '127.0.0.1', str(port)],
+                                cwd=game, env=environment, stdout=output, stderr=subprocess.STDOUT,
+                                creationflags=creation_flags))
+                        observed_two = False
+                        while any(probe.poll() is None for probe in probes):
+                            check()
+                            process.stdin.write(b'status\n'); process.stdin.flush()
+                            time.sleep(0.1)
+                            observed_two |= bool(re.search(r'INFO status tick=\d+ clients=2 actors=\d+', read_log()))
+                        if not observed_two or any(probe.returncode != 0 for probe in probes):
+                            raise RuntimeError('Separate client connection check failed; inspect client logs.')
+                    finally:
+                        for probe in probes:
+                            if probe.poll() is None:
+                                probe.terminate()
+                                try:
+                                    probe.wait(timeout=5)
+                                except subprocess.TimeoutExpired:
+                                    probe.kill(); probe.wait()
+                for index in range(2):
+                    report = (root / f'client-{index}.log').read_text(encoding='utf-8')
+                    if not re.search(r'result=passed snapshots=\d+ objects=[1-9]\d* tick_delta=\d+ input_queued=[1-9]\d*', report):
+                        raise RuntimeError('Separate client did not receive an advancing populated world.')
+                network_log = (logs / 'WorldStateServer.log').read_text(encoding='utf-8')
+                if not re.search(r'INFO: applied [1-9]\d* client input commands to player slot', network_log):
+                    raise RuntimeError('Server did not apply neutral input from a probe client.')
+                result['separate_clients'] = 2
+                result['probe_input_applied'] = True
             first_tick = None
             while True:
                 check()
