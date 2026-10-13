@@ -47,6 +47,15 @@ jobs:
         run: |
           g++-13 -std=c++20 -Wall -Wextra -I Source/System Tools/WorldStateScreenTextTest.cpp -o build-server/world-state-screen-text-test
           build-server/world-state-screen-text-test
+      - name: Verify peer identities
+        run: |
+          g++-13 -std=c++20 -Wall -Wextra -pthread -I external/sources/RakNet/include Tools/RakNetGuidTest.cpp -o build-server/peer-guid-test
+          build-server/peer-guid-test
+          python Tools/check_peer_guid_processes.py --exe build-server/peer-guid-test
+      - name: Verify sound payload codec
+        run: |
+          g++-13 -std=c++20 -Wall -Wextra -I Source/System Tools/WorldStateSoundProtocolTest.cpp -o build-server/world-state-sound-test
+          build-server/world-state-sound-test
       - name: Check dependencies
         run: |
           ldd build-server/CortexCommandServer | tee build-server/runtime-dependencies.txt
