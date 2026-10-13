@@ -30,6 +30,7 @@ GUIFont::GUIFont(const std::string& Name) :
 	m_FontHeight(0),
 	m_MainColor(15),
 	m_CurrentColor(m_MainColor),
+	m_UnicodeDefaultColor(m_MainColor),
 	m_CurrentBitmap(nullptr),
 	m_Name(Name), // Color index of the main font color
 	m_CharIndexCap(256),
@@ -64,6 +65,19 @@ bool GUIFont::Load(GUIScreen* Screen, const std::string& Filename) {
 
 	// The red separator MUST be on the Top-Left hand corner
 	unsigned long Red = m_Font->GetPixel(0, 0);
+	// Existing atlases can have a colored face unlike the historical MainColor
+	// default. Match that face for fallback glyphs without recoloring the atlas.
+	std::unordered_map<unsigned long, std::size_t> foregroundCounts;
+	std::size_t largestCount = 0;
+	m_UnicodeDefaultColor = m_MainColor;
+	for (int row = 0; row < m_Font->GetHeight(); ++row) {
+		for (int column = 0; column < m_Font->GetWidth(); ++column) {
+			const auto pixel = m_Font->GetPixel(column, row);
+			if (pixel == BackG || pixel == Red) continue;
+			const auto count = ++foregroundCounts[pixel];
+			if (count > largestCount) { largestCount = count; m_UnicodeDefaultColor = pixel; }
+		}
+	}
 
 	// Find the separating gap of the font lines
 	int y;
@@ -187,7 +201,8 @@ void GUIFont::Draw(GUIBitmap* Bitmap, int X, int Y, const std::string& Text, uns
 		if (codePoint >= m_CharIndexCap && m_TrueTypeFont) {
 			if (const TrueTypeGlyph* glyph = GetTrueTypeGlyph(codePoint)) {
 				if (Shadow) DrawTrueTypeGlyph(Bitmap, X + 1, Y + 1, *glyph, Shadow);
-				DrawTrueTypeGlyph(Bitmap, X, Y, *glyph, m_CurrentColor);
+				const auto foreground = m_CurrentBitmap == m_Font ? m_UnicodeDefaultColor : m_CurrentColor;
+				DrawTrueTypeGlyph(Bitmap, X, Y, *glyph, m_Screen->ConvertColor(foreground, Bitmap->GetColorDepth()));
 				X += glyph->m_Advance + m_Kerning;
 			} else {
 				const unsigned char c = '?';

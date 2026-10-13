@@ -24,6 +24,14 @@ and ZIP path checks also passed. These checks exercise the engine-managed Lua
 file paths; they do not establish Unicode-aware behavior for Lua's standard
 byte-indexed string operations or arbitrary native modules.
 
+On 2026-10-14, the network screen-message check exposed dark TrueType fallback
+glyphs next to the yellow bitmap glyphs of FontLarge. Default fallback text now
+uses the atlas's most frequent foreground color, excluding its background and
+separator; explicit cached font colors remain in use. The original atlas pixels
+are unchanged. The assigned Windows client's final screenshot visibly displayed
+`Network HUD: Привет, Ёжик!` with readable yellow Cyrillic glyphs. This visual check
+covered the built-in large font, not every custom mod font atlas.
+
 Linux verification on 2026-10-14: GitHub Actions run 38453967381 passed UTF-8
 decoding, UTF-16 conversion helpers, legacy Windows-1251 fallback, BOM handling,
 Cyrillic/emoji filenames through Reader/GUIReader, and ZIP path round trips.

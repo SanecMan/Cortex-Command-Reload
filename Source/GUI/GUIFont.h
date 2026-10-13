@@ -122,6 +122,7 @@ namespace RTE {
 		int m_FontHeight;
 		unsigned long m_MainColor;
 		unsigned long m_CurrentColor;
+		unsigned long m_UnicodeDefaultColor;
 		GUIBitmap* m_CurrentBitmap;
 		std::string m_Name;
 		Character m_Characters[256];
