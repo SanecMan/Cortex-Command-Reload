@@ -20,7 +20,7 @@
 namespace RTE::WorldStateProtocol {
 
 inline constexpr std::uint32_t c_Magic = 0x31524343; // "CCR1" on the wire.
-inline constexpr std::uint16_t c_Version = 16;
+inline constexpr std::uint16_t c_Version = 17;
 inline constexpr std::size_t c_TeamCount = 4;
 inline constexpr std::int8_t c_NoActivity = -1;
 inline constexpr std::int8_t c_MaxActivityState = 6;
@@ -104,6 +104,7 @@ struct ObjectState {
 	HandDeviceState BackgroundDevice;
 	bool HasAttachmentState = false;
 	std::vector<AttachmentState> Attachments;
+	bool HasEmitterState = false, EmissionEnabled = false, FlashVisible = false;
 	float AimAngle = 0;
 	std::uint8_t ActorStatus = 0;
 	bool operator==(const ObjectState&) const = default;
@@ -262,6 +263,8 @@ namespace Detail {
 		       std::isfinite(object.PositionX) && std::isfinite(object.PositionY) && std::isfinite(object.VelocityX) &&
 		       std::isfinite(object.VelocityY) && std::isfinite(object.Rotation) && std::isfinite(object.AngularVelocity) &&
 		       std::isfinite(object.Health) && std::isfinite(object.AimAngle) && object.ActorStatus <= 4 &&
+		       (object.HasEmitterState ? (object.ClassName == "AEmitter" || object.ClassName == "AEJetpack") : (!object.EmissionEnabled && !object.FlashVisible)) &&
+		       (!object.FlashVisible || object.EmissionEnabled) &&
 		       (object.Flags == c_ObjectFlagActor || (object.AimAngle == 0 && object.ActorStatus == 0)) &&
 		       (object.HasAttachmentState ? ValidAttachmentTree(object.Attachments, c_MaxStringBytes) : object.Attachments.empty()) &&
 		       (object.Flags != c_ObjectFlagTransientPixel || !object.HasAttachmentState) &&
@@ -468,9 +471,9 @@ inline bool WriteAttachments(std::vector<std::uint8_t>& packet, const ObjectStat
 		WriteUnsigned(packet, static_cast<std::uint8_t>(node.Role), 1);
 		if (!WriteString(packet, node.ClassName) || !WriteString(packet, node.ModuleName) || !WriteString(packet, node.PresetName)) return false;
 		for (float number : {node.ParentOffsetX, node.ParentOffsetY, node.JointOffsetX, node.JointOffsetY,
-		                    node.RotationFromRoot, node.HandOffsetX, node.HandOffsetY}) WriteFloat(packet, number);
+		                    node.RotationFromRoot, node.HandOffsetX, node.HandOffsetY, node.Scale}) WriteFloat(packet, number);
 		WriteUnsigned(packet, node.SpriteFrame, 2);
-		WriteUnsigned(packet, (node.HFlipped ? 1 : 0) | (node.DrawAfterParent ? 2 : 0), 1);
+		WriteUnsigned(packet, (node.HFlipped ? 1 : 0) | (node.DrawAfterParent ? 2 : 0) | (node.HasEmitterState ? 4 : 0) | (node.EmissionEnabled ? 8 : 0) | (node.FlashVisible ? 16 : 0), 1);
 		WriteUnsigned(packet, std::bit_cast<std::uint32_t>(node.MagazineRounds), 4);
 		if (packet.size() > c_MaxPacketSize) return false;
 	}
@@ -495,11 +498,12 @@ inline bool ReadAttachments(std::span<const std::uint8_t> packet, std::size_t& o
 		node.Role = static_cast<AttachmentRole>(value);
 		if (!ReadString(packet, offset, node.ClassName) || !ReadString(packet, offset, node.ModuleName) || !ReadString(packet, offset, node.PresetName)) return false;
 		for (float* number : {&node.ParentOffsetX, &node.ParentOffsetY, &node.JointOffsetX, &node.JointOffsetY,
-		                     &node.RotationFromRoot, &node.HandOffsetX, &node.HandOffsetY})
+		                     &node.RotationFromRoot, &node.HandOffsetX, &node.HandOffsetY, &node.Scale})
 			if (!ReadFloat(packet, offset, *number)) return false;
 		if (!ReadUnsigned(packet, offset, 2, value)) return false;
 		node.SpriteFrame = static_cast<std::uint16_t>(value);
-		if (!ReadUnsigned(packet, offset, 1, value) || value > 3) return false;
+		if (!ReadUnsigned(packet, offset, 1, value) || value > 31) return false;
+		node.HasEmitterState = (value & 4) != 0; node.EmissionEnabled = (value & 8) != 0; node.FlashVisible = (value & 16) != 0;
 		node.HFlipped = (value & 1) != 0; node.DrawAfterParent = (value & 2) != 0;
 		if (!ReadUnsigned(packet, offset, 4, value)) return false;
 		node.MagazineRounds = std::bit_cast<std::int32_t>(static_cast<std::uint32_t>(value));
@@ -574,6 +578,7 @@ inline bool WriteObject(std::vector<std::uint8_t>& packet, const ObjectState& ob
 			Detail::WriteUnsigned(packet,std::bit_cast<std::uint32_t>(object.OwnMagazineRounds),4);
 		}
 	}
+	WriteUnsigned(packet, (object.HasEmitterState ? 1 : 0) | (object.EmissionEnabled ? 2 : 0) | (object.FlashVisible ? 4 : 0), 1);
 	if (!WriteAttachments(packet, object) || packet.size() > c_MaxPacketSize) {
 		return false;
 	}
@@ -650,6 +655,8 @@ inline bool ReadObject(std::span<const std::uint8_t> packet, std::size_t& offset
 			object.OwnMagazineRounds=std::bit_cast<std::int32_t>(static_cast<std::uint32_t>(value)); if (object.OwnMagazineRounds < -1) return false;
 		}
 	}
+	if (!ReadUnsigned(packet, offset, 1, value) || value > 7) return false;
+	object.HasEmitterState = (value & 1) != 0; object.EmissionEnabled = (value & 2) != 0; object.FlashVisible = (value & 4) != 0;
 	return ReadAttachments(packet, offset, object) && ValidObject(object);
 }
 inline bool ValidInventory(const Snapshot& snapshot) {

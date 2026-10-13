@@ -21,7 +21,12 @@ inline bool TestWorldStateAttachmentCodec() {
 	AttachmentState magazine = gun;
 	magazine.Parent = 1; magazine.Role = AttachmentRole::FirearmMagazine;
 	magazine.ClassName = "Magazine"; magazine.PresetName = "Magazine"; magazine.MagazineRounds = -1;
-	body.Attachments = {arm, gun, magazine}; source.Objects.push_back(body);
+	AttachmentState emitter = arm;
+	emitter.Role = AttachmentRole::HumanJetpack; emitter.ClassName = "AEJetpack"; emitter.PresetName = "Jetpack";
+	emitter.HandOffsetX = 0; emitter.HasEmitterState = emitter.EmissionEnabled = emitter.FlashVisible = true;
+	AttachmentState flash = gun; flash.Parent = 3; flash.Role = AttachmentRole::EmitterFlash;
+	flash.ClassName = "Attachable"; flash.PresetName = "Flash"; flash.Scale = 0.375F;
+	body.Attachments = {arm, gun, magazine, emitter, flash}; source.Objects.push_back(body);
 	std::vector<std::uint8_t> packet;
 	Snapshot decoded;
 	if (!EncodeSnapshot(source, 1, packet) || !DecodeSnapshot(packet, decoded) || decoded.Objects != source.Objects) return false;
@@ -31,7 +36,11 @@ inline bool TestWorldStateAttachmentCodec() {
 		if (DecodeSnapshot(std::span(valid).first(length), decoded) || decoded.Objects != source.Objects) return false;
 	}
 	auto rejects = [&](const Snapshot& invalid) { return !EncodeSnapshot(invalid, 1, packet); };
-	auto invalid = source; invalid.Objects[0].Attachments[0].Parent = 0; if (!rejects(invalid)) return false;
+	auto invalid = source; invalid.Objects[0].Attachments[3].EmissionEnabled = false; if (!rejects(invalid)) return false;
+	invalid = source; invalid.Objects[0].Attachments[0].HasEmitterState = true; if (!rejects(invalid)) return false;
+	invalid = source; invalid.Objects[0].Attachments[4].Scale = std::numeric_limits<float>::infinity(); if (!rejects(invalid)) return false;
+	invalid = source; invalid.Objects[0].FlashVisible = true; if (!rejects(invalid)) return false;
+	invalid = source; invalid.Objects[0].Attachments[0].Parent = 0; if (!rejects(invalid)) return false;
 	invalid = source; invalid.Objects[0].Attachments[1].Parent = 2; if (!rejects(invalid)) return false;
 	invalid = source; invalid.Objects[0].Attachments.push_back(arm); if (!rejects(invalid)) return false;
 	invalid = source; invalid.Objects[0].Attachments[0].Slot = 1; if (!rejects(invalid)) return false;

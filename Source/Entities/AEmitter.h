@@ -51,6 +51,9 @@ namespace RTE {
 		/// Indicates whether this AEmitter is currently enabled and emitting.
 		/// @return Whether it's emitting or not.
 		bool IsEmitting() const { return m_EmitEnabled; }
+		bool IsEmissionFlashVisible() const { return m_pFlash && m_EmitEnabled && (m_ReplicaEmissionVisual ? m_ReplicaFlashVisible : (!m_FlashOnlyOnBurst || m_BurstTriggered)); }
+		// Visual replica application never starts timers, sounds or particle emission.
+		void SetReplicaEmissionVisual(bool enabled, bool flashVisible) { m_EmitEnabled = enabled; m_ReplicaEmissionVisual = true; m_ReplicaFlashVisible = flashVisible; }
 
 		/// Returns whether this emitter was emitting last frame.
 		/// @return Whether this emitter was emitting last frame.
@@ -420,6 +423,7 @@ namespace RTE {
 		// How far this is audiable (in screens) when emitting as a jetpack or craft engine
 		float m_LoudnessOnEmit;
 		// Whether to only display flash on bursts, and not on any emission frame.
+		bool m_ReplicaEmissionVisual = false, m_ReplicaFlashVisible = false;
 		bool m_FlashOnlyOnBurst;
 		// Whether the burst sound should always play until completion, or whether it stops when this emitter stops emitting
 		bool m_SustainBurstSound;

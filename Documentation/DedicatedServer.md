@@ -128,7 +128,35 @@ processes. Its final screenshot was inspected and showed the Ketanot Hills
 terrain rendered. Both root executables were updated by this verification;
 this is not a manual player-control or broad mod gameplay test.
 
-## Attachment and pose replication (v16)
+## Emitter visuals (protocol v17)
+
+Protocol v17 adds emission-enabled and flash-visible state for root and nested
+`AEmitter` / `AEJetpack` instances, attachment scale, and the native `EmitterFlash`
+slot. Both endpoints must be updated together. `.rte` serialization and Lua APIs
+are unchanged. Client application sets visual state without running emitter
+Update, emission timers, sound playback or client-side particle spawning; particles
+continue to come from the authoritative server's object snapshots.
+
+The draw predicate retains the ordinary emitter rules, while replicas use the
+server's captured flash visibility. Attachment scale preserves finite signed
+values used by content. Invalid emitter classes/flag combinations and non-finite
+scale are rejected before application.
+
+Windows Meson validation on 2026-10-13: `EmitterV17FinalPair` passed with two
+clients in 29.58 seconds and 64 server updates after disconnect. Both clients
+passed codec truncation/invalid-field checks and native attachment checks.
+The native emitter test compares CPU-rendered source and replica pixels with
+emission enabled, then checks that disabling emission changes the image and
+hides the flash. This covers sustained emitter flash state; a burst occurring
+entirely between snapshots can still be missed. Wound emitters, postprocess glow
+registration, replicated audio and arbitrary Lua HUD state remain incomplete.
+
+The root MSBuild `Final|x64` game was rebuilt and paired with the v17 server.
+`EmitterV17NativeFinalPair` passed the menu connection and inventory fixture
+with two clients in 32.38 seconds; the server continued 64 updates after
+disconnect. These durations include startup and are not performance benchmarks.
+
+## Attachment and pose replication (v16 foundation)
 
 The v16 protocol carries an attachment tree on each rotating world/inventory
 object. Records include parent indices, native pointer-slot roles, class/module/
@@ -149,8 +177,8 @@ Trees are limited to 256 nodes and 16 levels per rotating object, with bounded
 UTF-8 identity strings and finite numeric fields. Truncated data, invalid parent
 indices, repeated slots and invalid role values are rejected. Exceeding a capture
 limit rejects the snapshot rather than silently removing server attachments.
-Wound emitters, emission/flash activation timing and arbitrary
-Lua-local state are not represented by this tree and remain separate work.
+Wound emitters and arbitrary Lua-local state are not represented by this tree.
+The subsequent v17 extension above adds sampled emitter flash activation.
 
 Windows x64 Meson validation on 2026-10-08:
 

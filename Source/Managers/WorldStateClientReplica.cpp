@@ -1,4 +1,5 @@
 #include "WorldStateClientReplica.h"
+#include "AEmitter.h"
 #include "WorldStateAttachments.h"
 #include "System.h"
 
@@ -187,6 +188,10 @@ namespace {
 	}
 
 	bool ApplyFields(MovableObject& target, const WorldStateProtocol::ObjectState& state) {
+		if (state.HasEmitterState) {
+			auto* emitter = dynamic_cast<AEmitter*>(&target); if (!emitter) return false;
+			emitter->SetReplicaEmissionVisual(state.EmissionEnabled, state.FlashVisible);
+		}
 		target.SetPos(Vector(state.PositionX, state.PositionY));
 		target.SetPrevPos(target.GetPos());
 		target.SetVel(Vector(state.VelocityX, state.VelocityY));

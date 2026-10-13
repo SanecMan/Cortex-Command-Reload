@@ -20,7 +20,7 @@ enum class AttachmentRole : std::uint8_t {
     RocketULeftThruster, RocketURightThruster, DropshipLeftThruster,
     DropshipRightThruster, DropshipULeftThruster, DropshipURightThruster,
     DropshipLeftHatch, DropshipRightHatch, LegFoot, ArmDevice,
-    FirearmMagazine, FirearmFlash, TurretDevice
+    FirearmMagazine, FirearmFlash, TurretDevice, EmitterFlash
 };
 
 inline constexpr std::uint16_t c_AttachmentRoot = std::numeric_limits<std::uint16_t>::max();
@@ -33,6 +33,8 @@ struct AttachmentState {
     float ParentOffsetX = 0, ParentOffsetY = 0;
     float JointOffsetX = 0, JointOffsetY = 0;
     float RotationFromRoot = 0;
+    float Scale = 1;
+    bool HasEmitterState = false, EmissionEnabled = false, FlashVisible = false;
     float HandOffsetX = 0, HandOffsetY = 0;
     std::uint16_t SpriteFrame = 0;
     bool HFlipped = false, DrawAfterParent = false;
@@ -52,7 +54,7 @@ inline bool ValidAttachmentTree(const std::vector<AttachmentState>& nodes, std::
         if (depth > c_MaxAttachmentDepth) return false;
         depths.push_back(depth);
         const auto role = static_cast<std::uint8_t>(node.Role);
-        if (role > static_cast<std::uint8_t>(AttachmentRole::TurretDevice) || node.Slot >= c_MaxAttachments ||
+        if (role > static_cast<std::uint8_t>(AttachmentRole::EmitterFlash) || node.Slot >= c_MaxAttachments ||
             (node.Role != AttachmentRole::Generic && node.Role != AttachmentRole::TurretDevice && node.Slot != 0)) return false;
         const std::uint64_t key = (std::uint64_t(node.Parent) << 24) | (std::uint64_t(role) << 16) | node.Slot;
         if (!slots.insert(key).second) return false;
@@ -60,8 +62,11 @@ inline bool ValidAttachmentTree(const std::vector<AttachmentState>& nodes, std::
         for (const auto* text : {&node.ClassName, &node.ModuleName, &node.PresetName})
             if (text->size() > maxStringBytes || !UTF8::IsValid(*text)) return false;
         for (float number : {node.ParentOffsetX, node.ParentOffsetY, node.JointOffsetX, node.JointOffsetY,
-                             node.RotationFromRoot, node.HandOffsetX, node.HandOffsetY})
+                             node.RotationFromRoot, node.HandOffsetX, node.HandOffsetY, node.Scale})
             if (!std::isfinite(number)) return false;
+        if ((!node.HasEmitterState && (node.EmissionEnabled || node.FlashVisible)) ||
+            (node.HasEmitterState && node.ClassName != "AEmitter" && node.ClassName != "AEJetpack") ||
+            (node.FlashVisible && !node.EmissionEnabled)) return false;
         if (node.ClassName == "Magazine" ? node.MagazineRounds < -1 : node.MagazineRounds != 0) return false;
         if (node.ClassName != "Arm" && (node.HandOffsetX != 0 || node.HandOffsetY != 0)) return false;
     }

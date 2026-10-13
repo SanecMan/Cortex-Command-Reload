@@ -7,6 +7,7 @@
 #include "Leg.h"
 #include "Turret.h"
 #include "AEJetpack.h"
+#include "AEmitter.h"
 #include "HDFirearm.h"
 #include "Magazine.h"
 #include "PresetMan.h"
@@ -49,6 +50,7 @@ AttachmentRole RoleOf(const MOSRotating& parent, const Attachable* child, std::u
 		if (found != devices.end()) { slot = static_cast<std::uint16_t>(found - devices.begin()); return TurretDevice; }
 	}
 #undef MATCH_SLOT
+	if (const auto* value = dynamic_cast<const AEmitter*>(&parent)) { if (value->GetFlash() == child) return EmitterFlash; }
 	return Generic;
 }
 std::vector<Slot> Slots(const MOSRotating& parent) {
@@ -105,6 +107,7 @@ bool Adopt(MOSRotating& parent, Attachable* child, AttachmentRole role) {
 		ADOPT(FirearmMagazine, HDFirearm, Magazine, SetMagazine)
 		ADOPT(FirearmFlash, HDFirearm, Attachable, SetFlash)
 		ADOPT(TurretDevice, Turret, HeldDevice, AddMountedDevice)
+		ADOPT(EmitterFlash, AEmitter, Attachable, SetFlash)
 		case Generic: parent.AddAttachable(child); return true;
 	}
 #undef ADOPT
@@ -115,6 +118,10 @@ bool Adopt(MOSRotating& parent, Attachable* child, AttachmentRole role) {
 bool Capture(const MOSRotating& object, WorldStateProtocol::ObjectState& state) {
 	using namespace WorldStateProtocol;
 	state.HasAttachmentState = true;
+	state.HasEmitterState = state.EmissionEnabled = state.FlashVisible = false;
+	if (const auto* emitter = dynamic_cast<const AEmitter*>(&object)) {
+		state.HasEmitterState = true; state.EmissionEnabled = emitter->IsEmitting(); state.FlashVisible = emitter->IsEmissionFlashVisible();
+	}
 	state.Attachments.clear();
 	struct Parent { const MOSRotating* Object; std::uint16_t Index; std::size_t Depth; };
 	std::vector<Parent> parents{{&object, c_AttachmentRoot, 0}};
@@ -129,6 +136,10 @@ bool Capture(const MOSRotating& object, WorldStateProtocol::ObjectState& state) 
 			node.ParentOffsetX = child->GetParentOffset().GetX(); node.ParentOffsetY = child->GetParentOffset().GetY();
 			node.JointOffsetX = child->GetJointOffset().GetX(); node.JointOffsetY = child->GetJointOffset().GetY();
 			node.RotationFromRoot = child->GetRotAngle() - object.GetRotAngle();
+			node.Scale = child->GetScale();
+			if (const auto* emitter = dynamic_cast<const AEmitter*>(child)) {
+				node.HasEmitterState = true; node.EmissionEnabled = emitter->IsEmitting(); node.FlashVisible = emitter->IsEmissionFlashVisible();
+			}
 			node.SpriteFrame = static_cast<std::uint16_t>(std::min<unsigned int>(child->GetFrame(), 65535));
 			node.HFlipped = child->IsHFlipped(); node.DrawAfterParent = child->IsDrawnAfterParent();
 			if (const auto* arm = dynamic_cast<const Arm*>(child)) {
@@ -166,6 +177,11 @@ bool ApplyPose(MOSRotating& object, const std::vector<WorldStateProtocol::Attach
 			if (!child) return false;
 			child->SetParentOffset(Vector(node.ParentOffsetX, node.ParentOffsetY));
 			child->SetJointOffset(Vector(node.JointOffsetX, node.JointOffsetY));
+			child->SetScale(node.Scale);
+			if (node.HasEmitterState) {
+				auto* emitter = dynamic_cast<AEmitter*>(child); if (!emitter) return false;
+				emitter->SetReplicaEmissionVisual(node.EmissionEnabled, node.FlashVisible);
+			}
 			child->SetInheritsRotAngle(false); child->SetInheritsHFlipped(0);
 			child->SetRotAngle(object.GetRotAngle() + node.RotationFromRoot);
 			child->SetHFlipped(node.HFlipped); child->SetDrawnAfterParent(node.DrawAfterParent);
@@ -180,6 +196,10 @@ bool ApplyPose(MOSRotating& object, const std::vector<WorldStateProtocol::Attach
 
 bool Apply(MOSRotating& object, const WorldStateProtocol::ObjectState& state) {
 	using namespace WorldStateProtocol;
+	if (state.HasEmitterState) {
+		auto* emitter = dynamic_cast<AEmitter*>(&object); if (!emitter) return false;
+		emitter->SetReplicaEmissionVisual(state.EmissionEnabled, state.FlashVisible);
+	}
 	if (!state.HasAttachmentState) return true;
 	if (!ValidAttachmentTree(state.Attachments)) return false;
 	ObjectScriptExecution::SuppressionScope suppress;
@@ -225,7 +245,7 @@ bool Matches(const MOSRotating& object, const std::vector<WorldStateProtocol::At
 		const auto& a = nodes[index]; const auto& b = observed.Attachments[index];
 		if (a.Parent != b.Parent || a.Slot != b.Slot || a.Role != b.Role || a.ClassName != b.ClassName ||
 		    a.ModuleName != b.ModuleName || a.PresetName != b.PresetName || a.SpriteFrame != b.SpriteFrame ||
-		    a.HFlipped != b.HFlipped || a.DrawAfterParent != b.DrawAfterParent || a.MagazineRounds != b.MagazineRounds ||
+		    a.HFlipped != b.HFlipped || a.DrawAfterParent != b.DrawAfterParent || a.MagazineRounds != b.MagazineRounds || a.HasEmitterState != b.HasEmitterState || a.EmissionEnabled != b.EmissionEnabled || a.FlashVisible != b.FlashVisible || !near(a.Scale, b.Scale) ||
 		    !near(a.ParentOffsetX, b.ParentOffsetX) || !near(a.ParentOffsetY, b.ParentOffsetY) ||
 		    !near(a.JointOffsetX, b.JointOffsetX) || !near(a.JointOffsetY, b.JointOffsetY) ||
 		    !near(a.RotationFromRoot, b.RotationFromRoot) || !near(a.HandOffsetX, b.HandOffsetX) || !near(a.HandOffsetY, b.HandOffsetY)) return false;
@@ -233,12 +253,46 @@ bool Matches(const MOSRotating& object, const std::vector<WorldStateProtocol::At
 	return true;
 }
 
+bool TestEmitterVisual() {
+	using namespace WorldStateProtocol;
+	ObjectScriptExecution::SuppressionScope suppress;
+	const auto* preset = dynamic_cast<const AEJetpack*>(g_PresetMan.GetEntityPreset("AEJetpack", "Jetpack", "Base.rte"));
+	if (!preset || !preset->GetFlash()) return false;
+	std::unique_ptr<AEJetpack> source(dynamic_cast<AEJetpack*>(preset->Clone()));
+	std::unique_ptr<AEJetpack> target(dynamic_cast<AEJetpack*>(preset->Clone()));
+	if (!source || !target) return false;
+	source->SetPos(Vector(64, 64)); target->SetPos(source->GetPos());
+	source->EnableEmission(true); source->GetFlash()->SetScale(0.75F);
+	source->GetFlash()->SetParentOffset(Vector(8, 0));
+	source->CorrectAttachableAndWoundPositionsAndRotations();
+	ObjectState state;
+	if (!Capture(*source, state) || !state.EmissionEnabled || !state.FlashVisible || !Apply(*target, state) ||
+	    !target->IsEmitting() || !target->IsEmissionFlashVisible() || !target->GetFlash() ||
+	    std::abs(target->GetFlash()->GetScale() - 0.75F) > 0.0001F) return false;
+	BITMAP* on = create_bitmap_ex(32, 128, 128);
+	BITMAP* copy = create_bitmap_ex(32, 128, 128);
+	BITMAP* off = create_bitmap_ex(32, 128, 128);
+	if (!on || !copy || !off) { if (on) destroy_bitmap(on); if (copy) destroy_bitmap(copy); if (off) destroy_bitmap(off); return false; }
+	clear_to_color(on, 0); clear_to_color(copy, 0); clear_to_color(off, 0);
+	source->Draw(on, Vector(), g_DrawColor); target->Draw(copy, Vector(), g_DrawColor);
+	source->EnableEmission(false);
+	const bool disabled = Capture(*source, state) && Apply(*target, state) && !target->IsEmissionFlashVisible();
+	target->Draw(off, Vector(), g_DrawColor);
+	bool equal = true, changed = false;
+	for (int y = 0; y < 128; ++y) for (int x = 0; x < 128; ++x) {
+		equal = equal && getpixel(on, x, y) == getpixel(copy, x, y);
+		changed = changed || getpixel(on, x, y) != getpixel(off, x, y);
+	}
+	destroy_bitmap(on); destroy_bitmap(copy); destroy_bitmap(off);
+	return disabled && equal && changed;
+}
+
 bool TestNative() {
 	using namespace WorldStateProtocol;
 	ObjectScriptExecution::SuppressionScope suppress;
 	const auto* body = dynamic_cast<const AHuman*>(g_PresetMan.GetEntityPreset("AHuman", "Fat Culled Clone", "Base.rte"));
 	const Entity* weapon = g_PresetMan.GetEntityPreset("HDFirearm", "Auto Pistol", "Coalition.rte");
-	if (!body || !body->GetFGArm() || !weapon) return false;
+	if (!body || !body->GetFGArm() || !weapon || !TestEmitterVisual()) return false;
 	std::unique_ptr<AHuman> source(dynamic_cast<AHuman*>(body->Clone()));
 	std::unique_ptr<AHuman> target(dynamic_cast<AHuman*>(body->Clone()));
 	std::unique_ptr<HDFirearm> gun(dynamic_cast<HDFirearm*>(weapon->Clone()));
@@ -262,7 +316,7 @@ bool TestNative() {
 			const auto& a = expected.Attachments[index]; const auto& b = observed.Attachments[index];
 			if (a.Parent != b.Parent || a.Slot != b.Slot || a.Role != b.Role || a.ClassName != b.ClassName ||
 			    a.ModuleName != b.ModuleName || a.PresetName != b.PresetName || a.SpriteFrame != b.SpriteFrame ||
-			    a.HFlipped != b.HFlipped || a.DrawAfterParent != b.DrawAfterParent || a.MagazineRounds != b.MagazineRounds ||
+			    a.HFlipped != b.HFlipped || a.DrawAfterParent != b.DrawAfterParent || a.MagazineRounds != b.MagazineRounds || a.HasEmitterState != b.HasEmitterState || a.EmissionEnabled != b.EmissionEnabled || a.FlashVisible != b.FlashVisible || !near(a.Scale, b.Scale) ||
 			    !near(a.ParentOffsetX, b.ParentOffsetX) || !near(a.ParentOffsetY, b.ParentOffsetY) ||
 			    !near(a.JointOffsetX, b.JointOffsetX) || !near(a.JointOffsetY, b.JointOffsetY) ||
 			    !near(a.RotationFromRoot, b.RotationFromRoot) || !near(a.HandOffsetX, b.HandOffsetX) || !near(a.HandOffsetY, b.HandOffsetY)) return false;

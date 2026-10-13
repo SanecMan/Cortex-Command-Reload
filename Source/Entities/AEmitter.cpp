@@ -23,6 +23,7 @@ void AEmitter::Clear() {
 	m_BurstSound = nullptr;
 	m_EndSound = nullptr;
 	m_EmitEnabled = false;
+	m_ReplicaEmissionVisual = m_ReplicaFlashVisible = false;
 	m_WasEmitting = false;
 	m_EmitCount = 0;
 	m_EmitCountLimit = 0;
@@ -590,13 +591,13 @@ void AEmitter::Draw(BITMAP* pTargetBitmap,
                     bool onlyPhysical) const {
 	// Draw flash if there is one
 	if (m_pFlash && !m_pFlash->IsDrawnAfterParent() &&
-	    !onlyPhysical && mode == g_DrawColor && m_EmitEnabled && (!m_FlashOnlyOnBurst || m_BurstTriggered))
+	    !onlyPhysical && mode == g_DrawColor && IsEmissionFlashVisible())
 		m_pFlash->Draw(pTargetBitmap, targetPos, mode, onlyPhysical);
 
 	Attachable::Draw(pTargetBitmap, targetPos, mode, onlyPhysical);
 
 	// Update and Draw flash if there is one
 	if (m_pFlash && m_pFlash->IsDrawnAfterParent() &&
-	    !onlyPhysical && mode == g_DrawColor && m_EmitEnabled && (!m_FlashOnlyOnBurst || m_BurstTriggered))
+	    !onlyPhysical && mode == g_DrawColor && IsEmissionFlashVisible())
 		m_pFlash->Draw(pTargetBitmap, targetPos, mode, onlyPhysical);
 }
