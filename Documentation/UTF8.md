@@ -41,6 +41,14 @@ It is a software raster test, not verification of every graphics driver or mod
 font. Changing the bundled atlas's foreground color requires updating this
 specific regression expectation.
 
+The delivered Windows Final pair passed the same checks afterward:
+`UnicodeRasterDelivered` took 19.44 seconds, verified 54 correctly colored glyph
+pixels, two separate clients and 127 post-disconnect ticks.
+`UnicodeRasterDeliveredMenu` passed two graphical menu-connected clients in
+31.99 seconds, with the Cyrillic fixture applied and 63 further server ticks.
+All processes exited cleanly. Linux CI for this additional raster test is still
+running; the preceding v19 build and screen-message checks already passed.
+
 Linux verification on 2026-10-14: GitHub Actions run 38453967381 passed UTF-8
 decoding, UTF-16 conversion helpers, legacy Windows-1251 fallback, BOM handling,
 Cyrillic/emoji filenames through Reader/GUIReader, and ZIP path round trips.
