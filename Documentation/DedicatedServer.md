@@ -378,6 +378,10 @@ Windows `SeparateClientProbeWindows` passed on 2026-10-14 in 18.72 seconds:
 two simultaneous processes, populated advancing snapshots, server-side neutral
 input application and 127 more ticks after disconnect. Tutorial assigned one
 playable slot and one spectator. Invalid/missing probe ports returned exit 2.
+An unreachable loopback server returned exit 1 with a connection error. The
+delivered root server and native Final client then passed
+`SeparateClientFinalMenu` in 32.41 seconds with two menu-connected clients and
+62 simulation updates after disconnection.
 
 `.github/workflows/linux-server.yml` configures only the dedicated executable on
 Ubuntu 24.04 / GCC 13 with the checked-in SDL3/LuaJIT/Allegro sources. It is called
@@ -857,7 +861,7 @@ profile warning; no fatal error occurred.
 
 ## Remaining limits
 
-This is a working Windows headless host foundation. A complete gameplay release
+This is a working Windows/Linux headless host foundation. A complete gameplay release
 still needs remote purchase/deployment flows, full Activity-specific state and
 HUD synchronization, reconnect, broader mod/runtime regression coverage,
 long-running soak and LAN tests. The two-client Tutorial test proves simultaneous
