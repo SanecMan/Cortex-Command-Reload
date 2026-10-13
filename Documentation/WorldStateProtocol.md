@@ -38,6 +38,15 @@ MSVC test passed the protocol and queue cases described above. Windows
 `SoundQueueLifecycleHeadless` passed with two external clients in 18.42 seconds
 and no SDL video initialization. `SoundQueueLifecycleMenu` passed with two
 graphical clients in 28.45 seconds and 62 additional server ticks after disconnect.
+The native MSBuild `Final|x64` client and the updated server beside it passed
+`SoundQueueLifecycleDelivered`: two graphical clients, 32.19 seconds, 62 further
+server ticks after disconnect.
+
+Linux CI run `38473453031` verified the preceding v20 transport commit
+`25092231d91`: four internal sound recipients, two external clients, no SDL video
+initialization, UTF-8 configuration, invalid configuration rejection and SIGTERM
+shutdown. The build-tree run passed in 12.04 seconds and the extracted server
+package in 8.82 seconds. This is evidence for sound packet delivery, not playback.
 
 ## Screen messages (v19)
 
