@@ -132,8 +132,8 @@ void AudioMan::Destroy() {
 	if (m_AudioEnabled) {
 		StopAll();
 		m_AudioSystem->release();
-		Clear();
 	}
+	Clear();
 }
 
 void AudioMan::Update() {

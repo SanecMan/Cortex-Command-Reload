@@ -16,7 +16,12 @@ namespace {
 	// Lazy metadata-only system. It never selects an output device or plays channels.
 	class SoundLengthReader {
 	public:
-		~SoundLengthReader() { if (m_System) m_System->release(); }
+		~SoundLengthReader() { Reset(); }
+		void Reset() {
+			std::scoped_lock lock(m_Mutex);
+			if (m_System) { m_System->release(); m_System = nullptr; }
+			m_Lengths.clear();
+		}
 		unsigned int Read(const std::string& path) {
 			if (path.empty()) return 0;
 			std::scoped_lock lock(m_Mutex);
@@ -56,10 +61,8 @@ namespace {
 		FMOD::System* m_System = nullptr;
 		std::unordered_map<std::string, unsigned int> m_Lengths;
 	};
-	unsigned int ReadSoundLengthWithoutPlayback(const std::string& path) {
-		static SoundLengthReader reader;
-		return reader.Read(path);
-	}
+	SoundLengthReader& SoundLengths() { static SoundLengthReader reader; return reader; }
+	unsigned int ReadSoundLengthWithoutPlayback(const std::string& path) { return SoundLengths().Read(path); }
 	struct HeadlessPlayback {
 		std::array<SoundPlaybackTimeline, 3> Timelines;
 		bool Playing(double now) { bool playing = false; for (auto& timeline : Timelines) playing = timeline.Playing(now) || playing; return playing; }
@@ -91,6 +94,8 @@ void SoundContainer::StopHeadlessPlayback() {
 	auto& registry = HeadlessSounds(); std::scoped_lock lock(registry.Mutex); registry.Sounds.clear();
 }
 void SoundContainer::ResetHeadlessPlayback() {
+	// Release the FMOD metadata system during manager shutdown, before CRT/DLL teardown.
+	SoundLengths().Reset();
 	auto& registry = HeadlessSounds(); std::scoped_lock lock(registry.Mutex);
 	registry.Sounds.clear(); registry.Pitch = {1, 1, 1}; registry.SFXPaused = false;
 }
