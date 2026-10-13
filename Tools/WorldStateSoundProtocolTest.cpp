@@ -13,13 +13,17 @@ int main() {
     play.OffsetX = 3; play.OffsetY = -4; play.Loops = -1; play.Priority = 256; play.Bus = 2;
     play.Immobile = true; play.Paused = true;
     std::vector<Event> source{play};
-    for (auto action : {Action::Stop, Action::Position, Action::Volume, Action::Pitch, Action::Pause, Action::Fade}) {
+    for (auto action : {Action::Stop, Action::Position, Action::Volume, Action::Pitch, Action::Pause, Action::Fade, Action::Pan, Action::Panning, Action::GlobalPitch, Action::BusPause}) {
         Event event; event.Type = action; event.Container = 7; event.Player = 3;
         if (action == Action::Position) { event.X = -12; event.Y = 34; }
         if (action == Action::Volume) event.Gain = 0.5F;
         if (action == Action::Pitch) event.Rate = 2;
         if (action == Action::Pause) event.Paused = true;
         if (action == Action::Fade) event.FadeMilliseconds = 250;
+        if (action == Action::Pan) event.Pan = -0.25F;
+        if (action == Action::Panning) event.Panning = 2;
+        if (action == Action::GlobalPitch) { event.Container = 0; event.Player = -1; event.Bus = 5; event.Rate = 0.5F; }
+        if (action == Action::BusPause) { event.Container = 0; event.Player = -1; event.Bus = 0; event.Paused = true; }
         source.push_back(event);
     }
     auto check = [](bool passed, const char* name) { if (!passed) std::cerr << "FAILED " << name << '\n'; return passed; };
@@ -66,7 +70,7 @@ int main() {
     maximum.push_back(play);
     if (!check(!Encode(maximum, bytes), "batch limit")) return 1;
     Event stop; stop.Container = 1;
-    const std::vector<std::uint8_t> golden{0x43,0x43,0x41,0x31,2,0,1,0,1,1,0,0,0,0,0,0,0,0xFF};
+    const std::vector<std::uint8_t> golden{0x43,0x43,0x41,0x31,3,0,1,0,1,1,0,0,0,0,0,0,0,0xFF};
     if (!check(Encode(std::vector<Event>{stop}, bytes) && bytes == golden, "fixed little-endian layout")) return 1;
     RTE::WorldStateSoundQueue queue;
     if (!check(queue.Push(2, 10, source) && queue.Drain(1).empty() && queue.Size() == source.size(), "future scene retained")) return 1;
@@ -130,6 +134,20 @@ int main() {
     const auto tail = capture.Drain(overflow);
     if (!check(tail.size() == 1 && tail[0].Type == Action::Play && !overflow, "one-shot tail survives source destruction")) return 1;
     capture.End();
+    capture.Begin(); Event global; global.Type = Action::GlobalPitch; global.Bus = 3; global.Rate = 0.5F;
+    capture.Global(global); capture.Global(global);
+    auto globalEvents = capture.Drain(overflow);
+    if (!check(globalEvents.size() == 1 && globalEvents[0].Bus == 3, "global pitch deduplication")) return 1;
+    Event busPause; busPause.Type = Action::BusPause; busPause.Paused = true;
+    capture.Global(busPause); capture.Global(busPause);
+    if (!check(capture.Drain(overflow).size() == 1, "bus pause deduplication")) return 1;
+    const auto mix = capture.GetMixState();
+    if (!check(mix.size() == 6 && mix[0].Rate == 0.5F && mix[1].Paused && mix[2].Rate == 0.5F && mix[4].Rate == 1, "mix baseline")) return 1;
+    capture.End();
+    auto invalidGlobal = global; invalidGlobal.Bus = 8;
+    if (!check(!Encode(std::vector{invalidGlobal}, bytes), "invalid group mask")) return 1;
+    invalidGlobal = global; invalidGlobal.Container = 1;
+    if (!check(!Encode(std::vector{invalidGlobal}, bytes), "global identity validation")) return 1;
     std::cout << "sound_capture_test=passed\n";
     std::cout << "sound_protocol_test=passed\nsound_queue_test=passed\n";
     return 0;

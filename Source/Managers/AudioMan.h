@@ -6,6 +6,7 @@
 #include "Vector.h"
 #include "Singleton.h"
 #include <mutex>
+#include <array>
 #include <vector>
 #include <unordered_map>
 
@@ -166,6 +167,8 @@ namespace RTE {
 		/// Gets the global pitch scalar value for all sounds and music.
 		/// @return The current pitch scalar. Will be > 0.
 		float GetGlobalPitch() const { return m_GlobalPitch; }
+		const std::array<float, 3>& GetBusPitches() const { return m_BusPitches; }
+		bool AreIngameSoundsPaused() const { return m_IngameSoundsPaused; }
 
 		/// Sets the global pitch multiplier for mobile sounds, optionally setting it for immobile sounds and music.
 		/// @param pitch New global pitch, limited to 8 octaves up or down (i.e. 0.125 - 8). Defaults to 1.
@@ -351,6 +354,8 @@ namespace RTE {
 
 		std::mutex g_SoundEventsListMutex[c_MaxClients]; //!< A list for locking sound events for multiplayer to avoid race conditions and other such problems.
 		mutable std::mutex m_SoundChannelMinimumAudibleDistancesMutex; //!, As above but for m_SoundChannelMinimumAudibleDistances
+		std::array<float, 3> m_BusPitches{1,1,1};
+		bool m_IngameSoundsPaused = false;
 		struct ChannelOwner { SoundContainer* Container; float Pan, Panning, Volume; bool Infinite; };
 		mutable std::mutex m_ChannelOwnersMutex;
 		std::mutex m_FinishedChannelsMutex;

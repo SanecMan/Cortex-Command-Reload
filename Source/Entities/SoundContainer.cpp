@@ -387,8 +387,18 @@ const SoundData* SoundContainer::GetSoundDataForSound(const FMOD::Sound* sound) 
 	return nullptr;
 }
 
+void SoundContainer::SetPanningStrengthMultiplier(float value) {
+	m_PanningStrengthMultiplier = value;
+	m_SoundPropertiesUpToDate = false;
+	WorldStateSoundProtocol::Event captured; captured.Type = WorldStateSoundProtocol::Action::Panning;
+	captured.Panning = value; GetWorldStateSoundCapture().Command(this, captured);
+	if (IsBeingPlayed() && g_AudioMan.IsAudioEnabled()) g_AudioMan.ChangeSoundContainerPlayingChannelsPosition(this);
+}
+
 void SoundContainer::SetCustomPanValue(float customPanValue) {
 	m_CustomPanValue = std::clamp(customPanValue, -1.0f, 1.0f);
+	WorldStateSoundProtocol::Event captured; captured.Type = WorldStateSoundProtocol::Action::Pan;
+	captured.Pan = m_CustomPanValue; GetWorldStateSoundCapture().Command(this, captured);
 	if (IsBeingPlayed()) {
 		g_AudioMan.ChangeSoundContainerPlayingChannelsCustomPanValue(this);
 	}
@@ -446,7 +456,7 @@ void SoundContainer::SetPitch(float newPitch) {
 }
 
 void SoundContainer::SetNetworkPitch(float newPitch) {
-	if (!std::isfinite(newPitch) || newPitch <= 0 || newPitch > 64) return;
+	if (!std::isfinite(newPitch) || newPitch <= 0 || newPitch > 512) return;
 	m_Pitch = newPitch;
 	WorldStateSoundProtocol::Event event; event.Type = WorldStateSoundProtocol::Action::Pitch;
 	event.Rate = m_Pitch; GetWorldStateSoundCapture().Command(this, event);

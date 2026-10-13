@@ -184,10 +184,7 @@ namespace RTE {
 
 		/// Sets the panning strength multiplier of this SoundContainer.
 		/// @param panningStrengthMultiplier The new panning strength multiplier.
-		void SetPanningStrengthMultiplier(float panningStrengthMultiplier) {
-			m_PanningStrengthMultiplier = panningStrengthMultiplier;
-			m_SoundPropertiesUpToDate = false;
-		}
+		void SetPanningStrengthMultiplier(float panningStrengthMultiplier);
 
 		/// Gets the looping setting of this SoundContainer.
 		/// @return An int with the loop count.

@@ -14,11 +14,13 @@ param(
     [switch]$CheckMenuConnection,
     [switch]$CheckScreenText,
     [switch]$CheckSound,
+    [switch]$CheckSoundMix,
     [switch]$EnableAudio,
     [ValidateRange(60, 600)]
     [int]$TimeoutSeconds = 360
 )
 $ErrorActionPreference = 'Stop'
+if ($CheckSoundMix) { $CheckSound=$true }
 if ($CheckPurchasePricing) { $CheckPurchasePolicy=$true }
 if ($CheckPurchasePolicy) { $CheckBuyMenu=$true }
 if ($CheckPurchases -and $CheckTeamFunds) { throw 'Run purchase and administrative funds fixtures separately.' }
@@ -101,6 +103,7 @@ try {
         $processes.Add($client)
         $clients.Add($client)
     }
+    $mixPaused = $false; $mixResumed = $false
     $soundStarted = $false
     $soundStopped = $false
     $screenTextApplied = $false
@@ -132,7 +135,19 @@ try {
             if (!$soundStarted -and $soundReady) {
                 $server.StandardInput.WriteLine('debug-sound'); $server.StandardInput.Flush(); $soundStarted=$true
             }
-            if ($soundStarted -and !$soundStopped -and $soundPlayed) {
+            $mixReadyToStop = !$CheckSoundMix
+            if ($CheckSoundMix -and $soundPlayed) {
+                $pausedSeen = $true; $resumedSeen = $true
+                foreach ($index in 1..2) {
+                    $mixReport = Read-Report (Join-Path $gameDirectory "ScreenShots\$OutputPrefix-Client$index\DebugRun.log")
+                    $pausedSeen = $pausedSeen -and ($mixReport -match '(?m)^world_state_sound_bus_pause=1')
+                    $resumedSeen = $resumedSeen -and ($mixReport -match '(?s)world_state_sound_bus_pause=1.*world_state_sound_bus_pause=0')
+                }
+                if (!$mixPaused) { $server.StandardInput.WriteLine('debug-sound-mix-pause'); $server.StandardInput.Flush(); $mixPaused=$true }
+                elseif (!$mixResumed -and $pausedSeen) { $server.StandardInput.WriteLine('debug-sound-mix-resume'); $server.StandardInput.Flush(); $mixResumed=$true }
+                $mixReadyToStop = $mixResumed -and $resumedSeen
+            }
+            if ($soundStarted -and !$soundStopped -and $soundPlayed -and $mixReadyToStop) {
                 $server.StandardInput.WriteLine('debug-sound-stop'); $server.StandardInput.Flush(); $soundStopped=$true
             }
         }
@@ -237,6 +252,8 @@ try {
         if ($clientReport -match "(?m)^buy_menu_displayed_cost=$expectedPolicyCost\r?`$") { $displayedStockPriceObserved = $true }
         if ($clientReport -notmatch '(?m)^result=passed' -or $clientNetwork -notmatch '(?m)^client_local_simulation_ticks=0' -or
             $clientNetwork -notmatch '(?m)^snapshot=\d+.*missing_presets=0' -or $clientNetwork -match 'missing_presets=[1-9]') { throw 'Client replica checks failed.' }
+        if ($CheckSoundMix -and ($clientReport -notmatch '(?m)^world_state_sound_bus_pause=1' -or
+            $clientReport -notmatch '(?s)world_state_sound_bus_pause=1.*world_state_sound_bus_pause=0')) { throw 'Network sound group pause/resume failed.' }
         if ($CheckSound -and (!$soundStarted -or !$soundStopped -or $clientReport -notmatch '(?m)^world_state_sound_play=passed' -or
             $clientReport -notmatch '(?m)^world_state_sound_stop=passed')) { throw 'Network sound playback/lifecycle fixture failed.' }
         if ($EnableAudio -and $CheckSound -and ($clientReport -notmatch '(?m)^world_state_sound_play=passed audio_enabled=1' -or $clientReport -notmatch '(?m)^audio_owner_lifetime=passed')) { throw 'FMOD playback was not enabled.' }

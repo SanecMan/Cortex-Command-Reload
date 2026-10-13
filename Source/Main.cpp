@@ -301,7 +301,7 @@ namespace {
 	struct DebugRunState {
 		bool NetworkScreenTextVerified = false;
 		bool EnableDebugAudio = false;
-		std::uint64_t NetworkSoundFixture = 0;
+		std::uint64_t NetworkSoundFixture = 0, NetworkSoundVoice = 0;
 		bool NetworkSoundPlayVerified = false, NetworkSoundStopVerified = false;
 		bool Enabled = false;
 		bool StressStarted = false;
@@ -1585,7 +1585,7 @@ namespace {
 			for (auto& event : batch) captured.push_back(std::move(event));
 		}
 		GetWorldStateSoundCapture().End();
-		std::array<std::size_t, 7> actionCounts{};
+		std::array<std::size_t, 11> actionCounts{};
 		bool capturePassed = !captureOverflow;
 		for (const auto& event : captured) {
 			++actionCounts[static_cast<std::size_t>(event.Type)];
@@ -1602,6 +1602,20 @@ namespace {
 		replicaPlay.Module = "Base.rte"; replicaPlay.Resource = "Sounds/GUIs/SlicePicked.flac";
 		replicaPlay.Immobile = true; replicaPlay.Loops = -1; replicaPlay.OffsetX = 3; replicaPlay.OffsetY = -4;
 		bool replicaPassed = replicaSound.Apply(1, 0, std::vector{replicaPlay}) == 1 && replicaSound.HasVoice(456);
+		WorldStateSoundProtocol::Event uiPlay = replicaPlay; uiPlay.Container = 124; uiPlay.Voice = 457; uiPlay.Bus = 1; uiPlay.Rate = 2;
+		replicaPassed = replicaSound.Apply(1, 0, std::vector{uiPlay}) == 1 && replicaPassed;
+		WorldStateSoundProtocol::Event groupPitch; groupPitch.Type = WorldStateSoundProtocol::Action::GlobalPitch; groupPitch.Bus = 1; groupPitch.Rate = 0.5F;
+		replicaSound.Apply(1, 0, std::vector{groupPitch});
+		replicaPassed = replicaSound.GetVoicePitch(456) == 0.5F && replicaSound.GetVoicePitch(457) == 2 && replicaPassed;
+		WorldStateSoundProtocol::Event groupPause; groupPause.Type = WorldStateSoundProtocol::Action::BusPause; groupPause.Paused = true;
+		replicaSound.Apply(1, 0, std::vector{groupPause});
+		replicaPassed = replicaSound.IsVoicePaused(456) && !replicaSound.IsVoicePaused(457) && replicaPassed;
+		WorldStateSoundProtocol::Event explicitPause; explicitPause.Type = WorldStateSoundProtocol::Action::Pause; explicitPause.Container = 123; explicitPause.Paused = true;
+		replicaSound.Apply(1, 0, std::vector{explicitPause}); groupPause.Paused = false;
+		replicaSound.Apply(1, 0, std::vector{groupPause}); replicaPassed = replicaSound.IsVoicePaused(456) && replicaPassed;
+		explicitPause.Paused = false; replicaSound.Apply(1, 0, std::vector{explicitPause});
+		replicaPassed = !replicaSound.IsVoicePaused(456) && replicaPassed;
+		WorldStateSoundProtocol::Event uiStop; uiStop.Container = 124; replicaSound.Apply(1, 0, std::vector{uiStop});
 		WorldStateSoundProtocol::Event replicaStop; replicaStop.Container = 123;
 		replicaPassed = replicaSound.Apply(1, 0, std::vector{replicaStop}) == 1 && replicaSound.Size() == 0 && replicaPassed;
 		replicaPassed = replicaSound.Apply(1, 0, std::vector{replicaPlay}) == 1 && replicaPassed;
@@ -2166,10 +2180,18 @@ int RunPersistentHeadlessServer(const ServerConfiguration& config) {
 				if (!diagnosticSound) {
 					const Entity* preset = g_PresetMan.GetEntityPreset("SoundContainer", "Confirm", "Base.rte");
 					diagnosticSound.reset(preset ? dynamic_cast<SoundContainer*>(preset->Clone()) : nullptr);
-					if (diagnosticSound) diagnosticSound->SetLoopSetting(-1);
+					if (diagnosticSound) { diagnosticSound->SetLoopSetting(-1); diagnosticSound->SetBusRouting(SoundContainer::SFX); }
 				}
 				const bool played = diagnosticSound && diagnosticSound->Play();
 				log(played ? "INFO debug_sound=playing" : "ERROR debug_sound=unavailable");
+			} else if (command == "debug-sound-mix-pause") {
+				g_AudioMan.PauseIngameSounds(true);
+				g_AudioMan.SetGlobalPitch(0.5F, true, false);
+				log("INFO debug_sound_mix=paused");
+			} else if (command == "debug-sound-mix-resume") {
+				g_AudioMan.PauseIngameSounds(false);
+				g_AudioMan.SetGlobalPitch(1, true, false);
+				log("INFO debug_sound_mix=resumed");
 			} else if (command == "debug-sound-stop") {
 				if (diagnosticSound) diagnosticSound->Stop();
 				log("INFO debug_sound=stopped");
@@ -2906,12 +2928,16 @@ void RunGameLoop() {
 						if (!state.NetworkSoundPlayVerified && event.Type == WorldStateSoundProtocol::Action::Play &&
 						    event.Module == "Base.rte" && event.Resource == "Sounds/GUIs/SlicePicked.flac" && event.Loops == -1 &&
 						    worldStateSoundPlayback.HasVoice(event.Voice)) {
-							state.NetworkSoundFixture = event.Container; state.NetworkSoundPlayVerified = true;
+							state.NetworkSoundFixture = event.Container; state.NetworkSoundVoice = event.Voice; state.NetworkSoundPlayVerified = true;
 							state.Log << "world_state_sound_play=passed audio_enabled=" << g_AudioMan.IsAudioEnabled() << '\n' << std::flush;
 							if (g_AudioMan.IsAudioEnabled()) {
 								const bool lifetime = g_AudioMan.VerifySoundContainerLifetime();
 								state.Log << "audio_owner_lifetime=" << (lifetime ? "passed" : "failed") << '\n' << std::flush;
 							}
+						}
+						if (state.NetworkSoundPlayVerified && event.Type == WorldStateSoundProtocol::Action::BusPause && event.Bus == 0) {
+							const bool applied = worldStateSoundPlayback.HasVoice(state.NetworkSoundVoice) && worldStateSoundPlayback.IsVoicePaused(state.NetworkSoundVoice) == event.Paused;
+							state.Log << (applied ? "world_state_sound_bus_pause=" : "world_state_sound_bus_pause_failed=") << event.Paused << '\n' << std::flush;
 						}
 						if (state.NetworkSoundPlayVerified && !state.NetworkSoundStopVerified && event.Type == WorldStateSoundProtocol::Action::Stop &&
 						    event.Container == state.NetworkSoundFixture && !worldStateSoundPlayback.HasContainer(event.Container)) {

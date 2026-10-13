@@ -38,6 +38,7 @@ void AudioMan::Clear() {
 	m_MusicVolume = 1.0F;
 	m_SoundsVolume = 1.0F;
 	m_GlobalPitch = 1.0F;
+	m_BusPitches.fill(1); m_IngameSoundsPaused = false;
 
 	m_SoundPanningEffectStrength = 0.5F;
 
@@ -143,6 +144,8 @@ void AudioMan::Destroy() {
 }
 
 void AudioMan::Update() {
+	const float timeScale = g_TimerMan.GetTimeScale();
+	SetGlobalPitch(timeScale + (1.0F - timeScale) * 0.35F);
 	if (m_AudioEnabled) {
 		DrainFinishedChannels();
 		FMOD_RESULT status = FMOD_OK;
@@ -153,14 +156,6 @@ void AudioMan::Update() {
 			m_MasterChannelGroup->setMute(m_MuteMaster);
 		}
 
-		float globalPitch = 1.0F;
-
-		float timeScale = g_TimerMan.GetTimeScale();
-		// Soften the ratio of the pitch adjustment so it's not such an extreme effect on the audio.
-		// TODO: This coefficient should probably move to SettingsMan and be loaded from ini. That way this effect can be lessened or even turned off entirely by users. 0.35 is a good default value though.
-		globalPitch = timeScale + (1.0F - timeScale) * 0.35F;
-
-		SetGlobalPitch(globalPitch);
 
 		if (!g_ActivityMan.ActivityPaused()) {
 			const Activity* currentActivity = g_ActivityMan.GetActivity();
@@ -212,6 +207,13 @@ void AudioMan::Update() {
 }
 
 void AudioMan::SetGlobalPitch(float pitch, bool includeImmobileSounds, bool includeMusic) {
+	WorldStateSoundProtocol::Event captured; captured.Type = WorldStateSoundProtocol::Action::GlobalPitch;
+	captured.Rate = std::clamp(pitch, 0.125F, 8.0F);
+	m_BusPitches[SoundContainer::SFX] = captured.Rate;
+	if (includeImmobileSounds) m_BusPitches[SoundContainer::UI] = captured.Rate;
+	if (includeMusic) m_BusPitches[SoundContainer::MUSIC] = captured.Rate;
+	captured.Bus = 1 | (includeImmobileSounds ? 2 : 0) | (includeMusic ? 4 : 0);
+	GetWorldStateSoundCapture().Global(captured);
 	if (!m_AudioEnabled) {
 		m_GlobalPitch = std::clamp(pitch, 0.125F, 8.0F);
 		SoundContainer::SetHeadlessGlobalPitch(m_GlobalPitch, includeImmobileSounds, includeMusic);
@@ -240,6 +242,9 @@ bool AudioMan::SetMusicPitch(float pitch) {
 	}
 
 	pitch = Limit(pitch, 8, 0.125); // Limit pitch change to 8 octaves up or down
+	m_BusPitches[SoundContainer::MUSIC] = pitch;
+	WorldStateSoundProtocol::Event captured; captured.Type = WorldStateSoundProtocol::Action::GlobalPitch;
+	captured.Bus = 4; captured.Rate = pitch; GetWorldStateSoundCapture().Global(captured);
 	FMOD_RESULT result = m_MusicChannelGroup->setPitch(pitch);
 
 	if (result != FMOD_OK) {
@@ -267,6 +272,9 @@ void AudioMan::StopAll() {
 	else SoundContainer::StopHeadlessPlayback();
 }
 void AudioMan::PauseIngameSounds(bool pause) {
+	m_IngameSoundsPaused = pause;
+	WorldStateSoundProtocol::Event captured; captured.Type = WorldStateSoundProtocol::Action::BusPause;
+	captured.Bus = SoundContainer::SFX; captured.Paused = pause; GetWorldStateSoundCapture().Global(captured);
 	if (m_AudioEnabled) m_SFXChannelGroup->setPaused(pause);
 	else SoundContainer::PauseHeadlessIngamePlayback(pause);
 }

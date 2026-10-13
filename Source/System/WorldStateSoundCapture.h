@@ -2,6 +2,7 @@
 
 #include "WorldStateSoundProtocol.h"
 #include <atomic>
+#include <array>
 #include <deque>
 #include <mutex>
 #include <unordered_map>
@@ -38,6 +39,34 @@ public:
 		event.Container = found->second.ID;
 		if (WorldStateSoundProtocol::Detail::Valid(event)) Append(std::move(event));
 	}
+	void Global(WorldStateSoundProtocol::Event event) {
+		if (!IsEnabled() || !WorldStateSoundProtocol::Detail::Valid(event)) return;
+		std::scoped_lock lock(m_Mutex);
+		if (!m_Enabled) return;
+		if (event.Type == WorldStateSoundProtocol::Action::GlobalPitch) {
+			std::uint8_t changed = 0;
+			for (std::size_t bus = 0; bus < m_Pitch.size(); ++bus) if ((event.Bus & (1U << bus)) && m_Pitch[bus] != event.Rate) {
+				m_Pitch[bus] = event.Rate; changed |= static_cast<std::uint8_t>(1U << bus);
+			}
+			if (!changed) return;
+			event.Bus = changed;
+		} else if (event.Type == WorldStateSoundProtocol::Action::BusPause) {
+			if (m_BusPaused[event.Bus] == event.Paused) return;
+			m_BusPaused[event.Bus] = event.Paused;
+		} else return;
+		Append(std::move(event));
+	}
+	std::vector<WorldStateSoundProtocol::Event> GetMixState() {
+		std::scoped_lock lock(m_Mutex);
+		std::vector<WorldStateSoundProtocol::Event> result;
+		for (std::size_t bus = 0; bus < 3; ++bus) {
+			WorldStateSoundProtocol::Event pitch; pitch.Type = WorldStateSoundProtocol::Action::GlobalPitch;
+			pitch.Bus = static_cast<std::uint8_t>(1U << bus); pitch.Rate = m_Pitch[bus]; result.push_back(pitch);
+			WorldStateSoundProtocol::Event pause; pause.Type = WorldStateSoundProtocol::Action::BusPause;
+			pause.Bus = static_cast<std::uint8_t>(bus); pause.Paused = m_BusPaused[bus]; result.push_back(pause);
+		}
+		return result;
+	}
 	void StopAll() {
 		if (!IsEnabled()) return;
 		std::scoped_lock lock(m_Mutex);
@@ -68,12 +97,14 @@ public:
 		return result;
 	}
 private:
-	void Reset() { m_Events.clear(); m_Containers.clear(); m_NextID = 0; m_Overflow = false; }
+	void Reset() { m_Events.clear(); m_Containers.clear(); m_NextID = 0; m_Overflow = false; m_Pitch.fill(1); m_BusPaused.fill(false); }
 	std::uint64_t NextID() { if (++m_NextID == 0) ++m_NextID; return m_NextID; }
 	void Append(WorldStateSoundProtocol::Event event) {
 		if (m_Events.size() >= MaxPending) { m_Overflow = true; return; }
 		m_Events.push_back(std::move(event));
 	}
+	std::array<float, 3> m_Pitch{1,1,1};
+	std::array<bool, 3> m_BusPaused{};
 	std::atomic<bool> m_Enabled{false};
 	std::mutex m_Mutex;
 	struct ContainerState { std::uint64_t ID = 0; bool Looping = false; };

@@ -1,5 +1,35 @@
 # World-state protocol
 
+## v22 sound mix controls under validation
+
+Development sources add GlobalPitch (a three-bit bus mask), BusPause, Pan and
+Panning to inner sound schema 3 and session protocol 22. Global commands use a
+zero container ID and player -1; invalid masks/identities are rejected. Capture
+deduplicates unchanged group state and provides a six-event baseline for new
+connections and scene revisions. Baselines do not reconstruct already-playing
+loops; that remains separate work.
+
+Client playback tracks per-bus pitch and pause plus each voice's original rate
+and explicit pause. Group resume must preserve explicit container pause. It
+applies mix changes to replica voices rather than calling AudioMan global setters
+on the client. Headless AudioMan now applies the same time-scale pitch adjustment
+as the graphical host. Existing Lua SetPitch bounds remain unchanged.
+
+The MSVC protocol/queue/capture test passed all new action round trips, invalid
+mask/identity rejection, deduplication and baseline state checks. Both Meson
+executables compiled and linked. `SoundMixV22Headless` passed in 18.16 seconds,
+including independent UI pitch, SFX pitch, group pause and explicit-pause retention.
+`SoundMixV22VerifiedFMOD` passed with two audio-enabled clients in 29.29 seconds
+and 62 server ticks after disconnect. Pause/resume markers require queries of the
+actual FMOD channels, rather than just packet receipt. `-CheckSoundMix` requires
+resume after pause. This does not prove audible mix quality or all new command
+combinations. Native Final and Linux v22 verification are pending; root delivery
+remains the validated v21 pair during this work.
+
+Linux lifecycle-update run `38483629070` (commit `f99ffdecb43`) passed headless
+startup and two external clients in 12.34 seconds, with the extracted package
+passing in 9.01 seconds. Both runs initialized no SDL video and handled SIGTERM.
+
 ## v21 sound capture and playback
 
 The current development sources capture actual SoundContainer playback decisions

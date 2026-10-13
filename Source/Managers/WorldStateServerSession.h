@@ -53,6 +53,8 @@ namespace RTE {
 		std::unordered_map<std::string, std::chrono::steady_clock::time_point> m_LastPurchaseTimeByClient;
 
 		WorldStateTransport m_Transport;
+	bool m_SoundMixBaselinePending = true;
+	std::uint32_t m_LastSoundSceneRevision = 0;
 		WorldStateSnapshotBuilder m_SnapshotBuilder;
 		std::ofstream m_Log;
 		std::uint32_t m_LastBroadcastTick = 0;

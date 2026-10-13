@@ -5,9 +5,9 @@ namespace RTE::WorldStateSoundProtocol {
 // Inner audio payload schema; transport integration uses the common session
 // envelope. Never serialize native FMOD channels, pointers or size_t hashes.
 inline constexpr std::uint32_t Magic = 0x31414343; // CCA1
-inline constexpr std::uint16_t Version = 2;
+inline constexpr std::uint16_t Version = 3;
 inline constexpr std::size_t MaxEvents = 256, MaxBytes = 256 * 1024;
-enum class Action : std::uint8_t { Play, Stop, Position, Volume, Pitch, Pause, Fade };
+enum class Action : std::uint8_t { Play, Stop, Position, Volume, Pitch, Pause, Fade, GlobalPitch, BusPause, Pan, Panning };
 struct Event {
     Action Type = Action::Stop;
     std::uint64_t Container = 0, Voice = 0;
@@ -39,6 +39,9 @@ inline bool RelativeResource(const std::string& value) {
     return false;
 }
 inline bool Valid(const Event& event) {
+    if (event.Type == Action::GlobalPitch)
+        return !event.Container && event.Player == -1 && event.Bus > 0 && event.Bus <= 7 && std::isfinite(event.Rate) && event.Rate >= 0.125F && event.Rate <= 8;
+    if (event.Type == Action::BusPause) return !event.Container && event.Player == -1 && event.Bus <= 2;
     if (!event.Container || event.Player < -1 || event.Player >= RTE::WorldStateProtocol::c_PlayerSlotCount) return false;
     switch (event.Type) {
         case Action::Play:
@@ -51,6 +54,9 @@ inline bool Valid(const Event& event) {
         case Action::Position: return std::isfinite(event.X) && std::isfinite(event.Y);
         case Action::Volume: return std::isfinite(event.Gain) && event.Gain >= 0 && event.Gain <= 10;
         case Action::Pitch: return std::isfinite(event.Rate) && event.Rate > 0 && event.Rate <= 64;
+        case Action::Pan: return std::isfinite(event.Pan) && event.Pan >= -1 && event.Pan <= 1;
+        case Action::Panning: return std::isfinite(event.Panning) && event.Panning >= 0 && event.Panning <= 10;
+        case Action::GlobalPitch: case Action::BusPause: return false;
         case Action::Fade: return event.FadeMilliseconds <= static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max());
     }
     return false;
@@ -80,6 +86,10 @@ inline bool Encode(std::span<const Event> events, std::vector<std::uint8_t>& byt
             case Action::Pitch: WriteFloat(output, event.Rate); break;
             case Action::Pause: WriteUnsigned(output, event.Paused, 1); break;
             case Action::Fade: WriteUnsigned(output, event.FadeMilliseconds, 4); break;
+            case Action::GlobalPitch: WriteUnsigned(output, event.Bus, 1); WriteFloat(output, event.Rate); break;
+            case Action::BusPause: WriteUnsigned(output, event.Bus, 1); WriteUnsigned(output, event.Paused, 1); break;
+            case Action::Pan: WriteFloat(output, event.Pan); break;
+            case Action::Panning: WriteFloat(output, event.Panning); break;
             case Action::Stop: break;
         }
         if (output.size() > MaxBytes) return false;
@@ -100,7 +110,7 @@ inline bool Decode(std::span<const std::uint8_t> bytes, std::vector<Event>& even
     };
     for (std::size_t index = 0; index < count; ++index) {
         Event event;
-        if (!ReadUnsigned(bytes, offset, 1, value) || value > static_cast<std::uint8_t>(Action::Fade)) return false;
+        if (!ReadUnsigned(bytes, offset, 1, value) || value > static_cast<std::uint8_t>(Action::Panning)) return false;
         event.Type = static_cast<Action>(value);
         if (!ReadUnsigned(bytes, offset, 8, event.Container) || !ReadUnsigned(bytes, offset, 1, value)) return false;
         event.Player = std::bit_cast<std::int8_t>(static_cast<std::uint8_t>(value));
@@ -124,6 +134,16 @@ inline bool Decode(std::span<const std::uint8_t> bytes, std::vector<Event>& even
             case Action::Fade:
                 if (!ReadUnsigned(bytes, offset, 4, value)) return false;
                 event.FadeMilliseconds = static_cast<std::uint32_t>(value); break;
+            case Action::GlobalPitch:
+                if (!ReadUnsigned(bytes, offset, 1, value) || !ReadFloat(bytes, offset, event.Rate)) return false;
+                event.Bus = static_cast<std::uint8_t>(value); break;
+            case Action::BusPause:
+                if (!ReadUnsigned(bytes, offset, 1, value)) return false;
+                event.Bus = static_cast<std::uint8_t>(value);
+                if (!boolean(event.Paused)) return false;
+                break;
+            case Action::Pan: if (!ReadFloat(bytes, offset, event.Pan)) return false; break;
+            case Action::Panning: if (!ReadFloat(bytes, offset, event.Panning)) return false; break;
             case Action::Stop: break;
         }
         if (!Valid(event)) return false;

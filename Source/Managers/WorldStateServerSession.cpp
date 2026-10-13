@@ -1,6 +1,7 @@
 #include "WorldStateServerSession.h"
 
 #include "PerformanceMan.h"
+#include "AudioMan.h"
 #include "MessageIdentifiers.h"
 #include "Activity.h"
 #include "ActivityMan.h"
@@ -73,6 +74,14 @@ bool WorldStateServerSession::Start(const std::string& bindAddress, unsigned sho
 	m_InputSlotsInUse[Players::PlayerOne] = reserveLocalPlayer;
 	m_ConnectedClients = 0;
 	GetWorldStateSoundCapture().Begin();
+	for (std::uint8_t bus = 0; bus < 3; ++bus) {
+		WorldStateSoundProtocol::Event pitch; pitch.Type = WorldStateSoundProtocol::Action::GlobalPitch;
+		pitch.Bus = static_cast<std::uint8_t>(1U << bus); pitch.Rate = g_AudioMan.GetBusPitches()[bus];
+		GetWorldStateSoundCapture().Global(pitch);
+	}
+	WorldStateSoundProtocol::Event pause; pause.Type = WorldStateSoundProtocol::Action::BusPause;
+	pause.Paused = g_AudioMan.AreIngameSoundsPaused(); GetWorldStateSoundCapture().Global(pause);
+	m_SoundMixBaselinePending = true; m_LastSoundSceneRevision = 0;
 	m_DebugTerrainMutationSmokeEnabled = false;
 	m_DebugTerrainMutationSmokeAttempted = false;
 	m_DebugTerrainMutationProbeLocated = false;
@@ -257,6 +266,7 @@ void WorldStateServerSession::PollNetwork(std::uint32_t simulationTick) {
 	for (const WorldStateTransport::ReceivedPacket& packet : packets) {
 		if (packet.Identifier == ID_NEW_INCOMING_CONNECTION) {
 			++m_ConnectedClients;
+			m_SoundMixBaselinePending = true;
 			// Defer terrain access until the next simulation update, but remember to
 			// rebuild the batch for this newly connected peer.
 			m_PendingTerrainPatches.clear();
@@ -421,6 +431,14 @@ void WorldStateServerSession::Update(std::uint32_t simulationTick) {
 		return;
 	}
 	PollNetwork(simulationTick);
+	if (m_ConnectedClients && g_SceneMan.GetScene()) {
+		const auto revision = m_SnapshotBuilder.RefreshSceneRevision();
+		if (m_SoundMixBaselinePending || revision != m_LastSoundSceneRevision) {
+			const auto mix = GetWorldStateSoundCapture().GetMixState();
+			if (!SendSoundEvents(mix)) { Log("ERROR: sound mix baseline send failed"); Stop(); return; }
+			m_LastSoundSceneRevision = revision; m_SoundMixBaselinePending = false;
+		}
+	}
 	for (;;) {
 		bool overflow = false;
 		auto sounds = GetWorldStateSoundCapture().Drain(overflow);
