@@ -113,6 +113,7 @@ namespace RTE {
 		/// Indicates whether any sound in this SoundContainer is currently being played.
 		/// @return Whether any sounds are playing.
 		bool IsBeingPlayed() const;
+		void CaptureNetworkPlay(const SoundData& data, float variation, int player) const;
 		// Internal device-free playback controls used by AudioMan.
 		static void ResetHeadlessPlayback();
 		static void StopHeadlessPlayback();
@@ -248,6 +249,8 @@ namespace RTE {
 		/// Sets the pitch sounds in this SoundContainer should be played at and updates any playing instances accordingly.
 		/// @param newPitch The new pitch sounds in this SoundContainer should be played at. Limited between 0.125 and 8 (8 octaves up or down).
 		void SetPitch(float newPitch);
+		/// Exact server-selected pitch, including variation; normal Lua/API bounds remain unchanged.
+		void SetNetworkPitch(float newPitch);
 
 		/// Gets the pitch variation the sounds in this SoundContainer are played at.
 		/// @return The pitch variation the sounds in this SoundContainer are played at.

@@ -1,3 +1,4 @@
+#include "WorldStateSoundCapture.h"
 #include "AudioMan.h"
 
 #include "CameraMan.h"
@@ -242,6 +243,7 @@ bool AudioMan::SetMusicPitch(float pitch) {
 }
 
 void AudioMan::StopAll() {
+	GetWorldStateSoundCapture().StopAll();
 	if (m_AudioEnabled) m_MasterChannelGroup->stop();
 	else SoundContainer::StopHeadlessPlayback();
 }
@@ -453,6 +455,7 @@ bool AudioMan::PlaySoundContainer(SoundContainer* soundContainer, int player) {
 		}
 
 		soundContainer->AddPlayingChannel(channelIndex);
+		soundContainer->CaptureNetworkPlay(*soundData, pitchVariationMultiplier, player);
 	}
 
 	if (m_IsInMultiplayerMode) {
@@ -594,6 +597,8 @@ bool AudioMan::ChangeSoundContainerPlayingChannelsCustomPanValue(const SoundCont
 }
 
 bool AudioMan::StopSoundContainerPlayingChannels(SoundContainer* soundContainer, int player) {
+	WorldStateSoundProtocol::Event capturedStop; capturedStop.Player = static_cast<std::int8_t>(player);
+	GetWorldStateSoundCapture().Command(soundContainer, capturedStop);
 	if (!m_AudioEnabled || !soundContainer || !soundContainer->IsBeingPlayed()) {
 		return false;
 	}

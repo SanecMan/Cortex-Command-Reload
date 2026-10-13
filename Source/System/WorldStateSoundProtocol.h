@@ -5,7 +5,7 @@ namespace RTE::WorldStateSoundProtocol {
 // Inner audio payload schema; transport integration uses the common session
 // envelope. Never serialize native FMOD channels, pointers or size_t hashes.
 inline constexpr std::uint32_t Magic = 0x31414343; // CCA1
-inline constexpr std::uint16_t Version = 1;
+inline constexpr std::uint16_t Version = 2;
 inline constexpr std::size_t MaxEvents = 256, MaxBytes = 256 * 1024;
 enum class Action : std::uint8_t { Play, Stop, Position, Volume, Pitch, Pause, Fade };
 struct Event {
@@ -13,6 +13,7 @@ struct Event {
     std::uint64_t Container = 0, Voice = 0;
     std::int8_t Player = -1;
     std::string Module, Resource;
+    float OffsetX = 0, OffsetY = 0;
     float X = 0, Y = 0, Gain = 1, Rate = 1, Attenuation = 0, Pan = 0, Panning = 1;
     std::int32_t Loops = 0;
     std::uint8_t Bus = 0;
@@ -43,7 +44,7 @@ inline bool Valid(const Event& event) {
         case Action::Play:
             return event.Voice && RelativeResource(event.Module) && event.Module.find('/') == std::string::npos &&
                 event.Module.ends_with(".rte") && RelativeResource(event.Resource) && event.Bus <= 2 && event.Priority <= 256 && event.Loops >= -1 &&
-                std::isfinite(event.X) && std::isfinite(event.Y) && std::isfinite(event.Gain) && event.Gain >= 0 && event.Gain <= 10 &&
+                std::isfinite(event.OffsetX) && std::isfinite(event.OffsetY) && std::isfinite(event.X) && std::isfinite(event.Y) && std::isfinite(event.Gain) && event.Gain >= 0 && event.Gain <= 10 &&
                 std::isfinite(event.Rate) && event.Rate > 0 && event.Rate <= 64 && std::isfinite(event.Attenuation) && event.Attenuation >= 0 &&
                 std::isfinite(event.Pan) && event.Pan >= -1 && event.Pan <= 1 && std::isfinite(event.Panning) && event.Panning >= 0 && event.Panning <= 10;
         case Action::Stop: case Action::Pause: return true;
@@ -69,7 +70,7 @@ inline bool Encode(std::span<const Event> events, std::vector<std::uint8_t>& byt
             case Action::Play:
                 WriteUnsigned(output, event.Voice, 8);
                 if (!WriteString(output, event.Module) || !WriteString(output, event.Resource)) return false;
-                for (float value : {event.X, event.Y, event.Gain, event.Rate, event.Attenuation, event.Pan, event.Panning}) WriteFloat(output, value);
+                for (float value : {event.X, event.Y, event.Gain, event.Rate, event.Attenuation, event.Pan, event.Panning, event.OffsetX, event.OffsetY}) WriteFloat(output, value);
                 WriteUnsigned(output, static_cast<std::uint32_t>(event.Loops), 4);
                 WriteUnsigned(output, event.Bus, 1); WriteUnsigned(output, event.Priority, 2);
                 WriteUnsigned(output, event.Immobile, 1); WriteUnsigned(output, event.AffectedByGlobalPitch, 1);
@@ -106,7 +107,7 @@ inline bool Decode(std::span<const std::uint8_t> bytes, std::vector<Event>& even
         switch (event.Type) {
             case Action::Play:
                 if (!ReadUnsigned(bytes, offset, 8, event.Voice) || !ReadString(bytes, offset, event.Module) || !ReadString(bytes, offset, event.Resource)) return false;
-                for (float* target : {&event.X, &event.Y, &event.Gain, &event.Rate, &event.Attenuation, &event.Pan, &event.Panning})
+                for (float* target : {&event.X, &event.Y, &event.Gain, &event.Rate, &event.Attenuation, &event.Pan, &event.Panning, &event.OffsetX, &event.OffsetY})
                     if (!ReadFloat(bytes, offset, *target)) return false;
                 if (!ReadUnsigned(bytes, offset, 4, value)) return false;
                 event.Loops = std::bit_cast<std::int32_t>(static_cast<std::uint32_t>(value));

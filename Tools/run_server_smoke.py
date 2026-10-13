@@ -78,7 +78,7 @@ def main():
             report = (test_directory / 'DebugRun.log').read_text(encoding='utf-8')
             markers = ('result=passed', 'gpu_enabled=0', 'world_state_host_session_smoke=passed',
                        'clients_received=4', 'live_world_received=1', 'server_alive_after_disconnect=1',
-                       'headless_sound_length_smoke=passed', 'playback=1')
+                       'headless_sound_length_smoke=passed', 'headless_sound_capture=passed', 'headless_sound_replica=passed', 'playback=1')
             if probe.returncode != 0 or not all(marker in report for marker in markers):
                 raise RuntimeError('Dedicated server self-test failed; inspect its DebugRun.log.')
             result['self_test'] = True

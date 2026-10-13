@@ -5,6 +5,7 @@
 #include "UTF8.h"
 #include "TimerMan.h"
 #include "SoundPlaybackTimeline.h"
+#include "WorldStateSoundCapture.h"
 
 #include <mutex>
 #include <limits>
@@ -143,6 +144,7 @@ SoundContainer::~SoundContainer() {
 }
 
 void SoundContainer::Clear() {
+	GetWorldStateSoundCapture().Release(this);
 	{ auto& registry = HeadlessSounds(); std::scoped_lock lock(registry.Mutex); registry.Sounds.erase(this); }
 	m_TopLevelSoundSet = std::make_shared<SoundSet>();
 	m_TopLevelSoundSet->Destroy();
@@ -391,9 +393,33 @@ void SoundContainer::SetCustomPanValue(float customPanValue) {
 	}
 }
 
+void SoundContainer::CaptureNetworkPlay(const SoundData& data, float variation, int player) const {
+	if (!GetWorldStateSoundCapture().IsEnabled()) return;
+	const auto& path = data.SoundFile.GetDataPath();
+	const auto end = path.find(".rte/");
+	if (end == std::string::npos) return;
+	const auto slash = path.rfind('/', end);
+	const auto begin = slash == std::string::npos ? 0 : slash + 1;
+	WorldStateSoundProtocol::Event event;
+	event.Player = static_cast<std::int8_t>(player);
+	event.Module = path.substr(begin, end + 4 - begin); event.Resource = path.substr(end + 5);
+	event.X = m_Pos.m_X; event.Y = m_Pos.m_Y;
+	event.OffsetX = data.Offset.m_X; event.OffsetY = data.Offset.m_Y;
+	event.Gain = m_Volume; event.Rate = m_Pitch * variation;
+	event.Attenuation = data.MinimumAudibleDistance + std::clamp(m_AttenuationStartDistance, 0.0F,
+	    std::max(0.0F, static_cast<float>(c_SoundMaxAudibleDistance) - data.MinimumAudibleDistance));
+	event.Pan = m_CustomPanValue; event.Panning = m_PanningStrengthMultiplier;
+	event.Loops = m_Loops; event.Bus = static_cast<std::uint8_t>(m_BusRouting);
+	event.Priority = static_cast<std::uint16_t>(m_Priority); event.Immobile = m_Immobile;
+	event.AffectedByGlobalPitch = m_AffectedByGlobalPitch; event.Paused = m_Paused;
+	GetWorldStateSoundCapture().Play(this, std::move(event));
+}
+
 void SoundContainer::SetPosition(const Vector& newPosition) {
 	if (!m_Immobile && newPosition != m_Pos) {
 		m_Pos = newPosition;
+		WorldStateSoundProtocol::Event event; event.Type = WorldStateSoundProtocol::Action::Position;
+		event.X = m_Pos.m_X; event.Y = m_Pos.m_Y; GetWorldStateSoundCapture().Command(this, event);
 		if (IsBeingPlayed()) {
 			g_AudioMan.ChangeSoundContainerPlayingChannelsPosition(this);
 		}
@@ -410,10 +436,19 @@ void SoundContainer::SetVolume(float newVolume) {
 		g_AudioMan.ChangeSoundContainerPlayingChannelsVolume(this, newVolume);
 	}
 	m_Volume = newVolume;
+	WorldStateSoundProtocol::Event event; event.Type = WorldStateSoundProtocol::Action::Volume;
+	event.Gain = m_Volume; GetWorldStateSoundCapture().Command(this, event);
 }
 
 void SoundContainer::SetPitch(float newPitch) {
-	m_Pitch = std::clamp(newPitch, 0.125F, 8.0F);
+	SetNetworkPitch(std::clamp(newPitch, 0.125F, 8.0F));
+}
+
+void SoundContainer::SetNetworkPitch(float newPitch) {
+	if (!std::isfinite(newPitch) || newPitch <= 0 || newPitch > 64) return;
+	m_Pitch = newPitch;
+	WorldStateSoundProtocol::Event event; event.Type = WorldStateSoundProtocol::Action::Pitch;
+	event.Rate = m_Pitch; GetWorldStateSoundCapture().Command(this, event);
 	if (!g_AudioMan.IsAudioEnabled()) {
 		auto& registry = HeadlessSounds(); std::scoped_lock lock(registry.Mutex);
 		if (const auto found = registry.Sounds.find(this); found != registry.Sounds.end())
@@ -428,6 +463,8 @@ void SoundContainer::SetPitch(float newPitch) {
 void SoundContainer::SetPaused(bool paused) {
 	if (paused != m_Paused) {
 		m_Paused = paused;
+		WorldStateSoundProtocol::Event event; event.Type = WorldStateSoundProtocol::Action::Pause;
+		event.Paused = paused; GetWorldStateSoundCapture().Command(this, event);
 		if (!g_AudioMan.IsAudioEnabled()) {
 			auto& registry = HeadlessSounds(); std::scoped_lock lock(registry.Mutex);
 			if (const auto found = registry.Sounds.find(this); found != registry.Sounds.end())
@@ -463,10 +500,13 @@ bool SoundContainer::Play(int player) {
 			timeline.Pause(now, m_Paused); timeline.PauseGroup(now, m_BusRouting == SFX && registry.SFXPaused);
 			bool played = false;
 			const float variation = 1.0F + std::abs(m_PitchVariation);
-			for (double length : lengths) {
+			for (std::size_t index = 0; index < lengths.size(); ++index) {
+				const double length = lengths[index];
 				if (playback.Count(now) >= c_MaxPlayingSoundsPerContainer) break;
 				const float factor = variation == 1 ? 1 : RandomNum(1.0F / variation, variation);
-				played = timeline.Add(now, length, m_Loops, m_Pitch * factor * registry.Pitch[m_BusRouting]) || played;
+				if (timeline.Add(now, length, m_Loops, m_Pitch * factor * registry.Pitch[m_BusRouting])) {
+					played = true; CaptureNetworkPlay(*selected[index], factor, player);
+				}
 			}
 			if (played) m_TopLevelSoundSet->SelectNextSounds();
 			else if (!playback.Playing(now)) registry.Sounds.erase(this);
@@ -478,6 +518,8 @@ bool SoundContainer::Play(int player) {
 }
 
 bool SoundContainer::Stop(int player) {
+	WorldStateSoundProtocol::Event event; event.Player = static_cast<std::int8_t>(player);
+	GetWorldStateSoundCapture().Command(this, event);
 	if (!g_AudioMan.IsAudioEnabled()) {
 		const bool playing = IsBeingPlayed();
 		auto& registry = HeadlessSounds(); std::scoped_lock lock(registry.Mutex); registry.Sounds.erase(this); return playing;
@@ -493,6 +535,8 @@ bool SoundContainer::Restart(int player) {
 void SoundContainer::FadeOut(int fadeOutTime) {
 	if (!m_WasFadedOut && IsBeingPlayed()) {
 		m_WasFadedOut = true;
+		WorldStateSoundProtocol::Event event; event.Type = WorldStateSoundProtocol::Action::Fade;
+		event.FadeMilliseconds = static_cast<std::uint32_t>(std::max(0, fadeOutTime)); GetWorldStateSoundCapture().Command(this, event);
 		if (!g_AudioMan.IsAudioEnabled()) {
 			auto& registry = HeadlessSounds(); std::scoped_lock lock(registry.Mutex);
 			if (const auto found = registry.Sounds.find(this); found != registry.Sounds.end())

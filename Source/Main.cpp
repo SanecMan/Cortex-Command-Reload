@@ -45,6 +45,8 @@
 #include "SoundContainer.h"
 #include "SoundSet.h"
 #include "SoundPlaybackTimeline.h"
+#include "WorldStateSoundCapture.h"
+#include "WorldStateSoundPlayback.h"
 #include "UInputMan.h"
 #include "PerformanceMan.h"
 #include "FrameMan.h"
@@ -148,6 +150,7 @@ namespace {
 	std::unique_ptr<WorldStateClientSession> worldStateClient;
 	std::unique_ptr<WorldStateBuyMenu> worldStateBuyMenu;
 	WorldStateClientReplica worldStateClientReplica;
+	WorldStateSoundPlayback worldStateSoundPlayback;
 	std::ofstream worldStateClientLog;
 	std::uint32_t worldStateClientLastObservedSnapshotCount = 0;
 	std::uint32_t worldStateClientLastLoggedSnapshotCount = 0;
@@ -297,6 +300,9 @@ namespace {
 
 	struct DebugRunState {
 		bool NetworkScreenTextVerified = false;
+		bool EnableDebugAudio = false;
+		std::uint64_t NetworkSoundFixture = 0;
+		bool NetworkSoundPlayVerified = false, NetworkSoundStopVerified = false;
 		bool Enabled = false;
 		bool StressStarted = false;
 		bool PerformanceCountersObserved = false;
@@ -440,6 +446,7 @@ namespace {
 		DebugRunState& state = GetDebugRunState();
 		for (int i = 1; i < argc; ++i) {
 			const std::string_view argument(argv[i]);
+			if (argument == "-debug-run-audio") state.EnableDebugAudio = true;
 			if (argument == "-debug-overlay") state.OverlayCaptureEnabled = true;
 			if (argument == "-debug-run-preflight-only") state.PreflightOnly = true;
 			if (argument == "-debug-run-world-state-purchase") state.RequestPurchaseTest = true;
@@ -1547,6 +1554,7 @@ namespace {
 		std::unique_ptr<SoundContainer> confirm(preset ? dynamic_cast<SoundContainer*>(preset->Clone()) : nullptr);
 		const float flacLength = confirm ? confirm->GetLength(Type::Any) : 0;
 		const bool soundless = !g_AudioMan.IsAudioEnabled() && !container.IsBeingPlayed();
+		GetWorldStateSoundCapture().Begin();
 		bool playbackPassed = TestSoundPlaybackTimeline() && confirm && confirm->Play() && confirm->IsBeingPlayed();
 		if (playbackPassed) {
 			confirm->SetSoundOverlapMode(SoundContainer::IGNORE_PLAY);
@@ -1569,8 +1577,47 @@ namespace {
 			playbackPassed = confirm->Play() && confirm->Restart() && playbackPassed;
 			confirm->Reset(); playbackPassed = !confirm->IsBeingPlayed() && playbackPassed;
 		}
+		bool captureOverflow = false;
+		std::vector<WorldStateSoundProtocol::Event> captured;
+		for (;;) {
+			auto batch = GetWorldStateSoundCapture().Drain(captureOverflow);
+			if (batch.empty()) break;
+			for (auto& event : batch) captured.push_back(std::move(event));
+		}
+		GetWorldStateSoundCapture().End();
+		std::array<std::size_t, 7> actionCounts{};
+		bool capturePassed = !captureOverflow;
+		for (const auto& event : captured) {
+			++actionCounts[static_cast<std::size_t>(event.Type)];
+			if (event.Type == WorldStateSoundProtocol::Action::Play)
+				capturePassed = capturePassed && event.Module == "Base.rte" && !event.Resource.empty() && event.Container && event.Voice;
+		}
+		for (auto action : {WorldStateSoundProtocol::Action::Play, WorldStateSoundProtocol::Action::Stop,
+		    WorldStateSoundProtocol::Action::Volume, WorldStateSoundProtocol::Action::Pitch,
+		    WorldStateSoundProtocol::Action::Pause, WorldStateSoundProtocol::Action::Fade})
+			capturePassed = capturePassed && actionCounts[static_cast<std::size_t>(action)] > 0;
+		WorldStateSoundPlayback replicaSound;
+		WorldStateSoundProtocol::Event replicaPlay;
+		replicaPlay.Type = WorldStateSoundProtocol::Action::Play; replicaPlay.Container = 123; replicaPlay.Voice = 456;
+		replicaPlay.Module = "Base.rte"; replicaPlay.Resource = "Sounds/GUIs/SlicePicked.flac";
+		replicaPlay.Immobile = true; replicaPlay.Loops = -1; replicaPlay.OffsetX = 3; replicaPlay.OffsetY = -4;
+		bool replicaPassed = replicaSound.Apply(1, 0, std::vector{replicaPlay}) == 1 && replicaSound.HasVoice(456);
+		WorldStateSoundProtocol::Event replicaStop; replicaStop.Container = 123;
+		replicaPassed = replicaSound.Apply(1, 0, std::vector{replicaStop}) == 1 && replicaSound.Size() == 0 && replicaPassed;
+		replicaPassed = replicaSound.Apply(1, 0, std::vector{replicaPlay}) == 1 && replicaPassed;
+		replicaSound.Apply(2, 0, {}); replicaPassed = replicaSound.Size() == 0 && replicaPassed;
+		replicaPlay.Player = 3; replicaPassed = replicaSound.Apply(2, 0, std::vector{replicaPlay}) == 0 && replicaPassed;
+		replicaPlay.Player = -1; replicaPlay.Resource = "../Sounds.ini";
+		replicaPassed = replicaSound.Apply(2, 0, std::vector{replicaPlay}) == 0 && replicaPassed;
+		SoundContainer replicatedPitch; replicatedPitch.SetNetworkPitch(16);
+		replicaPassed = replicatedPitch.GetPitch() == 16 && replicaPassed;
+		replicatedPitch.SetPitch(16); replicaPassed = replicatedPitch.GetPitch() == 8 && replicaPassed;
+		replicaSound.Clear();
+		capturePassed = replicaPassed && capturePassed;
+		log << "headless_sound_replica=" << (replicaPassed ? "passed" : "failed") << '\n';
+		log << "headless_sound_capture=" << (capturePassed ? "passed" : "failed") << " events=" << captured.size() << '\n';
 		std::error_code error; const bool removed = std::filesystem::remove(path, error) && !error;
-		const bool passed = playbackPassed && file && emptySafe && soundless && any == 100 && next == 100 && parallel[0] == 100 && parallel[1] == 100 &&
+		const bool passed = capturePassed && playbackPassed && file && emptySafe && soundless && any == 100 && next == 100 && parallel[0] == 100 && parallel[1] == 100 &&
 		    alternativeLength == 100 && missingLength == 0 && flacLength > 0 && std::isfinite(flacLength) && removed;
 		log << "headless_sound_length_smoke=" << (passed ? "passed" : "failed") << " wav_ms=" << any << " next_ms=" << next
 		    << " alternative_ms=" << alternativeLength << " missing_ms=" << missingLength << " flac_ms=" << flacLength
@@ -2107,6 +2154,7 @@ int RunPersistentHeadlessServer(const ServerConfiguration& config) {
 			success = session.Start(config.ListenAddress, config.Port, config.Players, UTF8::PathToString(logDirectory / "WorldStateServer.log"), false, false);
 		}
 	}
+	std::unique_ptr<SoundContainer> diagnosticSound;
 	std::uint32_t tick = 0;
 	if (success) log("INFO ready port=" + std::to_string(session.GetBoundPort()) + " video_initialized=" + std::to_string(SDL_WasInit(SDL_INIT_VIDEO) != 0));
 	else log("ERROR startup failed");
@@ -2114,7 +2162,18 @@ int RunPersistentHeadlessServer(const ServerConfiguration& config) {
 		for (const std::string& command : console.Poll()) {
 			if (command == "quit" || command == "exit" || command == "stop") ServerConsole::StopRequested.store(true);
 			else if (command == "status") log("INFO status tick=" + std::to_string(tick) + " clients=" + std::to_string(session.GetConnectedClientCount()) + " actors=" + std::to_string(g_MovableMan.GetActorCount()));
-			else if (command == "debug-screen-text") {
+			else if (command == "debug-sound") {
+				if (!diagnosticSound) {
+					const Entity* preset = g_PresetMan.GetEntityPreset("SoundContainer", "Confirm", "Base.rte");
+					diagnosticSound.reset(preset ? dynamic_cast<SoundContainer*>(preset->Clone()) : nullptr);
+					if (diagnosticSound) diagnosticSound->SetLoopSetting(-1);
+				}
+				const bool played = diagnosticSound && diagnosticSound->Play();
+				log(played ? "INFO debug_sound=playing" : "ERROR debug_sound=unavailable");
+			} else if (command == "debug-sound-stop") {
+				if (diagnosticSound) diagnosticSound->Stop();
+				log("INFO debug_sound=stopped");
+			} else if (command == "debug-screen-text") {
 				if (Activity* activity = g_ActivityMan.GetActivity()) activity->ResetMessageTimer();
 				g_FrameMan.ClearScreenText(0);
 				g_FrameMan.SetScreenText("Network HUD: Привет, Ёжик!", 0, 250, 60000, true);
@@ -2174,6 +2233,7 @@ int RunPersistentHeadlessServer(const ServerConfiguration& config) {
 		g_TimerMan.UpdateSim();
 		StepHeadlessSimulation(&session, ++tick);
 	}
+	diagnosticSound.reset();
 	session.Stop();
 	g_ThreadMan.GetPriorityThreadPool().wait_for_tasks();
 	g_ThreadMan.GetBackgroundThreadPool().wait_for_tasks();
@@ -2224,7 +2284,7 @@ void InitializeManagers() {
 	g_PerformanceMan.Initialize();
 	logDebugInitializationStage("performance");
 
-	if (!System::IsDebugRun() && g_AudioMan.Initialize()) {
+	if ((!System::IsDebugRun() || GetDebugRunState().EnableDebugAudio) && g_AudioMan.Initialize()) {
 		g_GUISound.Initialize();
 		g_MusicMan.Initialize();
 	}
@@ -2519,6 +2579,7 @@ void RunMenuLoop() {
 	// Starting local content from a paused network game must stop snapshot replication.
 	if (!menuConnectionActivated && g_ActivityMan.ActivitySetToRestart() && worldStateClient) {
 		worldStateClient->Disconnect();
+		worldStateSoundPlayback.Clear();
 		worldStateClient.reset();
 		MainMenuGUI::DisconnectedNetworkSession = false;
 		worldStateClientReplica.Forget();
@@ -2575,6 +2636,7 @@ void RunGameLoop() {
 		if (worldStateClient) worldStateClient->Update();
 		if (worldStateClient && worldStateClient->HasSnapshot() && !worldStateClient->GetConnectionError().empty() && !MainMenuGUI::DisconnectedNetworkSession) {
 			MainMenuGUI::DisconnectedNetworkSession = true;
+			worldStateSoundPlayback.Clear();
 			const std::string reason = worldStateClient->GetConnectionError();
 			if (worldStateClientLog.is_open()) worldStateClientLog << "connection_lost=" << reason << '\n' << std::flush;
 			g_TimerMan.PauseSim(true);
@@ -2622,6 +2684,7 @@ void RunGameLoop() {
 						worldStateClientAppliedSceneRevision = snapshot.SceneRevision;
 						worldStateClientReplica.Forget();
 						worldStateSceneTransitionQueued = true;
+						worldStateSoundPlayback.Clear();
 						DebugRunState& debugRunState = GetDebugRunState();
 						debugRunState.WorldStateTransitionObserved = !debugRunState.RequireWorldStateTransition ||
 						    (snapshot.ActivityPreset == debugRunState.ExpectedTransitionActivity && snapshot.ScenePreset == debugRunState.ExpectedTransitionScene);
@@ -2830,6 +2893,27 @@ void RunGameLoop() {
 			}
 			if (worldStateReplicaClient && !worldStateSceneTransitionQueued) {
 				worldStateClientReplica.AdvanceInterpolation();
+				const auto& soundSnapshot = worldStateClient->GetLatestSnapshot();
+				const auto soundEvents = worldStateClient->DrainSoundEvents(soundSnapshot.SceneRevision);
+				const auto soundsApplied = worldStateSoundPlayback.Apply(soundSnapshot.SceneRevision, worldStateClient->GetAssignedPlayerSlot(), soundEvents);
+				if (System::IsDebugRun()) {
+					auto& state = GetDebugRunState();
+					for (const auto& event : soundEvents) {
+						if (!state.NetworkSoundPlayVerified && event.Type == WorldStateSoundProtocol::Action::Play &&
+						    event.Module == "Base.rte" && event.Resource == "Sounds/GUIs/SlicePicked.flac" && event.Loops == -1 &&
+						    worldStateSoundPlayback.HasVoice(event.Voice)) {
+							state.NetworkSoundFixture = event.Container; state.NetworkSoundPlayVerified = true;
+							state.Log << "world_state_sound_play=passed audio_enabled=" << g_AudioMan.IsAudioEnabled() << '\n' << std::flush;
+						}
+						if (state.NetworkSoundPlayVerified && !state.NetworkSoundStopVerified && event.Type == WorldStateSoundProtocol::Action::Stop &&
+						    event.Container == state.NetworkSoundFixture && !worldStateSoundPlayback.HasContainer(event.Container)) {
+							state.NetworkSoundStopVerified = true;
+							state.Log << "world_state_sound_stop=passed\n" << std::flush;
+						}
+					}
+				}
+				if (!soundEvents.empty() && worldStateClientLog.is_open())
+					worldStateClientLog << "sound_events_received=" << soundEvents.size() << " applied=" << soundsApplied << " active=" << worldStateSoundPlayback.Size() << '\n';
 				const int slot = worldStateClient->GetAssignedPlayerSlot();
 				const bool activeView = slot >= Players::PlayerOne && slot < Players::MaxPlayerCount &&
 				    worldStateClient->GetLatestSnapshot().Players[slot].ActiveHuman;
@@ -3560,7 +3644,8 @@ int RunCortexCommand(int argc, char** argv) {
 		}
 		if (!worldStateClient->HasSnapshot() || !worldStateClient->IsConnected()) {
 			std::cerr << "[NETWORK] " << (worldStateClient->GetConnectionError().empty() ? "No valid world snapshot arrived within 15 seconds" : worldStateClient->GetConnectionError()) << '\n';
-			worldStateClient.reset();
+			worldStateSoundPlayback.Clear();
+		worldStateClient.reset();
 			DestroyManagers();
 			allegro_exit();
 			SDL_Quit();
@@ -3581,7 +3666,8 @@ int RunCortexCommand(int argc, char** argv) {
 		std::string failureReason;
 		if (!QueueWorldStateActivity(snapshot, failureReason)) {
 			std::cerr << "[NETWORK] " << failureReason << "; verify installed .rte modules\n";
-			worldStateClient.reset();
+			worldStateSoundPlayback.Clear();
+		worldStateClient.reset();
 			DestroyManagers();
 			allegro_exit();
 			SDL_Quit();
@@ -3694,6 +3780,7 @@ int RunCortexCommand(int argc, char** argv) {
 	}
 	if (worldStateClient) {
 		worldStateClient->Disconnect();
+		worldStateSoundPlayback.Clear();
 		worldStateClient.reset();
 		g_FrameMan.SetClientGUIRenderer({});
 		worldStateBuyMenu.reset();

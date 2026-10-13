@@ -1,13 +1,16 @@
 #include "WorldStateSoundProtocol.h"
 #include "WorldStateSoundQueue.h"
+#include "WorldStateSoundCapture.h"
 #include <iostream>
+#include <thread>
+#include <unordered_set>
 
 int main() {
     using namespace RTE::WorldStateSoundProtocol;
     Event play;
     play.Type = Action::Play; play.Container = 7; play.Voice = 9;
     play.Module = "Мод.rte"; play.Resource = "Sounds/Ёжик.flac";
-    play.Loops = -1; play.Priority = 256; play.Bus = 2;
+    play.OffsetX = 3; play.OffsetY = -4; play.Loops = -1; play.Priority = 256; play.Bus = 2;
     play.Immobile = true; play.Paused = true;
     std::vector<Event> source{play};
     for (auto action : {Action::Stop, Action::Position, Action::Volume, Action::Pitch, Action::Pause, Action::Fade}) {
@@ -63,7 +66,7 @@ int main() {
     maximum.push_back(play);
     if (!check(!Encode(maximum, bytes), "batch limit")) return 1;
     Event stop; stop.Container = 1;
-    const std::vector<std::uint8_t> golden{0x43,0x43,0x41,0x31,1,0,1,0,1,1,0,0,0,0,0,0,0,0xFF};
+    const std::vector<std::uint8_t> golden{0x43,0x43,0x41,0x31,2,0,1,0,1,1,0,0,0,0,0,0,0,0xFF};
     if (!check(Encode(std::vector<Event>{stop}, bytes) && bytes == golden, "fixed little-endian layout")) return 1;
     RTE::WorldStateSoundQueue queue;
     if (!check(queue.Push(2, 10, source) && queue.Drain(1).empty() && queue.Size() == source.size(), "future scene retained")) return 1;
@@ -86,6 +89,43 @@ int main() {
     queue.Clear();
     if (!check(queue.Push(UINT32_MAX, 1, {stop}) && queue.Push(1, 2, {stop}) && queue.Drain(1).size() == 1 && queue.Size() == 0, "scene wrap")) return 1;
     if (!check(!queue.Push(0, 1, {stop}) && !queue.Push(1, 0, {stop}), "queue identity validation")) return 1;
+    RTE::WorldStateSoundCapture capture;
+    int firstSource = 0;
+    bool overflow = false;
+    capture.Play(&firstSource, play);
+    if (!check(capture.Drain(overflow).empty() && !overflow, "disabled capture")) return 1;
+    capture.Begin(); capture.Play(&firstSource, play); capture.Play(&firstSource, play);
+    Event command; command.Type = Action::Position; command.X = 42;
+    capture.Command(&firstSource, command); capture.Release(&firstSource); capture.Play(&firstSource, play);
+    const auto captured = capture.Drain(overflow);
+    if (!check(!overflow && captured.size() == 5 && captured[0].Container == captured[1].Container &&
+        captured[0].Voice != captured[1].Voice && captured[2].Container == captured[0].Container &&
+        captured[3].Type == Action::Stop && captured[4].Container != captured[0].Container &&
+        captured[0].Resource == play.Resource && captured[0].OffsetY == play.OffsetY, "capture selection and source lifetime")) return 1;
+    for (std::size_t index = 0; index <= RTE::WorldStateSoundCapture::MaxPending; ++index) capture.Command(&firstSource, command);
+    capture.Drain(overflow);
+    if (!check(overflow, "capture overflow detected")) return 1;
+    capture.End();
+    if (!check(capture.Drain(overflow).empty() && !overflow, "capture shutdown clears allocations")) return 1;
+    capture.Begin(); capture.Play(&firstSource, play); capture.Play(&firstSource, play); capture.StopAll();
+    const auto stopped = capture.Drain(overflow);
+    if (!check(stopped.size() == 3 && stopped[2].Type == Action::Stop && stopped[2].Container == stopped[0].Container, "capture global stop")) return 1;
+    capture.End(); capture.Begin();
+    int threadSources[8]{};
+    std::vector<std::thread> threads;
+    for (int index = 0; index < 8; ++index)
+        threads.emplace_back([&, index] { for (int count = 0; count < 200; ++count) capture.Play(&threadSources[index], play); });
+    for (auto& thread : threads) thread.join();
+    std::unordered_set<std::uint64_t> voiceIDs;
+    for (;;) {
+        const auto batch = capture.Drain(overflow);
+        if (!check(!overflow, "concurrent capture capacity")) return 1;
+        if (batch.empty()) break;
+        for (const auto& event : batch) if (!check(voiceIDs.insert(event.Voice).second, "concurrent capture voice identity")) return 1;
+    }
+    if (!check(voiceIDs.size() == 1600, "concurrent capture count")) return 1;
+    capture.End();
+    std::cout << "sound_capture_test=passed\n";
     std::cout << "sound_protocol_test=passed\nsound_queue_test=passed\n";
     return 0;
 }

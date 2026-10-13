@@ -1,6 +1,50 @@
 # World-state protocol
 
-## Sound payload preparation
+## v21 sound capture and playback
+
+The current development sources capture actual SoundContainer playback decisions
+through `WorldStateSoundCapture`, including the selected resource and random pitch
+factor. Both the metadata-only headless path and the graphical FMOD path capture
+Play. Container setters capture position, volume, pitch, pause and fade; Stop and
+container reset capture lifecycle termination. Capture uses local pointer lookup
+keys but emits monotonically assigned 64-bit container/voice IDs. It is disabled
+outside a running world-state host. The journal is mutex-protected and bounded to
+8,192 pending events; overflow or failed batch send explicitly stops the network
+session. Batches contain at most 100 events to fit worst-case resource names.
+
+The server update drains the journal into reliable scene-scoped packets. The
+client gameplay loop drains packets into `WorldStateSoundPlayback`, resolving
+resources only inside loaded module roots (including a canonical-path containment
+check). Missing/invalid files do not abort the game. It maintains at most 2,048
+local voices, applies targeted player routing and container controls, and clears
+voices on scene transition, disconnect or reconnect. Global StopAll and graphical
+restart/stop calls also emit lifecycle termination. The network-only pitch setter
+retains server-selected variation outside the normal setter range; Lua's existing
+SetPitch bounds remain unchanged.
+
+v21 adds two explicit float offset coordinates to Play (inner schema version 2).
+Position controls remain base-container coordinates, allowing the client to retain
+each selected sound's offset. Mixed v20/v21 peers must be rejected. The standalone
+MSVC protocol, queue and capture tests have passed, including source address reuse,
+voice identity uniqueness, selected Unicode resources and bounded capture overflow.
+
+Windows MSVC protocol/queue/capture tests passed, including 1,600 concurrent Play
+events from eight threads with unique voice identities. Both Meson executables
+compiled and linked. `SoundCaptureV21Headless` passed in 18.66 seconds: two external
+clients, 143 captured sound events, local replica playback/stop/scene cleanup and
+no SDL video initialization. `SoundCaptureV21Menu` passed with two clients in
+28.29 seconds, confirming network-selected playback and stop without an audio
+device. `SoundCaptureV21FMOD` passed with two graphical clients in 30.23 seconds;
+both reported `audio_enabled=1`, successful Play and successful Stop. Each menu
+run observed 62 further server ticks after client disconnect. These verify FMOD
+channel startup/lifecycle, not recorded waveform quality or human listening.
+
+Remaining audio coverage includes late-join loop reconstruction, global bus pause
+and pitch changes, dynamic pan changes and actual mix/output comparisons. Native
+Final delivery and Linux validation of v21 are still pending; the root binaries
+remain the previous validated v20 pair until delivery checks succeed.
+
+## Sound payload preparation (v20 historical checks)
 
 `WorldStateSoundProtocol.h` defines a separate bounded inner payload schema for
 Play, Stop, Position, Volume, Pitch, Pause and Fade. It uses explicit integer

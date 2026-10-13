@@ -13,6 +13,8 @@ param(
     [switch]$CheckInventory,
     [switch]$CheckMenuConnection,
     [switch]$CheckScreenText,
+    [switch]$CheckSound,
+    [switch]$EnableAudio,
     [ValidateRange(60, 600)]
     [int]$TimeoutSeconds = 360
 )
@@ -83,6 +85,7 @@ try {
     }
     Write-Host "Dedicated server ready on $port; connecting two separate clients."
     if ($CheckScreenText) { $server.StandardInput.WriteLine('debug-screen-text'); $server.StandardInput.Flush() }
+    $audioArguments = @(); if ($EnableAudio) { $audioArguments += '-debug-run-audio' }
     $clients = [Collections.Generic.List[Diagnostics.Process]]::new()
     $displayedStockPriceObserved = $false
     foreach ($index in 1..2) {
@@ -94,10 +97,12 @@ try {
 		if ($CheckInventory) { $purchaseArguments = @('-debug-run-world-state-inventory') }
         $client = Start-Process -FilePath $clientBinary -WorkingDirectory $gameDirectory -WindowStyle Hidden -PassThru -ArgumentList (@(
             '-debug-run','600','-debug-run-output',"$OutputPrefix-Client$index",$(if ($CheckMenuConnection) { '-debug-run-menu-connect' } else { '-world-state-client' }),'127.0.0.1',"$port"
-        )+$purchaseArguments)
+        )+$purchaseArguments+$audioArguments)
         $processes.Add($client)
         $clients.Add($client)
     }
+    $soundStarted = $false
+    $soundStopped = $false
     $screenTextApplied = $false
     $screenTextFixtureTimer = [Diagnostics.Stopwatch]::StartNew()
     $fundsChanged = $false
@@ -115,6 +120,20 @@ try {
             foreach ($index in 1..2) {
                 $screenTextReport = Join-Path $gameDirectory "ScreenShots\$OutputPrefix-Client$index\DebugRun.log"
                 $screenTextApplied = $screenTextApplied -or (Read-Report $screenTextReport) -match '(?m)^world_state_screen_text_received=passed'
+            }
+        }
+        if ($CheckSound) {
+            $soundReady = $true; $soundPlayed = $true
+            foreach ($index in 1..2) {
+                $clientOutput = Join-Path $gameDirectory "ScreenShots\$OutputPrefix-Client$index"
+                $soundReady = $soundReady -and ((Read-Report (Join-Path $clientOutput 'WorldStateClient.log')) -match '(?m)^snapshot=')
+                $soundPlayed = $soundPlayed -and ((Read-Report (Join-Path $clientOutput 'DebugRun.log')) -match '(?m)^world_state_sound_play=passed')
+            }
+            if (!$soundStarted -and $soundReady) {
+                $server.StandardInput.WriteLine('debug-sound'); $server.StandardInput.Flush(); $soundStarted=$true
+            }
+            if ($soundStarted -and !$soundStopped -and $soundPlayed) {
+                $server.StandardInput.WriteLine('debug-sound-stop'); $server.StandardInput.Flush(); $soundStopped=$true
             }
         }
         Check-Time
@@ -218,6 +237,9 @@ try {
         if ($clientReport -match "(?m)^buy_menu_displayed_cost=$expectedPolicyCost\r?`$") { $displayedStockPriceObserved = $true }
         if ($clientReport -notmatch '(?m)^result=passed' -or $clientNetwork -notmatch '(?m)^client_local_simulation_ticks=0' -or
             $clientNetwork -notmatch '(?m)^snapshot=\d+.*missing_presets=0' -or $clientNetwork -match 'missing_presets=[1-9]') { throw 'Client replica checks failed.' }
+        if ($CheckSound -and (!$soundStarted -or !$soundStopped -or $clientReport -notmatch '(?m)^world_state_sound_play=passed' -or
+            $clientReport -notmatch '(?m)^world_state_sound_stop=passed')) { throw 'Network sound playback/lifecycle fixture failed.' }
+        if ($EnableAudio -and $CheckSound -and $clientReport -notmatch '(?m)^world_state_sound_play=passed audio_enabled=1') { throw 'FMOD playback was not enabled.' }
         if ($CheckTeamFunds -and (!$fundsChanged -or $clientReport -notmatch '(?m)^world_state_team_funds_presentation=passed' -or
             $clientNetwork -notmatch 'funds_team0=12345\.250000 funds_team1=-17\.500000')) { throw 'Client team funds replication failed.' }
     }

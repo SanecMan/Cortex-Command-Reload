@@ -16,6 +16,7 @@
 #include "UInputMan.h"
 #include "System/UTF8.h"
 #include "System/WorldStateTerrainTest.h"
+#include "WorldStateSoundCapture.h"
 
 #include <algorithm>
 #include <utility>
@@ -71,6 +72,7 @@ bool WorldStateServerSession::Start(const std::string& bindAddress, unsigned sho
 	m_ReserveLocalPlayer = reserveLocalPlayer;
 	m_InputSlotsInUse[Players::PlayerOne] = reserveLocalPlayer;
 	m_ConnectedClients = 0;
+	GetWorldStateSoundCapture().Begin();
 	m_DebugTerrainMutationSmokeEnabled = false;
 	m_DebugTerrainMutationSmokeAttempted = false;
 	m_DebugTerrainMutationProbeLocated = false;
@@ -86,6 +88,7 @@ bool WorldStateServerSession::Start(const std::string& bindAddress, unsigned sho
 }
 
 void WorldStateServerSession::Stop() {
+	GetWorldStateSoundCapture().End();
 	g_SceneMan.SetWorldStateTerrainTrackingEnabled(false);
 	m_PendingTerrainPatches.clear();
 	m_LastTerrainSceneRevision = 0;
@@ -418,6 +421,19 @@ void WorldStateServerSession::Update(std::uint32_t simulationTick) {
 		return;
 	}
 	PollNetwork(simulationTick);
+	for (;;) {
+		bool overflow = false;
+		auto sounds = GetWorldStateSoundCapture().Drain(overflow);
+		if (overflow) {
+			Log("ERROR: sound capture overflow; stopping network session to avoid lost lifecycle commands");
+			Stop(); return;
+		}
+		if (sounds.empty()) break;
+		if (m_ConnectedClients && !SendSoundEvents(sounds)) {
+			Log("ERROR: captured sound batch send failed; stopping network session");
+			Stop(); return;
+		}
+	}
 	for (const auto& [clientAddress, player] : m_PlayerSlotByClient) {
 		g_UInputMan.ClearNetworkInputImpulse(player);
 	}

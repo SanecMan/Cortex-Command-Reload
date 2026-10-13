@@ -1128,3 +1128,25 @@ seconds. The purchase client's final screenshot was inspected and displayed
 Funds: 9500. At that RPC checkpoint, complete inventory replication and the
 visible remote BuyMenu were still outside the completed step. The client menu
 is now described above; complete inventory replication remains outstanding.
+## v21 network sound validation
+
+The development client now plays server-selected SoundContainer resources and
+applies their container controls. Use matching v21 client/server binaries and the
+same installed modules. Sound resources are resolved inside loaded module roots;
+missing resources are skipped rather than causing an assertion. Active loops that
+began before a client joined, global bus pause/pitch changes and dynamic pan updates
+are not yet reconstructed. See `WorldStateProtocol.md` for measured checks and limits.
+
+The automated two-client runner can exercise server-selected looping sound and
+its Stop event:
+
+```powershell
+.\Tools\RunDedicatedServerSmoke.ps1 -CheckMenuConnection -CheckSound
+.\Tools\RunDedicatedServerSmoke.ps1 -CheckMenuConnection -CheckSound -EnableAudio
+```
+
+`-EnableAudio` passes the opt-in `-debug-run-audio` flag to the diagnostic clients
+and requires both to report FMOD enabled. Ordinary diagnostics keep audio disabled.
+The server console provides `debug-sound` and `debug-sound-stop` for this disposable
+fixture. The runner waits for both worlds to load, then verifies Play/Stop on each
+client. It does not validate audio quality by listening or recording.
