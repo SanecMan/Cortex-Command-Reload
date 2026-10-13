@@ -6,6 +6,8 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "RTEA", "RTEA.vcxproj", "{A5
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "libluajit", "external\sources\LuaJIT-2.1\libluajit.vcxproj", "{9C341649-AA1F-35E8-81E3-228A6A09B2BB}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "RakNet", "external\sources\RakNet\RakNet.vcxproj", "{6533BDAE-0F0C-45E4-8FE7-ADD0F37FE063}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug Full|x64 = Debug Full|x64
@@ -15,6 +17,16 @@ Global
 		Profiling|x64 = Profiling|x64
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{6533BDAE-0F0C-45E4-8FE7-ADD0F37FE063}.Debug Full|x64.ActiveCfg = Debug|x64
+		{6533BDAE-0F0C-45E4-8FE7-ADD0F37FE063}.Debug Full|x64.Build.0 = Debug|x64
+		{6533BDAE-0F0C-45E4-8FE7-ADD0F37FE063}.Debug Minimal|x64.ActiveCfg = Debug|x64
+		{6533BDAE-0F0C-45E4-8FE7-ADD0F37FE063}.Debug Minimal|x64.Build.0 = Debug|x64
+		{6533BDAE-0F0C-45E4-8FE7-ADD0F37FE063}.Debug Release|x64.ActiveCfg = Release|x64
+		{6533BDAE-0F0C-45E4-8FE7-ADD0F37FE063}.Debug Release|x64.Build.0 = Release|x64
+		{6533BDAE-0F0C-45E4-8FE7-ADD0F37FE063}.Final|x64.ActiveCfg = Release|x64
+		{6533BDAE-0F0C-45E4-8FE7-ADD0F37FE063}.Final|x64.Build.0 = Release|x64
+		{6533BDAE-0F0C-45E4-8FE7-ADD0F37FE063}.Profiling|x64.ActiveCfg = Release|x64
+		{6533BDAE-0F0C-45E4-8FE7-ADD0F37FE063}.Profiling|x64.Build.0 = Release|x64
 		{A58C9DD7-8BC7-48DA-9E04-04D04F582BE3}.Debug Full|x64.ActiveCfg = Debug Full|x64
 		{A58C9DD7-8BC7-48DA-9E04-04D04F582BE3}.Debug Full|x64.Build.0 = Debug Full|x64
 		{A58C9DD7-8BC7-48DA-9E04-04D04F582BE3}.Debug Minimal|x64.ActiveCfg = Debug Minimal|x64

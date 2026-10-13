@@ -383,6 +383,29 @@ Lua HUD compatibility have not been verified by these runs.
 
 ## Portable headless startup check and Linux CI
 
+### Peer identity regression
+
+Run 38464747236 passed Linux software Cyrillic rasterization (54 foreground
+pixels, zero wrong-color pixels) and the build-tree server checks. Its extracted
+package check failed because one of two probe clients never established a
+session. The available logs did not record GUIDs, so the exact cause is unproven.
+Inspection found POSIX RakNet generated identities only from `gettimeofday`, and
+the client ignored `ID_ALREADY_CONNECTED`, which can hide an identity conflict
+until timeout. Generation now uses a process seed with OS entropy and a unique
+process-local atomic sequence; the client reports duplicate-identity rejection.
+This is a peer identifier, not an authentication token.
+
+`Tools/RakNetGuidTest.cpp` passed 16,000 identities from eight concurrent threads
+on Windows. `Tools/check_peer_guid_processes.py` passed 4,000 identities from four
+simultaneous processes. The rebuilt Windows RakNet library and Meson frontends
+passed headless startup/two-client checks in 19.83 seconds (134 further server
+ticks) and graphical menu/message checks in 28.53 seconds (62 ticks).
+Linux package verification must be repeated after this change.
+
+The Windows solution now builds its RakNet source project as a dependency.
+Meson with prebuilt libraries still requires rebuilding that library when its
+source changes; the tracked release library is updated with this identity fix.
+
 `Tools/run_server_smoke.py` uses only Python's standard library and runs on
 Windows or Linux. From the content checkout, run:
 

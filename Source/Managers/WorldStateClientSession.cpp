@@ -92,6 +92,7 @@ void WorldStateClientSession::Update() {
 			continue;
 		}
 		switch (packet.Identifier) {
+			case ID_ALREADY_CONNECTED: m_ConnectionError = "The server rejected a duplicate peer identity. Reconnect to create a new peer."; break;
 			case ID_CONNECTION_ATTEMPT_FAILED: m_ConnectionError = "The server did not accept the connection."; break;
 			case ID_NO_FREE_INCOMING_CONNECTIONS: m_ConnectionError = "The server is full."; break;
 			case ID_CONNECTION_BANNED: m_ConnectionError = "The server rejected this client (banned)."; break;
