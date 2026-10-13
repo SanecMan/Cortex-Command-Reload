@@ -211,6 +211,30 @@ machine, and the separate Linux host remains disabled at the user's request.
 **The Linux workflow has not been dispatched or its build/runtime verified.**
 The workflow is prepared infrastructure, not evidence of Linux completion.
 
+## Tracy build-option consistency
+
+For a Meson build with `-Dtracy_enable=false`, run:
+
+```sh
+python Tools/check_tracy_build.py --compile-commands build-server/compile_commands.json --expect disabled
+```
+
+This verifies compiler macro flags, including separate `-D` arguments and later
+`-U` overrides, and requires a TracyClient.cpp record. It does not preprocess
+source files or measure runtime speed. Linux CI runs it before compilation.
+The GCC Allegro build previously forced `TRACY_ENABLE` and exported it through
+its dependency even with the parent option disabled. That forced define was
+removed; the existing Tracy dependency now supplies the macro when enabled.
+No changes to `.rte`, Lua or the network protocol are involved.
+
+On Windows on 2026-10-13, Meson regeneration succeeded and needed no object
+rebuild for this GCC-only flag change. The real disabled compilation database
+passed (637 records), four flag-parser regression cases passed, and GCC C API
+object probes showed Tracy event references only in the enabled variant.
+`TracyDisabledServer` passed the portable headless smoke in 7.88 seconds with
+126 ticks and 17 actors. These are build-configuration/runtime smoke checks,
+not a full GCC/Linux compile or an FPS optimization benchmark.
+
 ## Portable build targets
 
 Meson provides `build_client` (default true) and `build_server` (default false).

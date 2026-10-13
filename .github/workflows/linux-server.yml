@@ -36,6 +36,8 @@ jobs:
           -Dbuild_client=false -Dbuild_server=true
           -Dinstall_runner=false -Dinstall_data=false
           -Dtracy_enable=false -Db_lto=false -Db_pch=false
+      - name: Verify profiler flags
+        run: python Tools/check_tracy_build.py --compile-commands build-server/compile_commands.json --expect disabled
       - name: Compile
         run: meson compile -C build-server -j 2
       - name: Check dependencies

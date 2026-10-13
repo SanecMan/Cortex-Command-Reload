@@ -80,7 +80,8 @@ subdir('addons/loadpng')
 compiler = meson.get_compiler('c')
 
 if compiler.get_argument_syntax() == 'gcc' 
-  c_args = ['-Wno-deprecated-declarations', '-DTRACY_ENABLE']
+  # Tracy's dependency supplies TRACY_ENABLE only when profiling is enabled.
+  c_args = ['-Wno-deprecated-declarations']
 else
 endif
 allegro_args = ['-DALLEGRO_NO_COMPATIBILITY']
