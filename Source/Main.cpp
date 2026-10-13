@@ -41,6 +41,8 @@
 #include "ConsoleMan.h"
 #include "SettingsMan.h"
 #include "PresetMan.h"
+#include "SoundContainer.h"
+#include "SoundSet.h"
 #include "UInputMan.h"
 #include "PerformanceMan.h"
 #include "FrameMan.h"
@@ -1452,6 +1454,47 @@ namespace {
 			<< " reconnect_reset=" << reset << " reconnected=" << reconnected
 			<< " version_refused=" << versionRefused << " compressed_version_refused=" << compressedVersionRefused
 			<< " version_retry=" << versionRetry << '\n' << std::flush;
+		return passed;
+	}
+
+	bool VerifyHeadlessSoundLengths(std::ofstream& log) {
+		using Type = SoundContainer::LengthOfSoundType;
+		const auto path = GetDebugRunState().OutputDirectory / UTF8::PathFromString("SoundLength_Ёжик.wav");
+		std::vector<std::uint8_t> wave;
+		auto id = [&](const char* text) { wave.insert(wave.end(), text, text + 4); };
+		auto number = [&](std::uint64_t value, std::size_t bytes) { WorldStateProtocol::Detail::WriteUnsigned(wave, value, bytes); };
+		id("RIFF"); number(1636, 4); id("WAVE"); id("fmt "); number(16, 4);
+		number(1, 2); number(1, 2); number(8000, 4); number(16000, 4); number(2, 2); number(16, 2);
+		id("data"); number(1600, 4); wave.resize(1644, 0); // 800 PCM frames = 100 ms.
+		std::ofstream file(path, std::ios::binary | std::ios::trunc);
+		file.write(reinterpret_cast<const char*>(wave.data()), static_cast<std::streamsize>(wave.size())); file.close();
+		SoundSet sounds;
+		sounds.AddSound(UTF8::PathToString(path), Vector(), 0, 0, false);
+		SoundContainer container; container.SetTopLevelSoundSet(sounds);
+		SoundContainer empty;
+		const bool emptySafe = empty.GetLength(Type::Any) == 0 && empty.GetLength(Type::NextPlayed) == 0;
+		const float any = container.GetLength(Type::Any), next = container.GetLength(Type::NextPlayed);
+		std::array<float, 2> parallel{};
+		std::thread first([&] { parallel[0] = container.GetLength(Type::Any); });
+		std::thread second([&] { parallel[1] = container.GetLength(Type::Any); });
+		first.join(); second.join();
+		auto alternativePath = path; alternativePath.replace_extension(".flac");
+		SoundSet alternativeSounds; alternativeSounds.AddSound(UTF8::PathToString(alternativePath), Vector(), 0, 0, false);
+		SoundContainer alternative; alternative.SetTopLevelSoundSet(alternativeSounds);
+		const float alternativeLength = alternative.GetLength(Type::Any);
+		SoundSet missingSounds; missingSounds.AddSound(UTF8::PathToString(path) + ".missing", Vector(), 0, 0, false);
+		SoundContainer missing; missing.SetTopLevelSoundSet(missingSounds);
+		const float missingLength = missing.GetLength(Type::Any);
+		const Entity* preset = g_PresetMan.GetEntityPreset("SoundContainer", "Confirm", "Base.rte");
+		std::unique_ptr<SoundContainer> confirm(preset ? dynamic_cast<SoundContainer*>(preset->Clone()) : nullptr);
+		const float flacLength = confirm ? confirm->GetLength(Type::Any) : 0;
+		const bool soundless = !g_AudioMan.IsAudioEnabled() && !container.IsBeingPlayed();
+		std::error_code error; const bool removed = std::filesystem::remove(path, error) && !error;
+		const bool passed = file && emptySafe && soundless && any == 100 && next == 100 && parallel[0] == 100 && parallel[1] == 100 &&
+		    alternativeLength == 100 && missingLength == 0 && flacLength > 0 && std::isfinite(flacLength) && removed;
+		log << "headless_sound_length_smoke=" << (passed ? "passed" : "failed") << " wav_ms=" << any << " next_ms=" << next
+		    << " alternative_ms=" << alternativeLength << " missing_ms=" << missingLength << " flac_ms=" << flacLength
+		    << " empty_safe=" << emptySafe << " soundless=" << soundless << " cleanup=" << removed << '\n' << std::flush;
 		return passed;
 	}
 
@@ -3031,6 +3074,7 @@ int RunCortexCommand(int argc, char** argv) {
 				GetDebugRunState().Log << "headless_content_preflight=" << (contentPassed ? "passed" : "failed")
 				    << " modules=" << g_PresetMan.GetTotalModuleCount() << " official_modules=" << g_PresetMan.GetOfficialModuleCount()
 				    << " video_initialized=" << (SDL_WasInit(SDL_INIT_VIDEO) != 0) << '\n' << std::flush;
+				if (contentPassed) contentPassed = VerifyHeadlessSoundLengths(GetDebugRunState().Log);
 				if (contentPassed && GetDebugRunState().HeadlessSimulationPreflight) {
 					// A remote slot can exist before its presentation menus are initialized.
 					// Reject such deliveries and hostile indices without reading player/team arrays.

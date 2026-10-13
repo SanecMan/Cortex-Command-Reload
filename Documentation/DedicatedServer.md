@@ -144,6 +144,47 @@ processes. Its final screenshot was inspected and showed the Ketanot Hills
 terrain rendered. Both root executables were updated by this verification;
 this is not a manual player-control or broad mod gameplay test.
 
+## Sound metadata without playback
+
+Headless content keeps sound file paths without FMOD playback handles.
+`SoundContainer::GetLength` now reads lengths lazily through a separate FMOD
+system configured with `NOSOUND_NRT`, `OPENONLY` and `ACCURATETIME`. It neither
+selects an audio device nor plays channels, and normal content loading does not
+create this metadata system. Accurate-time scanning may read compressed files
+on the first query; successful results use a bounded, mutex-protected cache.
+The temporary sound is released immediately. The regular AudioMan stays disabled.
+See FMOD's [mode definitions](https://www.fmod.com/docs/2.04/api/core-api-common.html).
+
+Property updates skip absent playback handles. Runtime `SoundSet::AddSound`
+retains metadata when playback is disabled, matching the INI reader. Empty
+containers return zero for both length selection modes, and unreadable metadata
+returns zero without dereferencing a null handle. Existing alternative-extension
+rules (`.wav`, `.ogg`, `.flac`) are used without changing the stored content path.
+The live playback path continues to use its existing sound handles.
+
+The automatic headless-content diagnostic now probes a generated 100 ms WAV
+under a Cyrillic path, both selection modes, parallel cached queries, extension
+fallback, an absent file, an empty container and the official Confirm FLAC.
+Its generated WAV is removed after a completed probe; normal repeated debug
+directory cleanup removes it if a run is interrupted. This supplies simulation
+length queries (including firearm reload timing), not replicated audio playback.
+
+Windows verification on 2026-10-14: repeated `HeadlessSoundLength` runs passed
+with an invalid SDL video/audio driver, 10 official modules, 60 simulation updates
+and `gpu_enabled=0`. WAV/next/alternative lengths were exactly 100 ms, Confirm
+FLAC was 204 ms, missing/empty cases were zero, parallel queries passed, and the
+generated file was removed. The first probe exposed a discarded runtime sound
+record and an empty-next-selection crash; those were corrected and rerun.
+`SoundLengthMenuPair` passed two real clients through the ordinary connection
+and inventory/wound fixture in 59.61 seconds, with 67 server updates after their
+disconnect. Linux metadata/runtime and actual audio event replication remain
+unverified; these durations are not controlled performance measurements.
+The rebuilt root MSBuild `Final|x64` game passed `SoundLengthNativeHeadless`
+with the same exact duration/cleanup checks and GPU disabled.
+`SoundLengthNativeFinalPair` then passed both menu-connected clients and the
+inventory/wound fixture in 32.29 seconds, with 63 server updates after disconnect.
+Both root executables were updated; protocol v18 and `.rte`/Lua APIs are unchanged.
+
 ## Wound replication (protocol v18)
 
 Protocol v18 adds a numbered `Wound` role to each rotating object's attachment

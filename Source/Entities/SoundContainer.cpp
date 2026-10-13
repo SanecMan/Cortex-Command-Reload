@@ -2,8 +2,62 @@
 
 #include "SoundSet.h"
 #include "SettingsMan.h"
+#include "UTF8.h"
+
+#include <mutex>
+#include <limits>
 
 using namespace RTE;
+
+namespace {
+	// Lazy metadata-only system. It never selects an output device or plays channels.
+	class SoundLengthReader {
+	public:
+		~SoundLengthReader() { if (m_System) m_System->release(); }
+		unsigned int Read(const std::string& path) {
+			if (path.empty()) return 0;
+			std::scoped_lock lock(m_Mutex);
+			std::filesystem::path nativePath = UTF8::PathFromString(path);
+			std::error_code error;
+			if (!std::filesystem::is_regular_file(nativePath, error)) {
+				for (const char* extension : c_SupportedAudioFormats) {
+					auto alternative = nativePath; alternative.replace_extension(extension);
+					error.clear();
+					if (std::filesystem::is_regular_file(alternative, error)) { nativePath = std::move(alternative); break; }
+				}
+			}
+			const std::string key = UTF8::PathToString(nativePath);
+			if (const auto found = m_Lengths.find(key); found != m_Lengths.end()) return found->second;
+			if (!m_System) {
+				FMOD::System* candidate = nullptr;
+				if (FMOD::System_Create(&candidate) != FMOD_OK) { if (candidate) candidate->release(); return 0; }
+				if (candidate->setOutput(FMOD_OUTPUTTYPE_NOSOUND_NRT) != FMOD_OK || candidate->init(1, FMOD_INIT_NORMAL, nullptr) != FMOD_OK) {
+					candidate->release(); return 0;
+				}
+				m_System = candidate;
+			}
+			FMOD::Sound* sound = nullptr;
+			if (m_System->createSound(key.c_str(), FMOD_OPENONLY | FMOD_ACCURATETIME, nullptr, &sound) != FMOD_OK || !sound) {
+				if (sound) sound->release(); return 0;
+			}
+			unsigned int length = 0;
+			const auto result = sound->getLength(&length, FMOD_TIMEUNIT_MS);
+			sound->release();
+			if (result != FMOD_OK || length == std::numeric_limits<unsigned int>::max()) return 0;
+			if (m_Lengths.size() >= 4096) m_Lengths.clear();
+			m_Lengths.emplace(key, length);
+			return length;
+		}
+	private:
+		std::mutex m_Mutex;
+		FMOD::System* m_System = nullptr;
+		std::unordered_map<std::string, unsigned int> m_Lengths;
+	};
+	unsigned int ReadSoundLengthWithoutPlayback(const std::string& path) {
+		static SoundLengthReader reader;
+		return reader.Read(path);
+	}
+}
 
 ConcreteClassInfo(SoundContainer, Entity, 50);
 
@@ -221,6 +275,7 @@ bool SoundContainer::HasAnySounds() const {
 }
 
 float SoundContainer::GetLength(LengthOfSoundType type) const {
+	if (!HasAnySounds()) return 0;
 	if (!m_SoundPropertiesUpToDate) {
 		// Todo - use a post-load fixup stage instead of lazily initializing shit everywhere... Eugh.
 		const_cast<SoundContainer*>(this)->UpdateSoundProperties();
@@ -232,8 +287,12 @@ float SoundContainer::GetLength(LengthOfSoundType type) const {
 
 	float lengthMilliseconds = 0.0f;
 	for (const SoundData* selectedSoundData: flattenedSoundData) {
-		unsigned int length;
-		selectedSoundData->SoundObject->getLength(&length, FMOD_TIMEUNIT_MS);
+		unsigned int length = 0;
+		if (selectedSoundData->SoundObject) {
+			if (selectedSoundData->SoundObject->getLength(&length, FMOD_TIMEUNIT_MS) != FMOD_OK) continue;
+		} else {
+			length = ReadSoundLengthWithoutPlayback(selectedSoundData->SoundFile.GetDataPath());
+		}
 		lengthMilliseconds = std::max(lengthMilliseconds, static_cast<float>(length));
 	}
 
@@ -344,6 +403,7 @@ FMOD_RESULT SoundContainer::UpdateSoundProperties() {
 	std::vector<SoundData*> flattenedSoundData;
 	m_TopLevelSoundSet->GetFlattenedSoundData(flattenedSoundData, false);
 	for (SoundData* soundData: flattenedSoundData) {
+		if (!soundData->SoundObject) continue; // Headless content retains metadata paths, not playback handles.
 		FMOD_MODE soundMode = (m_Loops == 0) ? FMOD_LOOP_OFF : FMOD_LOOP_NORMAL;
 		if (m_Immobile) {
 			soundMode |= FMOD_2D;

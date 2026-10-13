@@ -174,7 +174,7 @@ void SoundSet::SaveSoundSelectionCycleMode(Writer& writer, SoundSelectionCycleMo
 void SoundSet::AddSound(const std::string& soundFilePath, const Vector& offset, float minimumAudibleDistance, float attenuationStartDistance, bool abortGameForInvalidSound) {
 	ContentFile soundFile(soundFilePath.c_str());
 	FMOD::Sound* soundObject = soundFile.GetAsSound(abortGameForInvalidSound, false);
-	if (!soundObject) {
+	if (!soundObject && g_AudioMan.IsAudioEnabled()) {
 		return;
 	}
 
