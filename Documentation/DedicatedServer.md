@@ -172,6 +172,45 @@ Windows x64 Meson validation on 2026-10-08:
 The tests used the separate Meson build directory. Linux and broad mod visual/
 Lua HUD compatibility have not been verified by these runs.
 
+## Portable headless startup check and Linux CI
+
+`Tools/run_server_smoke.py` uses only Python's standard library and runs on
+Windows or Linux. From the content checkout, run:
+
+```sh
+python3 Tools/run_server_smoke.py --exe build-server/CortexCommandServer --game-dir .
+```
+
+It removes DISPLAY/WAYLAND_DISPLAY, forces invalid SDL video/audio drivers,
+loads a config with a Cyrillic file/log-directory path, checks UTF-8 server-name
+CLI override and the ephemeral-port override, rejects an invalid player limit,
+loads the Tutorial Activity, observes at least 120 additional simulation ticks
+with live actors and no clients, then requests a clean console shutdown. Known
+outputs within its own diagnostic directory are replaced on repeat runs; other
+workspace files are not removed. Results include `result.json` and stdout/stderr
+logs. On POSIX it additionally starts with stdin redirected from /dev/null and
+checks a clean SIGTERM shutdown, as needed for service/container execution.
+That branch is not exercised by a Windows run. The test does not check client
+connection or graphics/text glyph rendering.
+
+`.github/workflows/linux-server.yml` configures only the dedicated executable on
+Ubuntu 24.04 / GCC 13 with the checked-in SDL3/LuaJIT/Allegro sources. It is called
+by the normal CI workflow and supports manual/weekly runs. It runs the portable
+smoke without a display, saves failure diagnostics, and packages the executable,
+FMOD runtime, example config and server documentation. The package needs existing
+Data/ content and the Linux system runtime dependencies; it is not a standalone
+content distribution. Client rendering dependencies remain link dependencies of
+the common engine even in a server-only build.
+
+The Python syntax and workflow YAML syntax/structure were checked locally.
+`PortableServerWindows` passed repeatedly against the existing Windows server on
+2026-10-13; the final run took 7.88 seconds, observed 127 ticks and 17 actors,
+and verified `video_initialized=0`, UTF-8 config/CLI and invalid-config rejection.
+There is no installed WSL distribution or container runtime on this Windows
+machine, and the separate Linux host remains disabled at the user's request.
+**The Linux workflow has not been dispatched or its build/runtime verified.**
+The workflow is prepared infrastructure, not evidence of Linux completion.
+
 ## Portable build targets
 
 Meson provides `build_client` (default true) and `build_server` (default false).

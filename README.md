@@ -38,6 +38,11 @@ The shared engine still links legacy graphics/audio libraries; runtime headless
 startup skips window, GPU and audio initialization. Windows x64 builds and a
 two-client headless smoke test have passed; Linux runtime is not yet verified.
 Run the binaries with the game content directory as their working directory.
+A dedicated Ubuntu 24.04 CI job and portable headless startup check are available:
+`python Tools/run_server_smoke.py --exe PATH_TO_SERVER --game-dir PATH_TO_CONTENT`.
+The check covers UTF-8 config/CLI, simulation ticks and shutdown without a display.
+The Linux CI workflow is prepared but has not yet been run; see the server
+documentation for its dependencies and verification limits.
 
 # How To Make Issues #
 Please feel free to add issues and bugs. It's as simple as going to the issues tab and clicking a button. Once you do that, you'll see an easy to follow template to fill in. Try to put in the appropriate category for the issue and it'll be handled from there.

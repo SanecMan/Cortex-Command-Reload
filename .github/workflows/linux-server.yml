@@ -1,0 +1,72 @@
+name: Linux Dedicated Server
+
+on:
+  workflow_dispatch:
+  workflow_call:
+  schedule:
+    - cron: '30 2 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-server-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dedicated-server:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      CC: gcc-13
+      CXX: g++-13
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gcc-13 g++-13 cmake ninja-build pkg-config libflac-dev libminizip-dev liblz4-dev libpng-dev libtbb-dev libgl-dev libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxinerama-dev libxss-dev libasound2-dev libpulse-dev
+          python -m pip install meson==1.12.1
+      - name: Configure server-only target
+        run: >-
+          meson setup build-server --buildtype=release --wrap-mode=nodownload
+          -Dbuild_client=false -Dbuild_server=true
+          -Dinstall_runner=false -Dinstall_data=false
+          -Dtracy_enable=false -Db_lto=false -Db_pch=false
+      - name: Compile
+        run: meson compile -C build-server -j 2
+      - name: Check dependencies
+        run: |
+          ldd build-server/CortexCommandServer | tee build-server/runtime-dependencies.txt
+          if grep -q 'not found' build-server/runtime-dependencies.txt; then exit 1; fi
+      - name: Run without display or audio drivers
+        run: >-
+          python Tools/run_server_smoke.py --exe build-server/CortexCommandServer
+          --game-dir . --output-prefix LinuxDedicatedCI --timeout 300
+      - name: Collect runtime diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-server-diagnostics
+          path: |
+            ScreenShots/LinuxDedicatedCI/
+            build-server/meson-logs/
+            build-server/runtime-dependencies.txt
+          if-no-files-found: warn
+      - name: Package server
+        run: |
+          mkdir -p build-server/package
+          cp build-server/CortexCommandServer Server.example.ini build-server/package/
+          cp external/lib/linux/x86_64/libfmod.so.13.20 build-server/package/
+          ln -s libfmod.so.13.20 build-server/package/libfmod.so.13
+          cp Documentation/DedicatedServer.md build-server/package/
+          tar -C build-server/package -czf build-server/CortexCommandServer-linux-x64.tar.gz .
+      - name: Upload server
+        uses: actions/upload-artifact@v4
+        with:
+          name: CortexCommandServer-linux-x64
+          path: build-server/CortexCommandServer-linux-x64.tar.gz
+          if-no-files-found: error
