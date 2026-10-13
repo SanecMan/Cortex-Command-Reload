@@ -40,9 +40,8 @@ run observed 62 further server ticks after client disconnect. These verify FMOD
 channel startup/lifecycle, not recorded waveform quality or human listening.
 
 Remaining audio coverage includes late-join loop reconstruction, global bus pause
-and pitch changes, dynamic pan changes and actual mix/output comparisons. Linux validation of v21 passed as recorded below. Native Final was built and
-the root pair now uses v21, but its shutdown delivery test failed. The lifecycle
-fix is not yet in the root binaries; successful native delivery is still required.
+and pitch changes, dynamic pan changes and actual mix/output comparisons. Linux validation of v21 passed as recorded below. The first native Final delivery test failed during shutdown. The corrected root
+pair and subsequent repeat results are recorded below.
 
 The lifecycle update has now been rebuilt in the root Final client and server.
 `SoundOwnerLifetimeDelivered` and `SoundOwnerLifetimeDeliveredRepeat` both passed
