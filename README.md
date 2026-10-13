@@ -24,8 +24,9 @@ The fork provides a persistent headless world-state server. Build it with
 `CortexCommandServer.exe --config Server.example.ini`. It shares the existing
 simulation code and requires the game's content and runtime DLLs. See
 [Dedicated server setup, verification and current limits](Documentation/DedicatedServer.md).
-Linux x64 built and passed device-free simulation/configuration and SIGTERM
-shutdown checks on Ubuntu 24.04 in GitHub Actions. See the verification scope
+Linux x64 built and passed device-free simulation/configuration, two separate
+client processes, extracted-package startup and SIGTERM shutdown checks on
+Ubuntu 24.04 in GitHub Actions. See the verification scope
 and remaining multiplayer limits in the server documentation.
 
 Meson can build both frontends against one common engine library:

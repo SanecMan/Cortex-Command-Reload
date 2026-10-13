@@ -24,4 +24,11 @@ and ZIP path checks also passed. These checks exercise the engine-managed Lua
 file paths; they do not establish Unicode-aware behavior for Lua's standard
 byte-indexed string operations or arbitrary native modules.
 
+Linux verification on 2026-10-14: GitHub Actions run 38453967381 passed UTF-8
+decoding, UTF-16 conversion helpers, legacy Windows-1251 fallback, BOM handling,
+Cyrillic/emoji filenames through Reader/GUIReader, and ZIP path round trips.
+Both the build-tree server and an extracted server package passed Cyrillic
+config/log paths and UTF-8 CLI names. Those Linux runs created no GPU context
+and do not verify graphical Linux text rendering.
+
 Run `Cortex Command.exe -debug-run 60` (or `CortexCommand -debug-run 60` on Linux) to check UTF-8 decoding, cursor-boundary helpers, supplementary-plane encoding, UTF-16-to-UTF-8 conversion (including unpaired-surrogate replacement), BOM handling, the Windows-1251 fallback, Cyrillic and emoji native-file round trips, UTF-8 opening through `Reader` and `GUIReader`, and visible Cyrillic glyphs in the captured debug screenshot. Windows system error messages use the same UTF-16 bridge before they are passed to the UTF-8 SDL dialog. If the Windows error table supplies replacement characters instead of readable text, the crash report displays the numeric Windows error code instead of mojibake. The run hides its window but still creates an OpenGL context; it is not a GPU-free server mode. This change adds UTF-8 plumbing, not a Russian translation or language selector.

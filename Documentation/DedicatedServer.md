@@ -411,9 +411,20 @@ passed Ubuntu 24.04 / GCC 13 compilation and linking, dependency checks, and
 device-free runtime in 10.13 seconds: 120 further simulation ticks, 17 actors,
 UTF-8 config/CLI, invalid configuration rejection, four native in-process clients
 receiving populated snapshots and logical sound lifetimes. It also verified
-continued operation with closed stdin and clean SIGTERM shutdown. The separate
-process probes and extracted-package check were added afterward and require a
-new CI run; this result does not prove cross-OS or LAN gameplay.
+continued operation with closed stdin and clean SIGTERM shutdown.
+The following run,
+[38453967381](https://github.com/SanecMan/Cortex-Command-Reload/actions/runs/38453967381),
+also passed the separate-process probes and extracted-package check. The build
+tree test took 13.24 seconds and the extracted-package test 9.62 seconds. Each
+connected two clients concurrently, verified server-side neutral input
+application and 120 further simulation ticks after disconnect, and passed
+UTF-8 config/CLI, closed-stdin survival and clean SIGTERM shutdown. Both probe
+processes received 59 populated snapshots advancing 174 server ticks; Tutorial
+assigned one playable slot and one spectator. `ldd` resolved FMOD from the
+extracted package and reported no missing libraries or direct OpenGL/X11
+dependencies. The tests loaded the ten official modules, not the local Mods
+collection. These results do not prove cross-OS/LAN gameplay, two active Tutorial
+players, actual systemd/Docker deployment, or graphical Linux client rendering.
 Windows `DedicatedSelfTestWindows` passed the expanded runner:
 126 simulation ticks, 17 actors, no video initialization, four native loopback
 clients receiving a live world, and device-free sound playback lifetime checks.
