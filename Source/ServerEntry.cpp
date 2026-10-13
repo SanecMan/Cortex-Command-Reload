@@ -10,10 +10,19 @@
 #endif
 #include <string>
 #include <vector>
+#include <algorithm>
+#include <iostream>
 
 namespace {
 int RunServer(std::vector<std::string> arguments) {
-	arguments.emplace_back("--server");
+	const bool selfTest = std::find(arguments.begin(), arguments.end(), "--self-test") != arguments.end();
+	if (selfTest) {
+		if (std::find(arguments.begin(), arguments.end(), "--server") != arguments.end()) {
+			std::cerr << "Use --self-test without --server.\n"; return 2;
+		}
+		std::erase(arguments, "--self-test");
+		arguments.insert(arguments.begin() + 1, {"-debug-run", "60", "-debug-run-headless-simulation", "-debug-run-output", "DedicatedServerSelfTest"});
+	} else arguments.emplace_back("--server");
 	std::vector<char*> pointers;
 	for (std::string& argument : arguments) pointers.push_back(argument.data());
 	pointers.push_back(nullptr);

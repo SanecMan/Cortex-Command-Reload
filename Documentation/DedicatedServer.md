@@ -344,7 +344,7 @@ Lua HUD compatibility have not been verified by these runs.
 Windows or Linux. From the content checkout, run:
 
 ```sh
-python3 Tools/run_server_smoke.py --exe build-server/CortexCommandServer --game-dir .
+python3 Tools/run_server_smoke.py --exe build-server/CortexCommandServer --game-dir . --self-test
 ```
 
 It removes DISPLAY/WAYLAND_DISPLAY, forces invalid SDL video/audio drivers,
@@ -356,12 +356,19 @@ outputs within its own diagnostic directory are replaced on repeat runs; other
 workspace files are not removed. Results include `result.json` and stdout/stderr
 logs. On POSIX it additionally starts with stdin redirected from /dev/null and
 checks a clean SIGTERM shutdown, as needed for service/container execution.
-That branch is not exercised by a Windows run. The test does not check client
-connection or graphics/text glyph rendering.
+That branch is not exercised by a Windows run. With `--self-test`, it first runs
+the dedicated executable's device-free simulation diagnostics, including four
+native loopback clients receiving a populated world, player assignment, input
+manager application, and server survival after disconnect. This does not test
+four graphical clients, cross-platform LAN gameplay or text glyph rendering.
+`CortexCommandServer --self-test` also runs those diagnostics directly; use
+`-debug-run-output NAME` to select a diagnostic directory. Repeat runs replace
+that directory's diagnostic outputs.
 
 `.github/workflows/linux-server.yml` configures only the dedicated executable on
 Ubuntu 24.04 / GCC 13 with the checked-in SDL3/LuaJIT/Allegro sources. It is called
-by the normal CI workflow and supports manual/weekly runs. It runs the portable
+by the normal CI workflow and supports manual/weekly runs and isolated
+`codex/linux-server-*` verification branches. It runs the portable
 smoke without a display, saves failure diagnostics, and packages the executable,
 FMOD runtime, example config and server documentation. The package needs existing
 Data/ content and the Linux system runtime dependencies; it is not a standalone
@@ -374,8 +381,13 @@ The Python syntax and workflow YAML syntax/structure were checked locally.
 and verified `video_initialized=0`, UTF-8 config/CLI and invalid-config rejection.
 There is no installed WSL distribution or container runtime on this Windows
 machine, and the separate Linux host remains disabled at the user's request.
-**The Linux workflow has not been dispatched or its build/runtime verified.**
-The workflow is prepared infrastructure, not evidence of Linux completion.
+The first real Linux CI run (38448845526, 2026-10-14) passed configuration but
+failed compilation because classic minizip names its ZIP64 entry API differently
+from Windows minizip-ng. The small diagnostic ZIP entry now uses their common
+non-ZIP64 API. Linux compilation and runtime remain unverified until the repeat
+CI run passes. Windows `DedicatedSelfTestWindows` passed the expanded runner:
+126 simulation ticks, 17 actors, no video initialization, four native loopback
+clients receiving a live world, and device-free sound playback lifetime checks.
 
 ## Tracy build-option consistency
 

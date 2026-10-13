@@ -644,8 +644,9 @@ namespace {
 		constexpr std::string_view archiveEntryContents = "UTF-8 archive path round trip";
 		zipFile unicodeArchiveWriter = UTF8::OpenZipForWriting(unicodeArchivePath, APPEND_STATUS_CREATE);
 		zip_fileinfo archiveEntryInfo{};
-		const int archiveEntryOpened = unicodeArchiveWriter ? zipOpenNewFileInZip_64(unicodeArchiveWriter, "entry.txt", &archiveEntryInfo, nullptr, 0, nullptr, 0,
-		                                                                            nullptr, Z_DEFLATED, -1, 0)
+		// This small probe needs no ZIP64 entry; the common API exists in both minizip variants.
+		const int archiveEntryOpened = unicodeArchiveWriter ? zipOpenNewFileInZip(unicodeArchiveWriter, "entry.txt", &archiveEntryInfo, nullptr, 0, nullptr, 0,
+		                                                                         nullptr, Z_DEFLATED, -1)
 		                                                  : ZIP_PARAMERROR;
 		const int archiveEntryWritten = archiveEntryOpened == ZIP_OK
 		                                    ? zipWriteInFileInZip(unicodeArchiveWriter, archiveEntryContents.data(), static_cast<std::uint32_t>(archiveEntryContents.size()))
@@ -1276,7 +1277,7 @@ namespace {
 		return loopbackPassed;
 	}
 
-	bool VerifyWorldStateHostSessionLoopback(WorldStateServerSession& serverSession, std::ofstream& log) {
+	bool VerifyWorldStateHostSessionLoopback(WorldStateServerSession& serverSession, std::ofstream& log, bool requireLiveWorld = false) {
 		constexpr std::size_t expectedClientCount = 4;
 		const unsigned short port = serverSession.GetBoundPort();
 		serverSession.Update(++worldStateServerSimulationTick);
@@ -1309,6 +1310,9 @@ namespace {
 		                                    return client.IsConnected() && client.HasPlayerAssignment() && client.HasSnapshot() && client.GetLatestSnapshot().Tick > 0;
 		                                    });
 		std::array<int, expectedClientCount> assignedSlots{};
+		const bool liveWorldReceived = std::all_of(clients.begin(), clients.end(), [](const WorldStateClientSession& client) {
+			return client.HasSnapshot() && !client.GetLatestSnapshot().Objects.empty() && !client.GetLatestSnapshot().ScenePreset.empty();
+		});
 		std::transform(clients.begin(), clients.end(), assignedSlots.begin(), [](const WorldStateClientSession& client) {
 			return client.GetAssignedPlayerSlot();
 		});
@@ -1367,11 +1371,12 @@ namespace {
 		}
 		serverSession.DisableDebugEmptyWorldSnapshotSmoke();
 		const bool remainedAvailableAfterDisconnect = serverSession.IsStarted() && serverSession.GetConnectedClientCount() == 0;
-		const bool passed = idleServerSkippedSnapshot && allConnectedAndReceived && playerAssignmentsPassed && networkInputApplied && remainedAvailableAfterDisconnect;
+		const bool passed = idleServerSkippedSnapshot && allConnectedAndReceived && playerAssignmentsPassed && networkInputApplied && remainedAvailableAfterDisconnect && (!requireLiveWorld || liveWorldReceived);
 		log << "world_state_host_session_smoke=" << (passed ? "passed" : "failed")
 		    << " clients_accepted=" << expectedClientCount
 		    << " clients_received=" << clientsReceivedSnapshotCount
 		    << " assignments=" << playerAssignmentsPassed
+		    << " live_world_received=" << liveWorldReceived
 		    << " idle_snapshot_count=" << (idleServerSkippedSnapshot ? 0 : serverSession.GetSnapshotBroadcastCount())
 		    << " input_applied=" << networkInputApplied << " input_slot=" << networkInputPlayer
 		    << " server_alive_after_disconnect=" << remainedAvailableAfterDisconnect << '\n' << std::flush;
@@ -3183,6 +3188,12 @@ int RunCortexCommand(int argc, char** argv) {
 					}
 					contentPassed = started && particleMoved && updates == GetDebugRunState().UpdateLimit &&
 					    g_TimerMan.GetSimUpdateCount() >= updates && SDL_WasInit(SDL_INIT_VIDEO) == 0 && !g_WindowMan.GetWindow();
+					if (!headlessServer && contentPassed) {
+						WorldStateServerSession loopback;
+						const bool connected = loopback.Start("127.0.0.1", 0, 4, UTF8::PathToString(GetDebugRunState().OutputDirectory / "SelfTestNetwork.log"), true) &&
+						    VerifyWorldStateHostSessionLoopback(loopback, GetDebugRunState().Log, true);
+						loopback.Stop(); contentPassed = contentPassed && connected;
+					}
 					if (headlessServer) {
 						const bool networkPassed = serverStarted && sawClient && disconnectUpdate >= 0 && updates - disconnectUpdate >= 60 &&
 						    headlessServer->GetSnapshotBroadcastCount() > 0;

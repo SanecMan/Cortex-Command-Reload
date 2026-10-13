@@ -15,6 +15,7 @@ def main():
     parser.add_argument('--game-dir', required=True, type=Path)
     parser.add_argument('--output-prefix', default='PortableServerSmoke')
     parser.add_argument('--timeout', type=float, default=180)
+    parser.add_argument('--self-test', action='store_true', help='Run the server binary device-free diagnostics before startup checks.')
     args = parser.parse_args()
     if not re.fullmatch(r'[A-Za-z0-9_-]{1,48}', args.output_prefix) or args.timeout <= 0:
         parser.error('Use a simple output prefix and a positive timeout.')
@@ -28,7 +29,7 @@ def main():
             raise RuntimeError('Diagnostic paths must not be symlinks.')
         directory.mkdir(exist_ok=True)
     # Clear only this runner's known outputs, never other workspace files.
-    for directory, names in ((root, ('сервер.ini', 'stdout.log', 'stderr.log', 'invalid-config.log', 'service-stdout.log', 'service-stderr.log', 'result.json')),
+    for directory, names in ((root, ('сервер.ini', 'stdout.log', 'stderr.log', 'invalid-config.log', 'self-test-stdout.log', 'service-stdout.log', 'service-stderr.log', 'result.json')),
                              (logs, ('Server.log', 'ServerFailure.log', 'WorldStateServer.log', 'LogLoading.txt', 'LogConsole.txt')),
                              (service_logs, ('Server.log', 'ServerFailure.log', 'WorldStateServer.log', 'LogLoading.txt', 'LogConsole.txt'))):
         for name in names:
@@ -60,6 +61,22 @@ def main():
         return server_log.read_text(encoding='utf-8') if server_log.exists() else ''
 
     try:
+        if args.self_test:
+            test_name = args.output_prefix[:40] + 'SelfTest'
+            test_directory = game / 'ScreenShots' / test_name
+            if test_directory.is_symlink() or test_directory.resolve() != test_directory:
+                raise RuntimeError('Self-test output must not be a symlink.')
+            with (root / 'self-test-stdout.log').open('wb') as output:
+                probe = subprocess.run([str(binary), '--self-test', '-debug-run-output', test_name], cwd=game, env=environment,
+                                       stdout=output, stderr=subprocess.STDOUT, timeout=args.timeout,
+                                       creationflags=creation_flags, check=False)
+            report = (test_directory / 'DebugRun.log').read_text(encoding='utf-8')
+            markers = ('result=passed', 'gpu_enabled=0', 'world_state_host_session_smoke=passed',
+                       'clients_received=4', 'live_world_received=1', 'server_alive_after_disconnect=1',
+                       'headless_sound_length_smoke=passed', 'playback=1')
+            if probe.returncode != 0 or not all(marker in report for marker in markers):
+                raise RuntimeError('Dedicated server self-test failed; inspect its DebugRun.log.')
+            result['self_test'] = True
         with (root / 'invalid-config.log').open('wb') as invalid_log:
             invalid = subprocess.run([str(binary), '--players', '0'], cwd=game, env=environment,
                                      stdout=invalid_log, stderr=subprocess.STDOUT, timeout=args.timeout,

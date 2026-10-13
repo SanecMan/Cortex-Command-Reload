@@ -50,7 +50,7 @@ jobs:
       - name: Run without display or audio drivers
         run: >-
           python Tools/run_server_smoke.py --exe build-server/CortexCommandServer
-          --game-dir . --output-prefix LinuxDedicatedCI --timeout 300
+          --game-dir . --output-prefix LinuxDedicatedCI --timeout 300 --self-test
       - name: Collect runtime diagnostics
         if: always()
         uses: actions/upload-artifact@v4
@@ -58,6 +58,7 @@ jobs:
           name: linux-server-diagnostics
           path: |
             ScreenShots/LinuxDedicatedCI/
+            ScreenShots/LinuxDedicatedCISelfTest/
             build-server/meson-logs/
             build-server/runtime-dependencies.txt
           if-no-files-found: warn
