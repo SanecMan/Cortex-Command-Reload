@@ -36,6 +36,36 @@ The native MSBuild `Final|x64` client was then rebuilt in the checkout and
 two clients, 64 updates after disconnect, all processes exited successfully.
 Its total verification time was 167.71 seconds including startup, not a benchmark.
 
+## Connection failure handling
+
+The world-state client now reports explicit transport failures: server capacity,
+bans, password rejection, incompatible RakNet protocol, connection refusal,
+server shutdown and lost connection. The direct-connect menu displays that
+reason and re-enables its fields immediately instead of waiting for the generic
+15-second snapshot deadline. CLI clients also stop waiting after a terminal
+transport failure, and do not load a snapshot received just before disconnect.
+An incompatible *world-state wire version* still reaches the snapshot timeout;
+the RakNet protocol error is a separate transport response.
+
+On an established session's failure, the peer stops and the last authoritative
+snapshot stays frozen. This deliberately prevents the current game loop from
+resuming local physics/Lua for a remote world. Explicit Disconnect/Connect
+clears old snapshots, sequence counters, player assignment, terrain patches and
+purchase data before retry. Automatic in-game recovery and reconnect UX remain
+separate work; this change exposes transport failure rather than claiming those
+features are complete.
+
+Every normal diagnostic simulation run now includes
+`world_state_client_failure_smoke`: a real one-slot loopback server sends a
+snapshot to the first client, rejects the second as full, shuts down, and then
+accepts a fresh connection. It checks frozen-state handling and clean reconnect.
+On Windows, `ClientFailureLoopback` passed on 2026-10-13 with all four checks true
+and exit code 0. Both client/server targets built and linked in the Windows
+Meson build directory; no `.rte`, Lua API or world-state wire format changed.
+`ClientFailureMenuPair` then passed two separate clients through the main-menu
+connection flow in 28.68 seconds; both passed the failure/reconnect loopback
+check, and the headless server continued 63 updates after their disconnect.
+
 ## Attachment and pose replication (v16)
 
 The v16 protocol carries an attachment tree on each rotating world/inventory

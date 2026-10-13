@@ -211,6 +211,11 @@ namespace {
 	int PollMenuConnection(std::string& status) {
 		if (!pendingMenuClient) { status = "Connection cancelled."; return -1; }
 		pendingMenuClient->Update();
+		if (!pendingMenuClient->GetConnectionError().empty()) {
+			status = pendingMenuClient->GetConnectionError();
+			CancelMenuConnection();
+			return -1;
+		}
 		if (pendingMenuClient->IsConnected() && pendingMenuClient->HasSnapshot()) {
 			const auto& snapshot = pendingMenuClient->GetLatestSnapshot();
 			if (!QueueWorldStateActivity(snapshot, status)) {
@@ -1364,6 +1369,51 @@ namespace {
 		return passed;
 	}
 
+	bool VerifyWorldStateClientFailureLoopback(const WorldStateProtocol::Snapshot& snapshot, std::ofstream& log) {
+		WorldStateTransport server;
+		WorldStateClientSession client, overflow;
+		bool ready = server.StartServer(0, 1, "127.0.0.1");
+		auto receive = [&]() {
+			const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+			while (!client.HasSnapshot() && client.GetConnectionError().empty() && std::chrono::steady_clock::now() < deadline) {
+				std::vector<WorldStateTransport::ReceivedPacket> packets;
+				server.Poll(packets);
+				server.BroadcastSnapshot(snapshot, 1);
+				client.Update();
+				std::this_thread::sleep_for(std::chrono::milliseconds(5));
+			}
+			return client.IsConnected() && client.HasSnapshot();
+		};
+		ready = ready && client.Connect("127.0.0.1", server.GetBoundPort()) && receive();
+		bool refused = false, disconnected = false, reset = false, reconnected = false;
+		if (ready && overflow.Connect("127.0.0.1", server.GetBoundPort())) {
+			const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+			while (overflow.GetConnectionError().empty() && std::chrono::steady_clock::now() < deadline) {
+				std::vector<WorldStateTransport::ReceivedPacket> packets;
+				server.Poll(packets); overflow.Update();
+				std::this_thread::sleep_for(std::chrono::milliseconds(5));
+			}
+			refused = overflow.GetConnectionError() == "The server is full." && !overflow.IsConnected() && !overflow.HasSnapshot();
+		}
+		server.Stop();
+		if (ready) {
+			const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+			while (client.GetConnectionError().empty() && std::chrono::steady_clock::now() < deadline) {
+				client.Update(); std::this_thread::sleep_for(std::chrono::milliseconds(5));
+			}
+			disconnected = !client.IsConnected() && !client.GetConnectionError().empty() && client.HasSnapshot();
+			if (server.StartServer(0, 1, "127.0.0.1") && client.Connect("127.0.0.1", server.GetBoundPort())) {
+				reset = client.GetConnectionError().empty() && !client.HasSnapshot() && !client.HasPlayerAssignment() && client.GetReceivedSnapshotCount() == 0;
+				reconnected = reset && receive();
+			}
+		}
+		const bool passed = ready && refused && disconnected && reset && reconnected;
+		log << "world_state_client_failure_smoke=" << (passed ? "passed" : "failed")
+			<< " capacity_refused=" << refused << " disconnected_frozen=" << disconnected
+			<< " reconnect_reset=" << reset << " reconnected=" << reconnected << '\n' << std::flush;
+		return passed;
+	}
+
 	void FinishDebugRun(bool success) {
 		DebugRunState& state = GetDebugRunState();
 		if (!state.Enabled || System::IsSetToQuit()) {
@@ -1375,6 +1425,7 @@ namespace {
 		g_ThreadMan.GetBackgroundThreadPool().wait_for_tasks();
 		const WorldStateProtocol::Snapshot worldSnapshot = state.HasProtocolSmokeSnapshot ? state.ProtocolSmokeSnapshot : CaptureDebugWorldStateSnapshot();
 		const WorldStateProtocol::Snapshot repeatedWorldSnapshot = state.HasProtocolSmokeSnapshot ? state.ProtocolSmokeSnapshot : CaptureDebugWorldStateSnapshot();
+		const bool clientFailurePassed = VerifyWorldStateClientFailureLoopback(worldSnapshot, state.Log);
 		bool worldIdentityStable = worldSnapshot.SceneRevision == repeatedWorldSnapshot.SceneRevision &&
 		                          worldSnapshot.ActivityClassName == repeatedWorldSnapshot.ActivityClassName &&
 		                          worldSnapshot.ActivityPreset == repeatedWorldSnapshot.ActivityPreset &&
@@ -1668,7 +1719,7 @@ namespace {
 			success = success && state.ClientDisconnectWhilePausedObserved;
 		}
 		success = success && utf8GlyphRenderPassed && worldStateTransitionPassed && remoteTerrainMutationPassed && hostTerrainMutationPassed && hostEquipmentMutationPassed && remoteEquipmentMutationPassed &&
-		          state.HostSessionTestPassed && worldIdentityStable && replicaSmokePassed && backgroundEquipmentPassed && attachmentsPassed && objectCallbacksPassed && transientPixelReplicaPassed && terrainPatchApplyPassed &&
+		          state.HostSessionTestPassed && clientFailurePassed && worldIdentityStable && replicaSmokePassed && backgroundEquipmentPassed && attachmentsPassed && objectCallbacksPassed && transientPixelReplicaPassed && terrainPatchApplyPassed &&
 		          networkInputApplicationPassed && worldSnapshotPassed && snapshotCompressionPassed && liveSnapshotTransportPassed;
 		const double elapsedSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - state.StartTime).count();
 		if (state.RequestInventoryTest) {
@@ -3214,12 +3265,12 @@ int RunCortexCommand(int argc, char** argv) {
 			return EXIT_FAILURE;
 		}
 		const auto connectionDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(15);
-		while (!worldStateClient->HasSnapshot() && std::chrono::steady_clock::now() < connectionDeadline) {
+		while (!worldStateClient->HasSnapshot() && worldStateClient->GetConnectionError().empty() && std::chrono::steady_clock::now() < connectionDeadline) {
 			worldStateClient->Update();
 			std::this_thread::sleep_for(std::chrono::milliseconds(10));
 		}
-		if (!worldStateClient->HasSnapshot()) {
-			std::cerr << "[NETWORK] Connected but no valid world snapshot arrived within 15 seconds\n";
+		if (!worldStateClient->HasSnapshot() || !worldStateClient->IsConnected()) {
+			std::cerr << "[NETWORK] " << (worldStateClient->GetConnectionError().empty() ? "No valid world snapshot arrived within 15 seconds" : worldStateClient->GetConnectionError()) << '\n';
 			worldStateClient.reset();
 			DestroyManagers();
 			allegro_exit();

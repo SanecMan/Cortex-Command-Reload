@@ -10,11 +10,14 @@ using namespace RTE;
 
 bool WorldStateClientSession::Connect(const char* address, unsigned short port) {
 	Disconnect();
-	return m_Transport.StartClient(address, port);
+	if (m_Transport.StartClient(address, port)) return true;
+	m_ConnectionError = "Unable to start client transport. Check the server address.";
+	return false;
 }
 
 void WorldStateClientSession::Disconnect() {
 	m_Transport.Stop();
+	m_ConnectionError.clear();
 	m_Connected = false;
 	m_HasSnapshot = false;
 	m_LastSequence = 0;
@@ -70,9 +73,22 @@ void WorldStateClientSession::Update() {
 			m_Connected = true;
 			continue;
 		}
-		if (packet.Identifier == ID_DISCONNECTION_NOTIFICATION || packet.Identifier == ID_CONNECTION_LOST) {
+		switch (packet.Identifier) {
+			case ID_CONNECTION_ATTEMPT_FAILED: m_ConnectionError = "The server did not accept the connection."; break;
+			case ID_NO_FREE_INCOMING_CONNECTIONS: m_ConnectionError = "The server is full."; break;
+			case ID_CONNECTION_BANNED: m_ConnectionError = "The server rejected this client (banned)."; break;
+			case ID_INVALID_PASSWORD: m_ConnectionError = "The server requires a different password."; break;
+			case ID_INCOMPATIBLE_PROTOCOL_VERSION: m_ConnectionError = "The server uses an incompatible network protocol."; break;
+			case ID_DISCONNECTION_NOTIFICATION: m_ConnectionError = "The server closed the connection."; break;
+			case ID_CONNECTION_LOST: m_ConnectionError = "Connection to the server was lost."; break;
+			default: break;
+		}
+		if (!m_ConnectionError.empty()) {
 			m_Connected = false;
-			continue;
+			m_Transport.Stop();
+			// Keep the last authoritative snapshot frozen until explicit Disconnect or
+			// Connect. Clearing it here would resume local simulation of the remote world.
+			return;
 		}
 		if (packet.Identifier != ID_CCR_WORLD_STATE) {
 			continue;

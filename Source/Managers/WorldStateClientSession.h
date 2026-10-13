@@ -29,6 +29,7 @@ public:
 	int GetAssignedPlayerSlot() const { return m_AssignedPlayerSlot; }
 	bool HasPlayerAssignment() const { return m_HasPlayerAssignment; }
 		bool IsConnected() const { return m_Connected; }
+		const std::string& GetConnectionError() const { return m_ConnectionError; }
 		bool HasSnapshot() const { return m_HasSnapshot; }
 		std::uint32_t GetReceivedSnapshotCount() const { return m_ReceivedSnapshotCount; }
 	const WorldStateProtocol::Snapshot& GetLatestSnapshot() const { return m_LatestSnapshot; }
@@ -47,6 +48,7 @@ public:
 	std::uint32_t m_InputCommandSequence = 0;
 	int m_AssignedPlayerSlot = -1;
 	bool m_HasPlayerAssignment = false;
+		std::string m_ConnectionError;
 		bool m_Connected = false;
 		bool m_HasSnapshot = false;
 	};
