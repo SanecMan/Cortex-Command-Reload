@@ -1,6 +1,9 @@
 name: Linux Dedicated Server
 
 on:
+  push:
+    branches:
+      - 'codex/linux-server-*'
   workflow_dispatch:
   workflow_call:
   schedule:
