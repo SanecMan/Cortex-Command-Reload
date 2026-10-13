@@ -49,7 +49,18 @@ Windows Meson verification on 2026-10-14: the headless screen-text run passed in
 Two consecutive graphical menu/message runs passed in 28.95 and 30.15 seconds,
 with 62 and 63 additional server ticks and clean exits from both clients. The
 assigned client's final screenshot visibly showed the centered Cyrillic message.
-The v19 Linux checks and updated native Final delivery are pending.
+The delivered native Windows Final client/server pair passed again:
+`ScreenTextV19DeliveredHeadless` took 19.39 seconds with 127 post-disconnect ticks,
+and `ScreenTextV19DeliveredMenu` took 32.46 seconds with two graphical clients,
+63 post-disconnect ticks and clean exits.
+Linux v19 run
+[38462923605](https://github.com/SanecMan/Cortex-Command-Reload/actions/runs/38462923605)
+passed compilation, the standalone screen-message codec test, device-free
+message capture/application and two separate processes receiving HUD text. The
+build-tree check took 13.24 seconds (121 post-disconnect ticks), and the extracted
+package check 9.61 seconds (120 ticks). Both passed UTF-8 config/CLI and SIGTERM.
+This does not establish graphical Linux glyph rendering or arbitrary Lua HUD
+synchronization.
 
 Those runs exposed a metadata-only FMOD system being released during CRT teardown.
 Audio shutdown now resets it explicitly even when the regular playback device is
