@@ -34,6 +34,7 @@ public:
 		std::uint32_t GetReceivedSnapshotCount() const { return m_ReceivedSnapshotCount; }
 	const WorldStateProtocol::Snapshot& GetLatestSnapshot() const { return m_LatestSnapshot; }
 	std::vector<ReceivedTerrainPatch> DrainTerrainPatches(std::uint32_t sceneRevision);
+	std::vector<WorldStateSoundProtocol::Event> DrainSoundEvents(std::uint32_t sceneRevision);
 
 	private:
 		WorldStateTransport m_Transport;
@@ -42,6 +43,10 @@ public:
 	WorldStateProtocol::PurchasePolicy m_PurchasePolicy;
 	std::uint32_t m_PolicySequence=0;
 	std::deque<ReceivedTerrainPatch> m_TerrainPatches;
+	struct SoundBatch { std::uint32_t SceneRevision; std::vector<WorldStateSoundProtocol::Event> Events; };
+	std::deque<SoundBatch> m_SoundBatches;
+	std::size_t m_QueuedSoundEvents = 0;
+	std::uint32_t m_LastSoundSequence = 0;
 	std::uint32_t m_LastSequence = 0;
 	std::uint32_t m_LastTerrainSequence = 0;
 	std::uint32_t m_ReceivedSnapshotCount = 0;

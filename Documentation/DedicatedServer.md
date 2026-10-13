@@ -401,6 +401,13 @@ simultaneous processes. The rebuilt Windows RakNet library and Meson frontends
 passed headless startup/two-client checks in 19.83 seconds (134 further server
 ticks) and graphical menu/message checks in 28.53 seconds (62 ticks).
 Linux package verification must be repeated after this change.
+Repeat Linux run
+[38469296527](https://github.com/SanecMan/Cortex-Command-Reload/actions/runs/38469296527)
+passed compilation, threaded/cross-process peer identity tests, sound payload
+codec tests, Cyrillic software rasterization and both startup checks. The
+extracted package test passed in 9.62 seconds with two clients, HUD text, applied
+input, 121 further server ticks and clean SIGTERM shutdown. This successful
+repeat does not prove the exact cause of the earlier one-client failure.
 The delivered native Windows Final pair subsequently passed
 `PeerIdentityDeliveredMenu` in 32.44 seconds: two simultaneous clients and 62
 simulation ticks after disconnect, with clean process exits. MSBuild reported

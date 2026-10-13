@@ -41,6 +41,7 @@ void WorldStateClientSession::Disconnect() {
 	m_LastSequence = 0;
 	m_LastTerrainSequence = 0;
 	m_TerrainPatches.clear();
+	m_SoundBatches.clear(); m_QueuedSoundEvents = 0; m_LastSoundSequence = 0;
 	m_PurchaseResults.clear();
 	m_PurchasePolicy={}; m_PolicySequence=0;
 	m_ReceivedSnapshotCount = 0;
@@ -79,6 +80,21 @@ std::vector<WorldStateClientSession::ReceivedTerrainPatch> WorldStateClientSessi
 	return patches;
 }
 
+std::vector<WorldStateSoundProtocol::Event> WorldStateClientSession::DrainSoundEvents(std::uint32_t sceneRevision) {
+	std::vector<WorldStateSoundProtocol::Event> result;
+	const auto count = m_SoundBatches.size();
+	for (std::size_t index = 0; index < count; ++index) {
+		auto batch = std::move(m_SoundBatches.front()); m_SoundBatches.pop_front();
+		if (static_cast<std::int32_t>(sceneRevision - batch.SceneRevision) < 0) {
+			m_SoundBatches.push_back(std::move(batch)); continue;
+		}
+		m_QueuedSoundEvents -= batch.Events.size();
+		if (batch.SceneRevision == sceneRevision)
+			for (auto& event : batch.Events) result.push_back(std::move(event));
+	}
+	return result;
+}
+
 void WorldStateClientSession::Update() {
 	if (!m_Transport.IsStarted()) {
 		m_Connected = false;
@@ -104,6 +120,7 @@ void WorldStateClientSession::Update() {
 		}
 		if (!m_ConnectionError.empty()) {
 			m_Connected = false;
+			m_SoundBatches.clear(); m_QueuedSoundEvents = 0;
 			m_Transport.Stop();
 			// Keep the last authoritative snapshot frozen until explicit Disconnect or
 			// Connect. Clearing it here would resume local simulation of the remote world.
@@ -124,6 +141,19 @@ void WorldStateClientSession::Update() {
 			return; // Retain any authoritative snapshot, just as on transport failure.
 		}
 		WorldStateProtocol::TerrainPatch terrainPatch;
+		std::vector<WorldStateSoundProtocol::Event> soundEvents;
+		std::uint32_t soundRevision = 0, soundSequence = 0;
+		if (WorldStateSoundProtocol::DecodePacket(snapshotPayload, soundRevision, soundSequence, soundEvents)) {
+			if (!m_LastSoundSequence || static_cast<std::int32_t>(soundSequence - m_LastSoundSequence) > 0) {
+				m_LastSoundSequence = soundSequence;
+				while (!m_SoundBatches.empty() && (m_QueuedSoundEvents + soundEvents.size() > 2048 || m_SoundBatches.size() >= 32)) {
+					m_QueuedSoundEvents -= m_SoundBatches.front().Events.size(); m_SoundBatches.pop_front();
+				}
+				m_QueuedSoundEvents += soundEvents.size();
+				m_SoundBatches.push_back({soundRevision, std::move(soundEvents)});
+			}
+			continue;
+		}
 		WorldStateProtocol::PurchaseResult purchase;
 		WorldStateProtocol::PurchasePolicy policy;
 		std::uint32_t policySequence=0;

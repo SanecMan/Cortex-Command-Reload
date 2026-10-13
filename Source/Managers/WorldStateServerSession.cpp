@@ -407,6 +407,12 @@ void WorldStateServerSession::PublishPurchasePolicies(std::uint32_t tick) {
 	}
 }
 
+bool WorldStateServerSession::SendSoundEvents(std::span<const WorldStateSoundProtocol::Event> events) {
+	if (!IsStarted() || !m_ConnectedClients || events.empty()) return false;
+	if (++m_Sequence == 0) ++m_Sequence;
+	return m_Transport.BroadcastSoundEvents(m_SnapshotBuilder.RefreshSceneRevision(), m_Sequence, events);
+}
+
 void WorldStateServerSession::Update(std::uint32_t simulationTick) {
 	if (!m_Transport.IsStarted()) {
 		return;

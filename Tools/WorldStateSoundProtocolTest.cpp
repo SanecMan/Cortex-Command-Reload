@@ -23,6 +23,12 @@ int main() {
     std::vector<Event> decoded;
     if (!check(Encode(source, bytes) && Decode(bytes, decoded) && decoded == source, "actions and Unicode round trip")) return 1;
     const auto valid = bytes;
+	std::uint32_t sceneRevision = 0, sequence = 0;
+	if (!check(EncodePacket(3, 42, source, bytes) && DecodePacket(bytes, sceneRevision, sequence, decoded) &&
+	    sceneRevision == 3 && sequence == 42 && decoded == source, "session envelope")) return 1;
+	bytes[4] = static_cast<std::uint8_t>(RTE::WorldStateProtocol::c_Version - 1);
+	if (!check(!DecodePacket(bytes, sceneRevision, sequence, decoded), "foreign session version")) return 1;
+	if (!check(!EncodePacket(0, 42, source, bytes) && !EncodePacket(3, 0, source, bytes), "invalid envelope identity")) return 1;
     if (!check(Encode(std::vector<Event>{play}, bytes), "single play encoding")) return 1;
     bytes.back() = 2;
     if (!check(!Decode(bytes, decoded), "invalid boolean rejection")) return 1;

@@ -37,6 +37,7 @@ namespace RTE {
 		std::size_t ConfigureActivityPlayers(Activity& activity, bool beforeStart) const;
 		std::uint32_t GetSnapshotBroadcastCount() const { return m_SnapshotBroadcastCount; }
 		std::uint32_t GetInputCommandCount() const { return m_InputCommandCount; }
+		bool SendSoundEvents(std::span<const WorldStateSoundProtocol::Event> events);
 
 	private:
 		void Log(const std::string& message);

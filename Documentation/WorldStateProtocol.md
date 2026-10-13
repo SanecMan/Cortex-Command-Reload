@@ -11,8 +11,24 @@ bytes. Priority 256 is retained in a 16-bit field rather than truncated to a byt
 
 The standalone test covers every action, Unicode resource names, a fixed golden
 layout, truncated/corrupt packets and the 256-event batch bound. This codec is
-not yet connected to capture, session transport or client playback. It does not
-change the active v19 session wire format or provide audible multiplayer sound.
+now connected to reliable ordered session transport in v20. Sound envelopes
+carry a scene revision and nonzero sequence. The client ignores repeated/older
+sequences, holds future-scene batches, discards stale-scene batches when drained,
+and bounds pending data to 32 batches/2,048 events. Disconnect clears the queue.
+Queue overflow currently discards oldest batches; playback integration must
+handle missing playback-control events when that happens.
+Capture of ordinary game sounds and client playback are still separate work.
+This change requires matched v20 client/server binaries and does not yet provide
+audible multiplayer sound. `WorldStateServerSession::SendSoundEvents` is the
+explicit server emission API; the regular simulation does not call it yet.
+
+The native four-client transport diagnostic now sends a sound batch twice with
+the same sequence and verifies delivery to every client, future-scene retention
+and one-shot draining. Windows `SoundTransportV20Headless` passed in 18.17
+seconds with four internal sound recipients and two separate world-state clients.
+Graphical v20 menu/message checks passed in 31.07 seconds with two clients and
+63 additional server ticks after disconnect. These validate packet delivery,
+not audio mixing or late-join reconstruction of active looping sounds.
 
 ## Screen messages (v19)
 

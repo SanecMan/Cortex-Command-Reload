@@ -54,6 +54,7 @@ inline bool Valid(const Event& event) {
     }
     return false;
 }
+
 }
 inline bool Encode(std::span<const Event> events, std::vector<std::uint8_t>& bytes) {
     using namespace Detail;
@@ -129,5 +130,29 @@ inline bool Decode(std::span<const std::uint8_t> bytes, std::vector<Event>& even
     }
     if (offset != bytes.size()) return false;
     events = std::move(decoded); return true;
+}
+inline bool EncodePacket(std::uint32_t sceneRevision, std::uint32_t sequence, std::span<const Event> events, std::vector<std::uint8_t>& packet) {
+    using namespace Detail;
+    std::vector<std::uint8_t> body;
+    if (!sceneRevision || !sequence || !Encode(events, body) || body.size() > MaxBytes - RTE::WorldStateProtocol::c_HeaderSize - 4) return false;
+    packet.clear();
+    WriteUnsigned(packet, RTE::WorldStateProtocol::c_Magic, 4);
+    WriteUnsigned(packet, RTE::WorldStateProtocol::c_Version, 2);
+    WriteUnsigned(packet, static_cast<std::uint8_t>(RTE::WorldStateProtocol::MessageType::SoundEvents), 1);
+    WriteUnsigned(packet, 0, 1); WriteUnsigned(packet, sequence, 4); WriteUnsigned(packet, body.size() + 4, 4);
+    WriteUnsigned(packet, sceneRevision, 4);
+    packet.insert(packet.end(), body.begin(), body.end()); return true;
+}
+inline bool DecodePacket(std::span<const std::uint8_t> packet, std::uint32_t& sceneRevision, std::uint32_t& sequence, std::vector<Event>& events) {
+    using namespace Detail;
+    if (packet.size() < RTE::WorldStateProtocol::c_HeaderSize + 4 || packet.size() > MaxBytes) return false;
+    std::size_t offset = 0; std::uint64_t value = 0, serial = 0, revision = 0;
+    if (!ReadUnsigned(packet, offset, 4, value) || value != RTE::WorldStateProtocol::c_Magic ||
+        !ReadUnsigned(packet, offset, 2, value) || value != RTE::WorldStateProtocol::c_Version ||
+        !ReadUnsigned(packet, offset, 1, value) || value != static_cast<std::uint8_t>(RTE::WorldStateProtocol::MessageType::SoundEvents) ||
+        !ReadUnsigned(packet, offset, 1, value) || value != 0 || !ReadUnsigned(packet, offset, 4, serial) || !serial ||
+        !ReadUnsigned(packet, offset, 4, value) || value != packet.size() - RTE::WorldStateProtocol::c_HeaderSize ||
+        !ReadUnsigned(packet, offset, 4, revision) || !revision || !Decode(packet.subspan(offset), events)) return false;
+    sceneRevision = static_cast<std::uint32_t>(revision); sequence = static_cast<std::uint32_t>(serial); return true;
 }
 }

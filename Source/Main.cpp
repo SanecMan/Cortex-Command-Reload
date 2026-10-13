@@ -1221,6 +1221,7 @@ namespace {
 		std::size_t acceptedClientCount = 0;
 		std::size_t receivedClientCount = 0;
 		std::size_t receivedTerrainPatchCount = 0;
+		std::size_t receivedSoundCount = 0;
 		WorldStateTransport::SnapshotTransmissionMetrics snapshotTransmissionMetrics;
 		std::uint16_t boundPort = 0;
 		{
@@ -1228,6 +1229,12 @@ namespace {
 			std::array<WorldStateClientSession, expectedClientCount> clients;
 			std::array<bool, expectedClientCount> clientReceivedSnapshot{};
 			std::array<bool, expectedClientCount> clientReceivedTerrainPatch{};
+			std::array<bool, expectedClientCount> clientReceivedSound{};
+			WorldStateSoundProtocol::Event sound;
+			sound.Type = WorldStateSoundProtocol::Action::Play;
+			sound.Container = 1; sound.Voice = 2;
+			sound.Module = "Base.rte"; sound.Resource = "Sounds/UI/Confirm.flac";
+			const std::vector<WorldStateSoundProtocol::Event> expectedSounds{sound};
 			WorldStateProtocol::TerrainPatch expectedTerrainPatch;
 			expectedTerrainPatch.SceneRevision = expectedSnapshot.SceneRevision;
 			expectedTerrainPatch.X = 4;
@@ -1246,9 +1253,10 @@ namespace {
 				if (clientsStarted) {
 					bool broadcastSent = false;
 					bool terrainBroadcastSent = false;
+					bool soundBroadcastSent = false;
 					const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
 					while (std::chrono::steady_clock::now() < deadline &&
-					       (receivedClientCount < expectedClientCount || receivedTerrainPatchCount < expectedClientCount)) {
+					       (receivedClientCount < expectedClientCount || receivedTerrainPatchCount < expectedClientCount || receivedSoundCount < expectedClientCount)) {
 						std::vector<WorldStateTransport::ReceivedPacket> serverPackets;
 						serverTransport.Poll(serverPackets);
 						serverPacketCount += serverPackets.size();
@@ -1265,9 +1273,20 @@ namespace {
 							terrainBroadcastSent = serverTransport.BroadcastTerrainPatch(expectedTerrainPatch, expectedSnapshot.Tick + 1);
 							sendCount += terrainBroadcastSent ? expectedClientCount : 0;
 						}
+						if (broadcastSent && !soundBroadcastSent) {
+							soundBroadcastSent = serverTransport.BroadcastSoundEvents(expectedSnapshot.SceneRevision, expectedSnapshot.Tick + 2, expectedSounds) &&
+							    serverTransport.BroadcastSoundEvents(expectedSnapshot.SceneRevision, expectedSnapshot.Tick + 2, expectedSounds);
+						}
 						for (std::size_t clientIndex = 0; clientIndex < clients.size(); ++clientIndex) {
 							WorldStateClientSession& client = clients[clientIndex];
 							client.Update();
+							if (!clientReceivedSound[clientIndex]) {
+								if (!client.DrainSoundEvents(0).empty()) { soundBroadcastSent = false; break; }
+								const auto events = client.DrainSoundEvents(expectedSnapshot.SceneRevision);
+								if (events == expectedSounds && client.DrainSoundEvents(expectedSnapshot.SceneRevision).empty()) {
+									clientReceivedSound[clientIndex] = true; ++receivedSoundCount;
+								}
+							}
 							if (client.HasSnapshot() && !clientReceivedSnapshot[clientIndex]) {
 								const WorldStateProtocol::Snapshot& transportedSnapshot = client.GetLatestSnapshot();
 								clientReceivedSnapshot[clientIndex] = transportedSnapshot.Tick == expectedSnapshot.Tick &&
@@ -1294,7 +1313,8 @@ namespace {
 						}
 						std::this_thread::sleep_for(std::chrono::milliseconds(1));
 					}
-					loopbackPassed = broadcastSent && terrainBroadcastSent && receivedClientCount == expectedClientCount && receivedTerrainPatchCount == expectedClientCount;
+					loopbackPassed = broadcastSent && terrainBroadcastSent && soundBroadcastSent && receivedSoundCount == expectedClientCount &&
+					    receivedClientCount == expectedClientCount && receivedTerrainPatchCount == expectedClientCount;
 				}
 			}
 		}
@@ -1302,6 +1322,7 @@ namespace {
 		    << ",clients_started:" << clientsStarted << ",clients_accepted:" << acceptedClientCount << ",clients_received:" << receivedClientCount << ",server_packets:" << serverPacketCount
 		    << ",client_packets:" << clientPacketCount << ",terrain_received:" << receivedTerrainPatchCount << ",sends:" << sendCount
 		    << ",compressed_snapshot_payload_bytes:" << snapshotTransmissionMetrics.PayloadBytes << ",estimated_snapshot_payload_bandwidth_kbit_s_per_client:" << (snapshotTransmissionMetrics.PayloadBytes * 20.0 * 8.0 / 1000.0)
+		    << ",sound_clients_received:" << receivedSoundCount
 		    << ",snapshot_encode_us:" << snapshotTransmissionMetrics.EncodeMicroseconds << ",snapshot_compress_us:" << snapshotTransmissionMetrics.CompressMicroseconds
 		    << ",snapshot_queue_us:" << snapshotTransmissionMetrics.QueueMicroseconds
 		    << ",loopback:" << (loopbackPassed ? "passed" : "failed") << '\n' << std::flush;
