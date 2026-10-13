@@ -27,6 +27,7 @@
 #include "GUIReader.h"
 #include "AllegroScreen.h"
 #include "AllegroBitmap.h"
+#include "GUIFont.h"
 
 #include "MainMenuGUI.h"
 #include "ScenarioGUI.h"
@@ -3161,6 +3162,29 @@ int RunCortexCommand(int argc, char** argv) {
 				    << " modules=" << g_PresetMan.GetTotalModuleCount() << " official_modules=" << g_PresetMan.GetOfficialModuleCount()
 				    << " video_initialized=" << (SDL_WasInit(SDL_INIT_VIDEO) != 0) << '\n' << std::flush;
 				if (contentPassed) contentPassed = VerifyHeadlessSoundLengths(GetDebugRunState().Log);
+				if (contentPassed) {
+					// Exercise actual indexed glyph pixels, not just TTF glyph coverage.
+					BITMAP* glyphBitmap = create_bitmap_ex(8, 80, 24);
+					int foregroundPixels = 0, wrongColorPixels = 0;
+					bool rasterPassed = glyphBitmap != nullptr;
+					if (glyphBitmap) {
+						clear_to_color(glyphBitmap, 0);
+						AllegroBitmap target(glyphBitmap);
+						GUIFont* font = g_FrameMan.GetLargeFont();
+						rasterPassed = font && font->SupportsCodepoint(0x0416);
+						if (rasterPassed) font->Draw(&target, 2, 2, "Ж");
+						for (int row = 0; row < glyphBitmap->h; ++row) for (int column = 0; column < glyphBitmap->w; ++column) {
+							const int pixel = getpixel(glyphBitmap, column, row);
+							if (pixel != 0) { ++foregroundPixels; if (pixel != 118) ++wrongColorPixels; }
+						}
+						destroy_bitmap(glyphBitmap);
+					}
+					// The checked-in FontLarge atlas has foreground palette index 118.
+					rasterPassed = rasterPassed && foregroundPixels > 0 && wrongColorPixels == 0;
+					GetDebugRunState().Log << "utf8_raster_color_smoke=" << (rasterPassed ? "passed" : "failed")
+					    << " pixels=" << foregroundPixels << " wrong_color=" << wrongColorPixels << '\n' << std::flush;
+					contentPassed = contentPassed && rasterPassed;
+				}
 				if (contentPassed && GetDebugRunState().HeadlessSimulationPreflight) {
 					// A remote slot can exist before its presentation menus are initialized.
 					// Reject such deliveries and hostile indices without reading player/team arrays.

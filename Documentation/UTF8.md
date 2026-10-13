@@ -32,6 +32,15 @@ are unchanged. The assigned Windows client's final screenshot visibly displayed
 `Network HUD: Привет, Ёжик!` with readable yellow Cyrillic glyphs. This visual check
 covered the built-in large font, not every custom mod font atlas.
 
+Device-free diagnostics now also rasterize `Ж` into an indexed bitmap and check
+that actual foreground pixels use the checked-in FontLarge palette index 118.
+`UnicodeRasterHeadless` passed on Windows with 54 foreground pixels and no
+wrong-color pixels; the whole server/config/two-process check took 19.05 seconds.
+This catches the previous dark-glyph regression without a GPU or screenshot.
+It is a software raster test, not verification of every graphics driver or mod
+font. Changing the bundled atlas's foreground color requires updating this
+specific regression expectation.
+
 Linux verification on 2026-10-14: GitHub Actions run 38453967381 passed UTF-8
 decoding, UTF-16 conversion helpers, legacy Windows-1251 fallback, BOM handling,
 Cyrillic/emoji filenames through Reader/GUIReader, and ZIP path round trips.
