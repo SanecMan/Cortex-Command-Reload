@@ -3,9 +3,12 @@
 #include "SoundSet.h"
 #include "SettingsMan.h"
 #include "UTF8.h"
+#include "TimerMan.h"
+#include "SoundPlaybackTimeline.h"
 
 #include <mutex>
 #include <limits>
+#include <array>
 
 using namespace RTE;
 
@@ -57,6 +60,56 @@ namespace {
 		static SoundLengthReader reader;
 		return reader.Read(path);
 	}
+	struct HeadlessPlayback {
+		std::array<SoundPlaybackTimeline, 3> Timelines;
+		bool Playing(double now) { bool playing = false; for (auto& timeline : Timelines) playing = timeline.Playing(now) || playing; return playing; }
+		std::size_t Count(double now) { std::size_t count = 0; for (auto& timeline : Timelines) count += timeline.Count(now); return count; }
+	};
+	struct HeadlessPlaybackRegistry {
+		std::mutex Mutex;
+		std::unordered_map<const SoundContainer*, HeadlessPlayback> Sounds;
+		std::array<double, 3> Pitch{1, 1, 1};
+		bool SFXPaused = false;
+	};
+	HeadlessPlaybackRegistry& HeadlessSounds() { static HeadlessPlaybackRegistry registry; return registry; }
+	double SoundSimulationTime() {
+		const auto frequency = g_TimerMan.GetTicksPerSecond();
+		return frequency > 0 ? static_cast<double>(g_TimerMan.GetSimTickCount()) * 1000.0 / static_cast<double>(frequency) : 0;
+	}
+}
+
+bool SoundContainer::IsBeingPlayed() const {
+	if (g_AudioMan.IsAudioEnabled()) return !m_PlayingChannels.empty();
+	auto& registry = HeadlessSounds(); std::scoped_lock lock(registry.Mutex);
+	const auto found = registry.Sounds.find(this);
+	if (found == registry.Sounds.end()) return false;
+	if (found->second.Playing(SoundSimulationTime())) return true;
+	registry.Sounds.erase(found); return false;
+}
+
+void SoundContainer::StopHeadlessPlayback() {
+	auto& registry = HeadlessSounds(); std::scoped_lock lock(registry.Mutex); registry.Sounds.clear();
+}
+void SoundContainer::ResetHeadlessPlayback() {
+	auto& registry = HeadlessSounds(); std::scoped_lock lock(registry.Mutex);
+	registry.Sounds.clear(); registry.Pitch = {1, 1, 1}; registry.SFXPaused = false;
+}
+void SoundContainer::PauseHeadlessIngamePlayback(bool paused) {
+	auto& registry = HeadlessSounds(); std::scoped_lock lock(registry.Mutex); registry.SFXPaused = paused;
+	for (auto& [sound, playback] : registry.Sounds) playback.Timelines[SFX].PauseGroup(SoundSimulationTime(), paused);
+}
+void SoundContainer::FinishHeadlessIngameLoops() {
+	auto& registry = HeadlessSounds(); std::scoped_lock lock(registry.Mutex);
+	for (auto& [sound, playback] : registry.Sounds) playback.Timelines[SFX].FinishLoops(SoundSimulationTime());
+}
+void SoundContainer::SetHeadlessGlobalPitch(float pitch, bool includeUI, bool includeMusic) {
+	auto& registry = HeadlessSounds(); std::scoped_lock lock(registry.Mutex);
+	for (int bus = 0; bus < 3; ++bus) {
+		if ((bus == UI && !includeUI) || (bus == MUSIC && !includeMusic)) continue;
+		const double multiplier = pitch / registry.Pitch[bus];
+		for (auto& [sound, playback] : registry.Sounds) playback.Timelines[bus].MultiplyPitch(SoundSimulationTime(), multiplier);
+		registry.Pitch[bus] = pitch;
+	}
 }
 
 ConcreteClassInfo(SoundContainer, Entity, 50);
@@ -85,6 +138,7 @@ SoundContainer::~SoundContainer() {
 }
 
 void SoundContainer::Clear() {
+	{ auto& registry = HeadlessSounds(); std::scoped_lock lock(registry.Mutex); registry.Sounds.erase(this); }
 	m_TopLevelSoundSet = std::make_shared<SoundSet>();
 	m_TopLevelSoundSet->Destroy();
 
@@ -355,6 +409,12 @@ void SoundContainer::SetVolume(float newVolume) {
 
 void SoundContainer::SetPitch(float newPitch) {
 	m_Pitch = std::clamp(newPitch, 0.125F, 8.0F);
+	if (!g_AudioMan.IsAudioEnabled()) {
+		auto& registry = HeadlessSounds(); std::scoped_lock lock(registry.Mutex);
+		if (const auto found = registry.Sounds.find(this); found != registry.Sounds.end())
+			for (int bus = 0; bus < 3; ++bus) found->second.Timelines[bus].Pitch(SoundSimulationTime(), m_Pitch * registry.Pitch[bus]);
+		return;
+	}
 	if (IsBeingPlayed()) {
 		g_AudioMan.ChangeSoundContainerPlayingChannelsPitch(this);
 	}
@@ -363,6 +423,12 @@ void SoundContainer::SetPitch(float newPitch) {
 void SoundContainer::SetPaused(bool paused) {
 	if (paused != m_Paused) {
 		m_Paused = paused;
+		if (!g_AudioMan.IsAudioEnabled()) {
+			auto& registry = HeadlessSounds(); std::scoped_lock lock(registry.Mutex);
+			if (const auto found = registry.Sounds.find(this); found != registry.Sounds.end())
+				for (auto& timeline : found->second.Timelines) timeline.Pause(SoundSimulationTime(), paused);
+			return;
+		}
 		g_AudioMan.SetPausedSoundContainerPlayingChannels(this, paused);
 	}
 }
@@ -377,22 +443,57 @@ bool SoundContainer::Play(int player) {
 				return false;
 			}
 		}
+		if (!g_AudioMan.IsAudioEnabled()) {
+			if (m_Loops < -1 || m_BusRouting < 0 || m_BusRouting > 2) return false;
+			if (!m_SoundPropertiesUpToDate) { UpdateSoundProperties(); m_TopLevelSoundSet->SelectNextSounds(); }
+			std::vector<const SoundData*> selected; m_TopLevelSoundSet->GetFlattenedSoundData(selected, true);
+			std::vector<double> lengths; lengths.reserve(selected.size());
+			for (const auto* data : selected) lengths.push_back(ReadSoundLengthWithoutPlayback(data->SoundFile.GetDataPath()));
+			auto& registry = HeadlessSounds(); std::scoped_lock lock(registry.Mutex);
+			const double now = SoundSimulationTime();
+			for (auto iterator = registry.Sounds.begin(); iterator != registry.Sounds.end();)
+				if (!iterator->second.Playing(now)) iterator = registry.Sounds.erase(iterator); else ++iterator;
+			auto& playback = registry.Sounds[this];
+			auto& timeline = playback.Timelines[m_BusRouting];
+			timeline.Pause(now, m_Paused); timeline.PauseGroup(now, m_BusRouting == SFX && registry.SFXPaused);
+			bool played = false;
+			const float variation = 1.0F + std::abs(m_PitchVariation);
+			for (double length : lengths) {
+				if (playback.Count(now) >= c_MaxPlayingSoundsPerContainer) break;
+				const float factor = variation == 1 ? 1 : RandomNum(1.0F / variation, variation);
+				played = timeline.Add(now, length, m_Loops, m_Pitch * factor * registry.Pitch[m_BusRouting]) || played;
+			}
+			if (played) m_TopLevelSoundSet->SelectNextSounds();
+			else if (!playback.Playing(now)) registry.Sounds.erase(this);
+			return played;
+		}
 		return g_AudioMan.PlaySoundContainer(this, player);
 	}
 	return false;
 }
 
 bool SoundContainer::Stop(int player) {
+	if (!g_AudioMan.IsAudioEnabled()) {
+		const bool playing = IsBeingPlayed();
+		auto& registry = HeadlessSounds(); std::scoped_lock lock(registry.Mutex); registry.Sounds.erase(this); return playing;
+	}
 	return (HasAnySounds() && IsBeingPlayed()) ? g_AudioMan.StopSoundContainerPlayingChannels(this, player) : false;
 }
 
 bool SoundContainer::Restart(int player) {
+	if (!g_AudioMan.IsAudioEnabled()) return Stop(player) && Play(player);
 	return (HasAnySounds() && IsBeingPlayed()) ? g_AudioMan.StopSoundContainerPlayingChannels(this, player) && g_AudioMan.PlaySoundContainer(this, player) : false;
 }
 
 void SoundContainer::FadeOut(int fadeOutTime) {
 	if (!m_WasFadedOut && IsBeingPlayed()) {
 		m_WasFadedOut = true;
+		if (!g_AudioMan.IsAudioEnabled()) {
+			auto& registry = HeadlessSounds(); std::scoped_lock lock(registry.Mutex);
+			if (const auto found = registry.Sounds.find(this); found != registry.Sounds.end())
+				for (auto& timeline : found->second.Timelines) timeline.Fade(SoundSimulationTime(), fadeOutTime);
+			return;
+		}
 		return g_AudioMan.FadeOutSoundContainerPlayingChannels(this, fadeOutTime);
 	}
 }

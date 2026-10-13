@@ -43,6 +43,7 @@
 #include "PresetMan.h"
 #include "SoundContainer.h"
 #include "SoundSet.h"
+#include "SoundPlaybackTimeline.h"
 #include "UInputMan.h"
 #include "PerformanceMan.h"
 #include "FrameMan.h"
@@ -1489,12 +1490,34 @@ namespace {
 		std::unique_ptr<SoundContainer> confirm(preset ? dynamic_cast<SoundContainer*>(preset->Clone()) : nullptr);
 		const float flacLength = confirm ? confirm->GetLength(Type::Any) : 0;
 		const bool soundless = !g_AudioMan.IsAudioEnabled() && !container.IsBeingPlayed();
+		bool playbackPassed = TestSoundPlaybackTimeline() && confirm && confirm->Play() && confirm->IsBeingPlayed();
+		if (playbackPassed) {
+			confirm->SetSoundOverlapMode(SoundContainer::IGNORE_PLAY);
+			playbackPassed = !confirm->Play();
+			confirm->SetSoundOverlapMode(SoundContainer::RESTART);
+			playbackPassed = confirm->Play() && confirm->IsBeingPlayed() && playbackPassed;
+			confirm->SetPaused(true); confirm->SetPitch(2);
+			confirm->SetPosition(Vector(12, 4)); confirm->SetVolume(0.5F);
+			playbackPassed = confirm->IsPaused() && confirm->IsBeingPlayed() && playbackPassed;
+			confirm->FadeOut(0);
+			playbackPassed = !confirm->IsBeingPlayed() && playbackPassed;
+			confirm->SetPaused(false); confirm->SetSoundOverlapMode(SoundContainer::OVERLAP); confirm->SetLoopSetting(-1);
+			for (int index = 0; index < c_MaxPlayingSoundsPerContainer; ++index) playbackPassed = confirm->Play() && playbackPassed;
+			playbackPassed = !confirm->Play() && confirm->IsBeingPlayed() && confirm->GetPlayingChannels()->empty() && playbackPassed;
+			g_AudioMan.SetGlobalPitch(0.5F, true, true); g_AudioMan.PauseIngameSounds(true); g_AudioMan.FinishIngameLoopingSounds();
+			g_AudioMan.PauseIngameSounds(false); g_AudioMan.StopAll(); g_AudioMan.SetGlobalPitch(1, true, true);
+			playbackPassed = !confirm->IsBeingPlayed() && confirm->Play() && playbackPassed;
+			SoundContainer copy(*confirm);
+			playbackPassed = !copy.IsBeingPlayed() && confirm->Stop() && !confirm->IsBeingPlayed() && playbackPassed;
+			playbackPassed = confirm->Play() && confirm->Restart() && playbackPassed;
+			confirm->Reset(); playbackPassed = !confirm->IsBeingPlayed() && playbackPassed;
+		}
 		std::error_code error; const bool removed = std::filesystem::remove(path, error) && !error;
-		const bool passed = file && emptySafe && soundless && any == 100 && next == 100 && parallel[0] == 100 && parallel[1] == 100 &&
+		const bool passed = playbackPassed && file && emptySafe && soundless && any == 100 && next == 100 && parallel[0] == 100 && parallel[1] == 100 &&
 		    alternativeLength == 100 && missingLength == 0 && flacLength > 0 && std::isfinite(flacLength) && removed;
 		log << "headless_sound_length_smoke=" << (passed ? "passed" : "failed") << " wav_ms=" << any << " next_ms=" << next
 		    << " alternative_ms=" << alternativeLength << " missing_ms=" << missingLength << " flac_ms=" << flacLength
-		    << " empty_safe=" << emptySafe << " soundless=" << soundless << " cleanup=" << removed << '\n' << std::flush;
+		    << " empty_safe=" << emptySafe << " soundless=" << soundless << " playback=" << playbackPassed << " cleanup=" << removed << '\n' << std::flush;
 		return passed;
 	}
 

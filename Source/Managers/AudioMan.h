@@ -247,22 +247,14 @@ namespace RTE {
 
 #pragma region Global Playback and Handling
 		/// Stops all playback.
-		void StopAll() {
-			if (m_AudioEnabled) {
-				m_MasterChannelGroup->stop();
-			}
-		}
+		void StopAll();
 
 		/// Makes all sounds that are looping stop looping, allowing them to play once more then be finished.
 		void FinishIngameLoopingSounds();
 
 		/// Pauses all ingame sounds.
 		/// @param pause Whether to pause sounds or resume them.
-		void PauseIngameSounds(bool pause = true) {
-			if (m_AudioEnabled) {
-				m_SFXChannelGroup->setPaused(pause);
-			}
-		}
+		void PauseIngameSounds(bool pause = true);
 #pragma endregion
 
 #pragma region Music Handling

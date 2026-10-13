@@ -23,6 +23,7 @@ AudioMan::~AudioMan() {
 }
 
 void AudioMan::Clear() {
+	SoundContainer::ResetHeadlessPlayback();
 	m_AudioEnabled = false;
 	m_CurrentActivityHumanPlayerPositions.clear();
 	m_SoundChannelMinimumAudibleDistances.clear();
@@ -204,6 +205,8 @@ void AudioMan::Update() {
 
 void AudioMan::SetGlobalPitch(float pitch, bool includeImmobileSounds, bool includeMusic) {
 	if (!m_AudioEnabled) {
+		m_GlobalPitch = std::clamp(pitch, 0.125F, 8.0F);
+		SoundContainer::SetHeadlessGlobalPitch(m_GlobalPitch, includeImmobileSounds, includeMusic);
 		return;
 	}
 	if (m_IsInMultiplayerMode) {
@@ -238,7 +241,16 @@ bool AudioMan::SetMusicPitch(float pitch) {
 	return true;
 }
 
+void AudioMan::StopAll() {
+	if (m_AudioEnabled) m_MasterChannelGroup->stop();
+	else SoundContainer::StopHeadlessPlayback();
+}
+void AudioMan::PauseIngameSounds(bool pause) {
+	if (m_AudioEnabled) m_SFXChannelGroup->setPaused(pause);
+	else SoundContainer::PauseHeadlessIngamePlayback(pause);
+}
 void AudioMan::FinishIngameLoopingSounds() {
+	if (!m_AudioEnabled) { SoundContainer::FinishHeadlessIngameLoops(); return; }
 	if (m_AudioEnabled) {
 		int numberOfPlayingChannels;
 		FMOD::Channel* soundChannel;
@@ -357,6 +369,7 @@ void AudioMan::ClearSoundEvents(int player) {
 }
 
 bool AudioMan::PlaySoundContainer(SoundContainer* soundContainer, int player) {
+	if (!m_AudioEnabled && soundContainer) return soundContainer->Play(player);
 	if (!m_AudioEnabled || !soundContainer || soundContainer->GetPlayingChannels()->size() >= c_MaxPlayingSoundsPerContainer) {
 		return false;
 	}

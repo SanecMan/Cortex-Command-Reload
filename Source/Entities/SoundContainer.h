@@ -112,7 +112,13 @@ namespace RTE {
 
 		/// Indicates whether any sound in this SoundContainer is currently being played.
 		/// @return Whether any sounds are playing.
-		bool IsBeingPlayed() const { return !m_PlayingChannels.empty(); }
+		bool IsBeingPlayed() const;
+		// Internal device-free playback controls used by AudioMan.
+		static void ResetHeadlessPlayback();
+		static void StopHeadlessPlayback();
+		static void PauseHeadlessIngamePlayback(bool paused);
+		static void FinishHeadlessIngameLoops();
+		static void SetHeadlessGlobalPitch(float pitch, bool includeUI, bool includeMusic);
 
 		/// Adds a channel index to the SoundContainer's collection of playing channels.
 		/// @param channel The channel index to add.

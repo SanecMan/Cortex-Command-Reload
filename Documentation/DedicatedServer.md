@@ -144,6 +144,43 @@ processes. Its final screenshot was inspected and showed the Ketanot Hills
 terrain rendered. Both root executables were updated by this verification;
 this is not a manual player-control or broad mod gameplay test.
 
+## Device-free playback lifetime
+
+When AudioMan has no playback device, `SoundContainer` now maintains logical
+voices on the simulation clock. `Play`, `IsBeingPlayed`, `Stop`, `Restart`,
+overlap/ignore/restart policies, loop counts, pause, pitch and fade govern those
+lifetimes without creating FMOD channels. Metadata supplies selected clip lengths.
+SFX/UI/music lifetimes are kept separately, including when a container changes
+bus for a later play. Ingame pause/finish-loops affect SFX; global stop and pitch
+controls follow the existing bus selection. Copy/reset/destruction do not inherit
+or leave active voices. The existing 128-voice limit applies across the buses.
+
+Registry access is serialized by a mutex; this does not make simultaneous
+arbitrary mutation of one SoundContainer/SoundSet thread-safe. Actual playback
+channel IDs remain empty in device-free mode. The ordinary enabled-audio client
+continues to use FMOD channels. Unlike that real-time audio path, device-free
+lifetimes follow simulation time and therefore stop advancing when simulation
+is stopped. Sound event transport, audible-volume modeling and client playback
+of server sounds are still incomplete.
+
+The headless diagnostic includes deterministic timeline tests for expiration,
+finite/infinite loops, overlapping voices, local/group pauses, pitch changes and
+fade. It also exercises actual SoundContainer play policies, the 128-voice cap,
+stop/restart/fade/reset/copy, position/volume setters and AudioMan global controls,
+checking that no physical channels are created.
+
+Windows Meson checks on 2026-10-14: `HeadlessPlayback` completed 60 simulation
+updates with `playback=1`, `soundless=1`, invalid SDL video/audio drivers and
+`gpu_enabled=0`. `HeadlessPlaybackPair` passed two clients through the menu and
+inventory/wound mutation in 31.03 seconds, with zero replica mismatches and 64
+server updates after disconnect. These checks cover lifetime/API behavior and
+ordinary network regression, not listening to remotely replicated sound.
+The root MSBuild `Final|x64` client was rebuilt and paired with the matching v18
+server. `HeadlessPlaybackNativeFinal` passed the device-free lifetime/API probes
+and 60 simulation updates; `HeadlessPlaybackNativeFinalPair` passed two clients
+and the inventory/wound fixture in 33.65 seconds, with 64 updates after
+disconnect. These binaries preserve the existing wire version and content APIs.
+
 ## Sound metadata without playback
 
 Headless content keeps sound file paths without FMOD playback handles.
