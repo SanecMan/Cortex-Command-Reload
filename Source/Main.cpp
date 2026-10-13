@@ -2237,6 +2237,7 @@ int RunPersistentHeadlessServer(const ServerConfiguration& config) {
 	session.Stop();
 	g_ThreadMan.GetPriorityThreadPool().wait_for_tasks();
 	g_ThreadMan.GetBackgroundThreadPool().wait_for_tasks();
+	g_AudioMan.Destroy();
 	g_ConsoleMan.SaveAllText(UTF8::PathToString(logDirectory / "LogConsole.txt"));
 	g_MovableMan.Destroy();
 	g_SceneMan.Destroy();
@@ -2314,13 +2315,16 @@ void InitializeManagers() {
 /// Destroys all the managers and frees all loaded data before termination.
 /// </summary>
 void DestroyManagers() {
+	// Stop FMOD while every channel owner and the console still exist.
+	if (System::IsDebugRun()) GetDebugRunState().Log << "audio_shutdown_begin\n" << std::flush;
+	g_AudioMan.Destroy();
+	if (System::IsDebugRun()) GetDebugRunState().Log << "audio_shutdown_complete\n" << std::flush;
 	g_MetaMan.Destroy();
 	g_PerformanceMan.Destroy();
 	g_MovableMan.Destroy();
 	g_SceneMan.Destroy();
 	g_ActivityMan.Destroy();
 	g_GUISound.Destroy();
-	g_AudioMan.Destroy();
 	g_MusicMan.Destroy();
 	g_PresetMan.Destroy();
 	g_UInputMan.Destroy();
@@ -2904,6 +2908,10 @@ void RunGameLoop() {
 						    worldStateSoundPlayback.HasVoice(event.Voice)) {
 							state.NetworkSoundFixture = event.Container; state.NetworkSoundPlayVerified = true;
 							state.Log << "world_state_sound_play=passed audio_enabled=" << g_AudioMan.IsAudioEnabled() << '\n' << std::flush;
+							if (g_AudioMan.IsAudioEnabled()) {
+								const bool lifetime = g_AudioMan.VerifySoundContainerLifetime();
+								state.Log << "audio_owner_lifetime=" << (lifetime ? "passed" : "failed") << '\n' << std::flush;
+							}
 						}
 						if (state.NetworkSoundPlayVerified && !state.NetworkSoundStopVerified && event.Type == WorldStateSoundProtocol::Action::Stop &&
 						    event.Container == state.NetworkSoundFixture && !worldStateSoundPlayback.HasContainer(event.Container)) {

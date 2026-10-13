@@ -239,7 +239,7 @@ try {
             $clientNetwork -notmatch '(?m)^snapshot=\d+.*missing_presets=0' -or $clientNetwork -match 'missing_presets=[1-9]') { throw 'Client replica checks failed.' }
         if ($CheckSound -and (!$soundStarted -or !$soundStopped -or $clientReport -notmatch '(?m)^world_state_sound_play=passed' -or
             $clientReport -notmatch '(?m)^world_state_sound_stop=passed')) { throw 'Network sound playback/lifecycle fixture failed.' }
-        if ($EnableAudio -and $CheckSound -and $clientReport -notmatch '(?m)^world_state_sound_play=passed audio_enabled=1') { throw 'FMOD playback was not enabled.' }
+        if ($EnableAudio -and $CheckSound -and ($clientReport -notmatch '(?m)^world_state_sound_play=passed audio_enabled=1' -or $clientReport -notmatch '(?m)^audio_owner_lifetime=passed')) { throw 'FMOD playback was not enabled.' }
         if ($CheckTeamFunds -and (!$fundsChanged -or $clientReport -notmatch '(?m)^world_state_team_funds_presentation=passed' -or
             $clientNetwork -notmatch 'funds_team0=12345\.250000 funds_team1=-17\.500000')) { throw 'Client team funds replication failed.' }
     }

@@ -125,6 +125,11 @@ int main() {
     }
     if (!check(voiceIDs.size() == 1600, "concurrent capture count")) return 1;
     capture.End();
+    capture.Begin(); auto finite = play; finite.Loops = 0;
+    capture.Play(&firstSource, finite); capture.Release(&firstSource);
+    const auto tail = capture.Drain(overflow);
+    if (!check(tail.size() == 1 && tail[0].Type == Action::Play && !overflow, "one-shot tail survives source destruction")) return 1;
+    capture.End();
     std::cout << "sound_capture_test=passed\n";
     std::cout << "sound_protocol_test=passed\nsound_queue_test=passed\n";
     return 0;

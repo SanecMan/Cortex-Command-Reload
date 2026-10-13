@@ -23,9 +23,10 @@ public:
 		event.Type = WorldStateSoundProtocol::Action::Play;
 		event.Container = 1; event.Voice = 1;
 		if (!WorldStateSoundProtocol::Detail::Valid(event)) return;
-		auto& id = m_Containers[source];
-		if (!id) id = NextID();
-		event.Container = id; event.Voice = NextID();
+		auto& state = m_Containers[source];
+		if (!state.ID) state.ID = NextID();
+		state.Looping = state.Looping || event.Loops == -1;
+		event.Container = state.ID; event.Voice = NextID();
 		Append(std::move(event));
 	}
 	void Command(const void* source, WorldStateSoundProtocol::Event event) {
@@ -34,7 +35,7 @@ public:
 		if (!m_Enabled) return;
 		const auto found = m_Containers.find(source);
 		if (found == m_Containers.end() || event.Type == WorldStateSoundProtocol::Action::Play) return;
-		event.Container = found->second;
+		event.Container = found->second.ID;
 		if (WorldStateSoundProtocol::Detail::Valid(event)) Append(std::move(event));
 	}
 	void StopAll() {
@@ -42,7 +43,7 @@ public:
 		std::scoped_lock lock(m_Mutex);
 		if (!m_Enabled) return;
 		for (const auto& [source, id] : m_Containers) {
-			WorldStateSoundProtocol::Event stop; stop.Container = id; Append(std::move(stop));
+			WorldStateSoundProtocol::Event stop; stop.Container = id.ID; Append(std::move(stop));
 		}
 		m_Containers.clear();
 	}
@@ -51,8 +52,9 @@ public:
 		std::scoped_lock lock(m_Mutex);
 		if (!m_Enabled) return;
 		if (const auto found = m_Containers.find(source); found != m_Containers.end()) {
-			WorldStateSoundProtocol::Event stop; stop.Container = found->second;
-			Append(std::move(stop)); m_Containers.erase(found);
+			WorldStateSoundProtocol::Event stop; stop.Container = found->second.ID;
+			if (found->second.Looping) Append(std::move(stop));
+			m_Containers.erase(found);
 		}
 	}
 	std::vector<WorldStateSoundProtocol::Event> Drain(bool& overflow) {
@@ -74,7 +76,8 @@ private:
 	}
 	std::atomic<bool> m_Enabled{false};
 	std::mutex m_Mutex;
-	std::unordered_map<const void*, std::uint64_t> m_Containers;
+	struct ContainerState { std::uint64_t ID = 0; bool Looping = false; };
+	std::unordered_map<const void*, ContainerState> m_Containers;
 	std::deque<WorldStateSoundProtocol::Event> m_Events;
 	std::uint64_t m_NextID = 0;
 	bool m_Overflow = false;

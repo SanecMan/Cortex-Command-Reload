@@ -26,6 +26,8 @@ AudioMan::~AudioMan() {
 void AudioMan::Clear() {
 	SoundContainer::ResetHeadlessPlayback();
 	m_AudioEnabled = false;
+	{ std::scoped_lock lock(m_ChannelOwnersMutex); m_ChannelOwners.clear(); }
+	{ std::scoped_lock lock(m_FinishedChannelsMutex); m_FinishedChannels.clear(); }
 	m_CurrentActivityHumanPlayerPositions.clear();
 	m_SoundChannelMinimumAudibleDistances.clear();
 
@@ -132,13 +134,17 @@ bool AudioMan::Initialize() {
 void AudioMan::Destroy() {
 	if (m_AudioEnabled) {
 		StopAll();
+		const auto closed = m_AudioSystem->close();
+		if (closed != FMOD_OK) g_ConsoleMan.PrintString("ERROR: FMOD close failed: " + std::string(FMOD_ErrorString(closed)));
 		m_AudioSystem->release();
+		m_AudioSystem = nullptr;
 	}
 	Clear();
 }
 
 void AudioMan::Update() {
 	if (m_AudioEnabled) {
+		DrainFinishedChannels();
 		FMOD_RESULT status = FMOD_OK;
 
 		if (m_MuteAudioOnFocusLoss && !g_WindowMan.AnyWindowHasFocus()) {
@@ -198,6 +204,7 @@ void AudioMan::Update() {
 		}
 
 		status = status == FMOD_OK ? m_AudioSystem->update() : status;
+		DrainFinishedChannels();
 		if (status != FMOD_OK) {
 			g_ConsoleMan.PrintString("ERROR: Could not update AudioMan due to FMOD error: " + std::string(FMOD_ErrorString(status)));
 		}
@@ -244,7 +251,19 @@ bool AudioMan::SetMusicPitch(float pitch) {
 
 void AudioMan::StopAll() {
 	GetWorldStateSoundCapture().StopAll();
-	if (m_AudioEnabled) m_MasterChannelGroup->stop();
+	if (m_AudioEnabled) {
+		std::scoped_lock lock(m_ChannelOwnersMutex);
+		for (const auto& [index, owner] : m_ChannelOwners) {
+			FMOD::Channel* channel = nullptr;
+			if (m_AudioSystem->getChannel(index, &channel) == FMOD_OK && channel) {
+				channel->setCallback(nullptr); channel->setUserData(nullptr);
+			}
+			if (owner.Container) owner.Container->RemovePlayingChannel(index);
+		}
+		m_MasterChannelGroup->stop();
+		m_ChannelOwners.clear();
+		{ std::scoped_lock distanceLock(m_SoundChannelMinimumAudibleDistancesMutex); m_SoundChannelMinimumAudibleDistances.clear(); }
+	}
 	else SoundContainer::StopHeadlessPlayback();
 }
 void AudioMan::PauseIngameSounds(bool pause) {
@@ -454,7 +473,12 @@ bool AudioMan::PlaySoundContainer(SoundContainer* soundContainer, int player) {
 			}
 		}
 
-		soundContainer->AddPlayingChannel(channelIndex);
+		{ std::scoped_lock lock(m_ChannelOwnersMutex);
+			if (const auto previous = m_ChannelOwners.find(channelIndex); previous != m_ChannelOwners.end() && previous->second.Container)
+				previous->second.Container->RemovePlayingChannel(channelIndex);
+			m_ChannelOwners[channelIndex] = {soundContainer, soundContainer->GetCustomPanValue(), soundContainer->GetPanningStrengthMultiplier(), soundContainer->GetVolume(), soundContainer->GetLoopSetting() == -1};
+			soundContainer->AddPlayingChannel(channelIndex);
+		}
 		soundContainer->CaptureNetworkPlay(*soundData, pitchVariationMultiplier, player);
 	}
 
@@ -609,14 +633,19 @@ bool AudioMan::StopSoundContainerPlayingChannels(SoundContainer* soundContainer,
 	FMOD_RESULT result = FMOD_OK;
 	FMOD::Channel* soundChannel;
 
-	const std::unordered_set<int>* channels = soundContainer->GetPlayingChannels();
-	for (std::unordered_set<int>::const_iterator channelIterator = channels->begin(); channelIterator != channels->end();) {
-		result = m_AudioSystem->getChannel((*channelIterator), &soundChannel);
-		++channelIterator; // NOTE - stopping the sound will remove the channel, screwing things up if we don't move to the next iterator preemptively
-		result = (result == FMOD_OK) ? soundChannel->stop() : result;
-		if (result != FMOD_OK) {
-			g_ConsoleMan.PrintString("Error: Failed to stop playing channel in SoundContainer " + soundContainer->GetPresetName() + ": " + std::string(FMOD_ErrorString(result)));
+	std::scoped_lock ownerLock(m_ChannelOwnersMutex);
+	const auto* channels = soundContainer->GetPlayingChannels();
+	const std::vector<int> indices(channels->begin(), channels->end());
+	for (int index : indices) {
+		const auto status = m_AudioSystem->getChannel(index, &soundChannel);
+		if (status == FMOD_OK && soundChannel) {
+			soundChannel->setCallback(nullptr); soundChannel->setUserData(nullptr);
+			const auto stopped = soundChannel->stop();
+			if (stopped != FMOD_OK && stopped != FMOD_ERR_INVALID_HANDLE) result = stopped;
 		}
+		soundContainer->RemovePlayingChannel(index); m_ChannelOwners.erase(index);
+		std::scoped_lock distanceLock(m_SoundChannelMinimumAudibleDistancesMutex);
+		m_SoundChannelMinimumAudibleDistances.erase(index);
 	}
 	return result == FMOD_OK;
 }
@@ -693,12 +722,21 @@ void AudioMan::Update3DEffectsForSFXChannels() {
 				result = result == FMOD_OK ? soundChannel->getUserData(&userData) : result;
 				if (result == FMOD_OK) {
 					const SoundContainer* soundContainer = static_cast<SoundContainer*>(userData);
-					if (sqrDistanceToPlayer < (m_MinimumDistanceForPanning * m_MinimumDistanceForPanning) || soundContainer->GetCustomPanValue() != 0.0f) {
+					float pan = 0, panning = 1;
+					if (soundContainer) { pan = soundContainer->GetCustomPanValue(); panning = soundContainer->GetPanningStrengthMultiplier(); }
+					else {
+						int index = 0;
+						if (soundChannel->getIndex(&index) == FMOD_OK) {
+							std::scoped_lock lock(m_ChannelOwnersMutex);
+							if (const auto found = m_ChannelOwners.find(index); found != m_ChannelOwners.end()) { pan = found->second.Pan; panning = found->second.Panning; }
+						}
+					}
+					if (sqrDistanceToPlayer < (m_MinimumDistanceForPanning * m_MinimumDistanceForPanning) || pan != 0.0f) {
 						result = soundChannel->set3DLevel(0);
 					} else if (sqrDistanceToPlayer < (doubleMinimumDistanceForPanning * doubleMinimumDistanceForPanning)) {
-						result = soundChannel->set3DLevel(Lerp(0, 1, 0, m_SoundPanningEffectStrength * soundContainer->GetPanningStrengthMultiplier(), channel3dLevel));
+						result = soundChannel->set3DLevel(Lerp(0, 1, 0, m_SoundPanningEffectStrength * panning, channel3dLevel));
 					} else {
-						result = soundChannel->set3DLevel(m_SoundPanningEffectStrength * soundContainer->GetPanningStrengthMultiplier());
+						result = soundChannel->set3DLevel(m_SoundPanningEffectStrength * panning);
 					}
 				}
 			}
@@ -720,6 +758,15 @@ FMOD_RESULT AudioMan::UpdatePositionalEffectsForSoundChannel(FMOD::Channel* soun
 	}
 
 	const SoundContainer* channelSoundContainer = static_cast<SoundContainer*>(userData);
+	float sourcePan = 0, sourceVolume = 1;
+	if (channelSoundContainer) { sourcePan = channelSoundContainer->GetCustomPanValue(); sourceVolume = channelSoundContainer->GetVolume(); }
+	else {
+		int index = 0;
+		if (soundChannel->getIndex(&index) == FMOD_OK) {
+			std::scoped_lock lock(m_ChannelOwnersMutex);
+			if (const auto found = m_ChannelOwners.find(index); found != m_ChannelOwners.end()) { sourcePan = found->second.Pan; sourceVolume = found->second.Volume; }
+		}
+	}
 
 	bool sceneWraps = g_SceneMan.SceneWrapsX();
 
@@ -785,23 +832,23 @@ FMOD_RESULT AudioMan::UpdatePositionalEffectsForSoundChannel(FMOD::Channel* soun
 	lowpassFrequency = std::clamp(lowpassFrequency, 350.0f, 22000.0f);
 	result = (result == FMOD_OK) ? dsp_multibandeq->setParameterFloat(1, lowpassFrequency) : result;
 
-	if (channelSoundContainer->GetCustomPanValue() != 0.0f) {
-		result = (result == FMOD_OK) ? soundChannel->setPan(channelSoundContainer->GetCustomPanValue()) : result;
+	if (sourcePan != 0.0f) {
+		result = (result == FMOD_OK) ? soundChannel->setPan(sourcePan) : result;
 	}
 
-	float minimumAudibleDistance = m_SoundChannelMinimumAudibleDistances.at(soundChannelIndex);
-	if (shortestDistance >= soundMaxDistance) {
-		attenuatedVolume = 0.0F;
-	} else if (m_SoundChannelMinimumAudibleDistances.find(soundChannelIndex) == m_SoundChannelMinimumAudibleDistances.end()) {
-		g_ConsoleMan.PrintString("ERROR: An error occurred when checking to see if the sound at channel " + std::to_string(soundChannelIndex) + " was less than its minimum audible distance away from the farthest listener.");
-	} else if (sqrLongestDistance < (minimumAudibleDistance * minimumAudibleDistance)) {
-		attenuatedVolume = 0.0F;
+	float minimumAudibleDistance = 0;
+	{
+		std::scoped_lock lock(m_SoundChannelMinimumAudibleDistancesMutex);
+		if (const auto found = m_SoundChannelMinimumAudibleDistances.find(soundChannelIndex); found != m_SoundChannelMinimumAudibleDistances.end())
+			minimumAudibleDistance = found->second;
 	}
+	if (shortestDistance >= soundMaxDistance || sqrLongestDistance < minimumAudibleDistance * minimumAudibleDistance)
+		attenuatedVolume = 0.0F;
 
 	float panLevel;
 	result = result == FMOD_OK ? soundChannel->get3DLevel(&panLevel) : result;
 	if (result == FMOD_OK && (panLevel < 1.0F || attenuatedVolume == 0.0F)) {
-		result = soundChannel->setVolume(attenuatedVolume * channelSoundContainer->GetVolume());
+		result = soundChannel->setVolume(attenuatedVolume * sourceVolume);
 	}
 
 	result = (result == FMOD_OK && (sceneWraps || positionOverride)) ? soundChannel->set3DAttributes(&channelPosition, nullptr) : result;
@@ -809,32 +856,81 @@ FMOD_RESULT AudioMan::UpdatePositionalEffectsForSoundChannel(FMOD::Channel* soun
 	return result;
 }
 
+void AudioMan::DetachSoundContainerPlayingChannels(SoundContainer* source) {
+	if (!m_AudioEnabled || !source) return;
+	std::scoped_lock ownerLock(m_ChannelOwnersMutex);
+	const auto* channels = source->GetPlayingChannels();
+	const std::vector<int> indices(channels->begin(), channels->end());
+	for (int index : indices) {
+		FMOD::Channel* channel = nullptr;
+		const auto found = m_ChannelOwners.find(index);
+		if (m_AudioSystem->getChannel(index, &channel) == FMOD_OK && channel) {
+			channel->setUserData(nullptr);
+			if (found != m_ChannelOwners.end()) {
+				found->second.Container = nullptr;
+				found->second.Pan = source->GetCustomPanValue(); found->second.Panning = source->GetPanningStrengthMultiplier(); found->second.Volume = source->GetVolume();
+				// One-shot explosions retain their tail after their device disappears.
+				// Infinite loops must not remain orphaned indefinitely.
+				if (found->second.Infinite) channel->stop();
+			}
+		} else m_ChannelOwners.erase(index);
+		source->RemovePlayingChannel(index);
+	}
+}
+
+bool AudioMan::VerifySoundContainerLifetime() {
+	if (!m_AudioEnabled) return false;
+	auto create = [this](bool infinite, int& index) {
+		auto sound = std::make_unique<SoundContainer>();
+		sound->GetTopLevelSoundSet().AddSound("Base.rte/Sounds/GUIs/SlicePicked.flac", Vector(), 0, -1, false);
+		sound->SetImmobile(true); sound->SetPaused(true); sound->SetLoopSetting(infinite ? -1 : 0);
+		if (!sound->Play() || sound->GetPlayingChannels()->empty()) return false;
+		index = *sound->GetPlayingChannels()->begin();
+		sound.reset();
+		return true;
+	};
+	int finiteIndex = -1, loopIndex = -1;
+	if (!create(false, finiteIndex)) return false;
+	FMOD::Channel* channel = nullptr; bool playing = false; void* data = reinterpret_cast<void*>(1);
+	bool passed = m_AudioSystem->getChannel(finiteIndex, &channel) == FMOD_OK && channel &&
+	    channel->isPlaying(&playing) == FMOD_OK && playing && channel->getUserData(&data) == FMOD_OK && data == nullptr;
+	if (channel) channel->stop();
+	passed = create(true, loopIndex) && passed;
+	channel = nullptr; playing = false;
+	const auto status = m_AudioSystem->getChannel(loopIndex, &channel);
+	if (status == FMOD_OK && channel) {
+		const auto queried = channel->isPlaying(&playing);
+		passed = (queried == FMOD_ERR_INVALID_HANDLE || (queried == FMOD_OK && !playing)) && passed;
+	} else passed = status == FMOD_ERR_INVALID_HANDLE && passed;
+	m_AudioSystem->update(); DrainFinishedChannels();
+	return passed;
+}
+
+void AudioMan::DrainFinishedChannels() {
+	std::vector<int> finished;
+	{ std::scoped_lock lock(m_FinishedChannelsMutex); finished.swap(m_FinishedChannels); }
+	std::scoped_lock ownerLock(m_ChannelOwnersMutex);
+	for (int index : finished) {
+		const auto found = m_ChannelOwners.find(index);
+		if (found == m_ChannelOwners.end()) continue;
+		FMOD::Channel* channel = nullptr; bool playing = false;
+		if (m_AudioSystem->getChannel(index, &channel) == FMOD_OK && channel &&
+		    channel->isPlaying(&playing) == FMOD_OK && playing) continue; // Reused channel: ignore an older end callback.
+		if (found->second.Container) found->second.Container->RemovePlayingChannel(index);
+		m_ChannelOwners.erase(found);
+		std::scoped_lock distanceLock(m_SoundChannelMinimumAudibleDistancesMutex);
+		m_SoundChannelMinimumAudibleDistances.erase(index);
+	}
+}
+
 FMOD_RESULT F_CALLBACK AudioMan::SoundChannelEndedCallback(FMOD_CHANNELCONTROL* channelControl, FMOD_CHANNELCONTROL_TYPE channelControlType, FMOD_CHANNELCONTROL_CALLBACK_TYPE callbackType, void*, void*) {
 	if (channelControlType == FMOD_CHANNELCONTROL_CHANNEL && callbackType == FMOD_CHANNELCONTROL_CALLBACK_END) {
-		FMOD::Channel* channel = reinterpret_cast<FMOD::Channel*>(channelControl);
-		int channelIndex;
-		FMOD_RESULT result = channel->getIndex(&channelIndex);
-
-		// Remove this playing sound index from the SoundContainer if it has any playing sounds, i.e. it hasn't been reset before this callback happened.
-		void* userData;
-		result = (result == FMOD_OK) ? channel->getUserData(&userData) : result;
-		if (result == FMOD_OK) {
-			SoundContainer* channelSoundContainer = static_cast<SoundContainer*>(userData);
-			if (channelSoundContainer->IsBeingPlayed()) {
-				channelSoundContainer->RemovePlayingChannel(channelIndex);
-			}
-			result = (result == FMOD_OK) ? channel->setUserData(nullptr) : result;
-
-			if (g_AudioMan.m_SoundChannelMinimumAudibleDistances.find(channelIndex) != g_AudioMan.m_SoundChannelMinimumAudibleDistances.end()) {
-				g_AudioMan.m_SoundChannelMinimumAudibleDistances.erase(channelIndex);
-			}
-
-			if (result != FMOD_OK) {
-				g_ConsoleMan.PrintString("ERROR: An error occurred when Ending a sound in SoundContainer " + channelSoundContainer->GetPresetName() + ": " + std::string(FMOD_ErrorString(result)));
-				return result;
-			}
-		} else {
-			g_ConsoleMan.PrintString("ERROR: An error occurred when Ending a sound: " + std::string(FMOD_ErrorString(result)));
+		auto* channel = reinterpret_cast<FMOD::Channel*>(channelControl);
+		int index = 0;
+		if (channel->getIndex(&index) == FMOD_OK) {
+			// Never dereference a container or mutate its channels on an FMOD thread.
+			std::scoped_lock lock(g_AudioMan.m_FinishedChannelsMutex);
+			g_AudioMan.m_FinishedChannels.push_back(index);
 		}
 	}
 	return FMOD_OK;

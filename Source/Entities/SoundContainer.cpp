@@ -144,6 +144,7 @@ SoundContainer::~SoundContainer() {
 }
 
 void SoundContainer::Clear() {
+	if (g_AudioMan.IsAudioEnabled()) g_AudioMan.DetachSoundContainerPlayingChannels(this);
 	GetWorldStateSoundCapture().Release(this);
 	{ auto& registry = HeadlessSounds(); std::scoped_lock lock(registry.Mutex); registry.Sounds.erase(this); }
 	m_TopLevelSoundSet = std::make_shared<SoundSet>();

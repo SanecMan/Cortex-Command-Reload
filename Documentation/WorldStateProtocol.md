@@ -40,9 +40,39 @@ run observed 62 further server ticks after client disconnect. These verify FMOD
 channel startup/lifecycle, not recorded waveform quality or human listening.
 
 Remaining audio coverage includes late-join loop reconstruction, global bus pause
-and pitch changes, dynamic pan changes and actual mix/output comparisons. Native
-Final delivery and Linux validation of v21 are still pending; the root binaries
-remain the previous validated v20 pair until delivery checks succeed.
+and pitch changes, dynamic pan changes and actual mix/output comparisons. Linux validation of v21 passed as recorded below. Native Final was built and
+the root pair now uses v21, but its shutdown delivery test failed. The lifecycle
+fix is not yet in the root binaries; successful native delivery is still required.
+
+The lifecycle update has now been rebuilt in the root Final client and server.
+`SoundOwnerLifetimeDelivered` and `SoundOwnerLifetimeDeliveredRepeat` both passed
+with two audio-enabled clients, explicit container lifetime checks, network
+Play/Stop and clean client exit (31.94/31.64 seconds, 63 further server ticks).
+Meson `SoundShutdownTraceFMOD` and `SoundShutdownTraceRepeat` also passed twice
+in sequence (29.48/29.44 seconds); the headless regression passed in 18.09 seconds.
+Earlier lifecycle/explicit-close trials still reproduced the shutdown failure, so
+these successful repeats should not be treated as proof of every possible FMOD
+shutdown race. The lifetime checks prove finite tails survive owner destruction
+and infinite voices do not remain orphaned. Linux verification of this latest
+lifecycle update is separate from the green v21 transport run below.
+
+Linux CI run `38477672589` for `83ac67d5d50` passed the v21 build, codec/capture
+tests, headless playback/replica diagnostics and both external clients. Build-tree
+startup passed in 13.24 seconds, extracted-package startup in 9.62 seconds, with
+no SDL video initialization and successful SIGTERM shutdown.
+
+The native Final delivery test subsequently failed during FMOD shutdown despite
+successful Play/Stop markers. The dump places the main thread in
+`AudioMan::Destroy -> FMOD::System::release`, with an FMOD worker access violation.
+The original callback directly accessed container pointers, while container reset
+could discard ownership without detaching channels. A lifecycle fix is under
+validation: callbacks queue channel IDs, the audio update processes completions,
+container destruction detaches finite sounds and stops orphaned infinite loops,
+and FMOD shuts down before owners are destroyed. Detached finite sounds retain
+volume and panning metadata. The capture journal also preserves finite sound tails
+when their source disappears. Native delivery must be repeated successfully before
+claiming this shutdown failure is resolved; the dump does not prove every internal
+FMOD failure mechanism.
 
 ## Sound payload preparation (v20 historical checks)
 

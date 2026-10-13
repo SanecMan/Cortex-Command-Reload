@@ -5,6 +5,9 @@
 #include "Timer.h"
 #include "Vector.h"
 #include "Singleton.h"
+#include <mutex>
+#include <vector>
+#include <unordered_map>
 
 #include "fmod/fmod.hpp"
 #include "fmod/fmod_errors.h"
@@ -103,6 +106,7 @@ namespace RTE {
 		/// Gets the audio management system object used for playing all audio.
 		/// @return The audio management system object used by AudioMan for playing audio.
 		FMOD::System* GetAudioSystem() const { return m_AudioSystem; }
+		bool VerifySoundContainerLifetime();
 
 		/// Reports whether audio is enabled.
 		/// @return Whether audio is enabled.
@@ -346,7 +350,14 @@ namespace RTE {
 		std::list<NetworkSoundData> m_SoundEvents[c_MaxClients]; //!< Lists of per player sound events.
 
 		std::mutex g_SoundEventsListMutex[c_MaxClients]; //!< A list for locking sound events for multiplayer to avoid race conditions and other such problems.
-		std::mutex m_SoundChannelMinimumAudibleDistancesMutex; //!, As above but for m_SoundChannelMinimumAudibleDistances
+		mutable std::mutex m_SoundChannelMinimumAudibleDistancesMutex; //!, As above but for m_SoundChannelMinimumAudibleDistances
+		struct ChannelOwner { SoundContainer* Container; float Pan, Panning, Volume; bool Infinite; };
+		mutable std::mutex m_ChannelOwnersMutex;
+		std::mutex m_FinishedChannelsMutex;
+		std::unordered_map<int, ChannelOwner> m_ChannelOwners;
+		std::vector<int> m_FinishedChannels;
+		void DrainFinishedChannels();
+		void DetachSoundContainerPlayingChannels(SoundContainer* source);
 
 	private:
 #pragma region Sound Container Actions and Modifications
