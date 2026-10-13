@@ -1,4 +1,5 @@
 #include "WorldStateSoundProtocol.h"
+#include "WorldStateSoundQueue.h"
 #include <iostream>
 
 int main() {
@@ -64,6 +65,27 @@ int main() {
     Event stop; stop.Container = 1;
     const std::vector<std::uint8_t> golden{0x43,0x43,0x41,0x31,1,0,1,0,1,1,0,0,0,0,0,0,0,0xFF};
     if (!check(Encode(std::vector<Event>{stop}, bytes) && bytes == golden, "fixed little-endian layout")) return 1;
-    std::cout << "sound_protocol_test=passed\n";
+    RTE::WorldStateSoundQueue queue;
+    if (!check(queue.Push(2, 10, source) && queue.Drain(1).empty() && queue.Size() == source.size(), "future scene retained")) return 1;
+    if (!check(queue.Drain(2) == source && queue.Size() == 0 && queue.Drain(2).empty(), "single consumption")) return 1;
+    if (!check(queue.Push(2, 10, source) && queue.Push(2, 9, source) && queue.Drain(2).empty(), "late duplicate and older sequence rejected")) return 1;
+    if (!check(queue.Push(2, 11, source) && queue.Drain(3).empty() && queue.Size() == 0, "stale scene discarded")) return 1;
+    queue.Clear();
+    if (!check(queue.Push(1, 1, source) && queue.Drain(1) == source, "reconnect resets sequence")) return 1;
+    queue.Clear();
+    for (std::uint32_t index = 1; index <= RTE::WorldStateSoundQueue::MaxBatches; ++index)
+        if (!check(queue.Push(1, index, {stop}), "batch capacity")) return 1;
+    if (!check(!queue.Push(1, 33, {stop}) && queue.Size() == 32 && queue.Drain(1).size() == 32, "batch overflow preserves lifecycle events")) return 1;
+    queue.Clear();
+    maximum.resize(MaxEvents);
+    for (std::uint32_t index = 1; index <= 8; ++index)
+        if (!check(queue.Push(1, index, maximum), "event capacity")) return 1;
+    if (!check(!queue.Push(1, 9, {stop}) && queue.Size() == 2048 && queue.Drain(1).size() == 2048, "event overflow preserves lifecycle events")) return 1;
+    queue.Clear();
+    if (!check(queue.Push(1, UINT32_MAX, {stop}) && queue.Push(1, 1, {stop}) && queue.Drain(1).size() == 2, "sequence wrap")) return 1;
+    queue.Clear();
+    if (!check(queue.Push(UINT32_MAX, 1, {stop}) && queue.Push(1, 2, {stop}) && queue.Drain(1).size() == 1 && queue.Size() == 0, "scene wrap")) return 1;
+    if (!check(!queue.Push(0, 1, {stop}) && !queue.Push(1, 0, {stop}), "queue identity validation")) return 1;
+    std::cout << "sound_protocol_test=passed\nsound_queue_test=passed\n";
     return 0;
 }

@@ -15,8 +15,11 @@ now connected to reliable ordered session transport in v20. Sound envelopes
 carry a scene revision and nonzero sequence. The client ignores repeated/older
 sequences, holds future-scene batches, discards stale-scene batches when drained,
 and bounds pending data to 32 batches/2,048 events. Disconnect clears the queue.
-Queue overflow currently discards oldest batches; playback integration must
-handle missing playback-control events when that happens.
+Queue overflow ends the connection with an explicit error rather than silently
+discarding lifecycle commands (for example Stop on a looping voice). Transport
+failures and foreign protocol versions clear pending sounds while retaining the
+last world snapshot. The portable queue regression covers late duplicate packets,
+stale/future scenes, reconnect reset, both capacity limits and sequence/scene wrap.
 Capture of ordinary game sounds and client playback are still separate work.
 This change requires matched v20 client/server binaries and does not yet provide
 audible multiplayer sound. `WorldStateServerSession::SendSoundEvents` is the
@@ -29,6 +32,12 @@ seconds with four internal sound recipients and two separate world-state clients
 Graphical v20 menu/message checks passed in 31.07 seconds with two clients and
 63 additional server ticks after disconnect. These validate packet delivery,
 not audio mixing or late-join reconstruction of active looping sounds.
+
+The lifecycle queue update was compiled in both Meson executables. The standalone
+MSVC test passed the protocol and queue cases described above. Windows
+`SoundQueueLifecycleHeadless` passed with two external clients in 18.42 seconds
+and no SDL video initialization. `SoundQueueLifecycleMenu` passed with two
+graphical clients in 28.45 seconds and 62 additional server ticks after disconnect.
 
 ## Screen messages (v19)
 
