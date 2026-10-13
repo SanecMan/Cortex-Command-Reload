@@ -144,7 +144,51 @@ processes. Its final screenshot was inspected and showed the Ketanot Hills
 terrain rendered. Both root executables were updated by this verification;
 this is not a manual player-control or broad mod gameplay test.
 
-## Emitter visuals (protocol v17)
+## Wound replication (protocol v18)
+
+Protocol v18 adds a numbered `Wound` role to each rotating object's attachment
+tree, including wounds on limbs and other nested attachments. Wounds are kept
+in the native `MOSRotating` wound list, not the ordinary attachment list. Client
+reconciliation preserves matching instances, applies sampled pose/emission
+visuals, removes obsolete wounds and restores list order. Replacing a limb also
+retires its owned wounds. Both endpoints must be rebuilt together.
+
+Replica-only removal updates owned mass and frees the wound without selecting
+random gameplay wounds or inflicting damage. Adoption uses `AddWound` with the
+gib-limit check disabled. No local emitter Update, injury simulation or particle
+spawning runs on the client. `.rte` wound definitions and Lua APIs are unchanged.
+Wound slots must be contiguous for each parent; only emitter classes with valid
+emitter state are accepted. Existing attachment count/depth limits still apply.
+
+Diagnostic native tests exercise wounds on the body and arm, instance retention,
+reordering, removal and final mass restoration. The two-client inventory fixture
+now starts with three wounds, then removes a wounded arm and replaces body wounds
+with one moved wound; initial/mutated stages require those wire records and
+native attachment matching. Native tests also compare the wounded source and
+replica's CPU-rendered pixels and require the image to change after wound removal.
+Replica removal detaches the wound under callback suppression before deletion,
+unregistering mod-provided pie slices/listeners. Replicated sound, postprocess glow and arbitrary
+Lua HUD state remain separate work.
+
+Windows Meson validation on 2026-10-14: `WoundV18Native` passed 60 updates with
+exit code 0, codec, native ownership/mass and pixel checks. `WoundV18Pair` passed
+two clients through the main-menu connection and inventory mutation in 30.70
+seconds. Both required the three-wound initial stage and one-wound changed stage,
+matched their native attachment trees with zero mismatches, and reported zero
+local simulation ticks. The server continued 64 updates after disconnect. This
+does not establish compatibility with every mod's wound scripts or replicated
+audio/glow effects; timings are verification durations, not benchmarks.
+`WoundV18Headless` separately loaded 10 official modules and completed 60
+simulation updates with intentionally invalid SDL video/audio drivers,
+`video_initialized=0` and `gpu_enabled=0`. This validates Windows device-free
+startup/simulation, not Linux or the graphical wound comparison (which runs in
+the ordinary diagnostic client).
+The root MSBuild `Final|x64` client was rebuilt and paired with the v18 server.
+`WoundV18NativeFinalPair` passed both menu-connected clients and the wound-bearing
+inventory fixture in 31.91 seconds, with zero attachment mismatches and 63
+server updates after disconnect. Both root binaries now use protocol v18.
+
+## Emitter visuals (protocol v17 foundation)
 
 Protocol v17 adds emission-enabled and flash-visible state for root and nested
 `AEmitter` / `AEJetpack` instances, attachment scale, and the native `EmitterFlash`
@@ -164,7 +208,7 @@ passed codec truncation/invalid-field checks and native attachment checks.
 The native emitter test compares CPU-rendered source and replica pixels with
 emission enabled, then checks that disabling emission changes the image and
 hides the flash. This covers sustained emitter flash state; a burst occurring
-entirely between snapshots can still be missed. Wound emitters, postprocess glow
+entirely between snapshots can still be missed. Postprocess glow
 registration, replicated audio and arbitrary Lua HUD state remain incomplete.
 
 The root MSBuild `Final|x64` game was rebuilt and paired with the v17 server.
@@ -193,8 +237,8 @@ Trees are limited to 256 nodes and 16 levels per rotating object, with bounded
 UTF-8 identity strings and finite numeric fields. Truncated data, invalid parent
 indices, repeated slots and invalid role values are rejected. Exceeding a capture
 limit rejects the snapshot rather than silently removing server attachments.
-Wound emitters and arbitrary Lua-local state are not represented by this tree.
-The subsequent v17 extension above adds sampled emitter flash activation.
+The subsequent v17/v18 extensions above add sampled emitter flash activation
+and wound ownership. Arbitrary Lua-local state is not represented by this tree.
 
 Windows x64 Meson validation on 2026-10-08:
 

@@ -55,7 +55,7 @@ AttachmentRole RoleOf(const MOSRotating& parent, const Attachable* child, std::u
 }
 std::vector<Slot> Slots(const MOSRotating& parent) {
 	std::vector<Slot> result;
-	result.reserve(parent.GetAttachables().size());
+	result.reserve(parent.GetAttachables().size() + parent.GetWoundList().size());
 	std::uint16_t generic = 0;
 	for (Attachable* child : parent.GetAttachables()) {
 		std::uint16_t index = 0;
@@ -63,12 +63,19 @@ std::vector<Slot> Slots(const MOSRotating& parent) {
 		if (role == AttachmentRole::Generic) index = generic++;
 		result.push_back({role, index, child});
 	}
+	for (std::size_t index = 0; index < parent.GetWoundList().size(); ++index)
+		result.push_back({AttachmentRole::Wound, static_cast<std::uint16_t>(index), parent.GetWoundList()[index]});
 	return result;
 }
 bool SameIdentity(const Attachable& child, const AttachmentState& state) {
 	return child.GetClassName() == state.ClassName && child.GetModuleName() == state.ModuleName && child.GetPresetName() == state.PresetName;
 }
 void Retire(MOSRotating& parent, Attachable* child) {
+	if (auto* wound = dynamic_cast<AEmitter*>(child); wound &&
+	    std::find(parent.GetWoundList().begin(), parent.GetWoundList().end(), wound) != parent.GetWoundList().end()) {
+		parent.RemoveReplicaWound(wound);
+		return;
+	}
 	child->SetDeleteWhenRemovedFromParent(false); child->SetGibWhenRemovedFromParent(false); child->SetToDelete(false);
 	std::unique_ptr<Attachable> owned(parent.RemoveAttachable(child, false, false));
 	if (owned) owned->DestroyScriptState();
@@ -108,6 +115,11 @@ bool Adopt(MOSRotating& parent, Attachable* child, AttachmentRole role) {
 		ADOPT(FirearmFlash, HDFirearm, Attachable, SetFlash)
 		ADOPT(TurretDevice, Turret, HeldDevice, AddMountedDevice)
 		ADOPT(EmitterFlash, AEmitter, Attachable, SetFlash)
+		case Wound: {
+			auto* wound = dynamic_cast<AEmitter*>(child); if (!wound) return false;
+			parent.AddWound(wound, wound->GetParentOffset(), false);
+			return std::find(parent.GetWoundList().begin(), parent.GetWoundList().end(), wound) != parent.GetWoundList().end();
+		}
 		case Generic: parent.AddAttachable(child); return true;
 	}
 #undef ADOPT
@@ -210,6 +222,7 @@ bool Apply(MOSRotating& object, const WorldStateProtocol::ObjectState& state) {
 		auto current = Slots(*parent.Object);
 		std::vector<Attachable*> order;
 		std::vector<HeldDevice*> mountedOrder;
+		std::vector<AEmitter*> woundOrder;
 		std::unordered_set<Attachable*> retained;
 		for (std::size_t childIndex = 0; childIndex < state.Attachments.size(); ++childIndex) {
 			const auto& node = state.Attachments[childIndex];
@@ -226,12 +239,15 @@ bool Apply(MOSRotating& object, const WorldStateProtocol::ObjectState& state) {
 				if (!Adopt(*parent.Object, replacement, node.Role)) return false;
 				clone.release(); child = replacement;
 			}
-			retained.insert(child); order.push_back(child);
+			retained.insert(child);
+			if (node.Role == AttachmentRole::Wound) woundOrder.push_back(dynamic_cast<AEmitter*>(child));
+			else order.push_back(child);
 			if (node.Role == AttachmentRole::TurretDevice) mountedOrder.push_back(dynamic_cast<HeldDevice*>(child));
 			parents.push_back({child, static_cast<std::uint16_t>(childIndex)});
 		}
 		for (const auto& slot : current) if (slot.Object && !retained.contains(slot.Object)) Retire(*parent.Object, slot.Object);
 		if (!parent.Object->SetReplicaAttachmentOrder(order)) return false;
+		if (!parent.Object->SetReplicaWoundOrder(woundOrder)) return false;
 		if (auto* turret = dynamic_cast<Turret*>(parent.Object)) if (!turret->SetReplicaMountedDeviceOrder(mountedOrder)) return false;
 	}
 	return ApplyPose(object, state.Attachments);
@@ -335,6 +351,43 @@ bool TestNative() {
 	std::unique_ptr<Arm> replacement(dynamic_cast<Arm*>(body->GetFGArm()->Clone()));
 	if (!replacement) return false;
 	source->SetFGArm(replacement.release());
-	return matches() && target->GetFGArm();
+	if (!matches() || !target->GetFGArm()) return false;
+	const auto* woundPreset = dynamic_cast<const AEmitter*>(g_PresetMan.GetEntityPreset("AEmitter", "Wound Flesh", "Base.rte"));
+	if (!woundPreset) return false;
+	auto addWound = [&](MOSRotating& owner, Vector offset) {
+		std::unique_ptr<AEmitter> wound(dynamic_cast<AEmitter*>(woundPreset->Clone()));
+		if (!wound) return false;
+		wound->EnableEmission(false);
+		owner.AddWound(wound.get(), offset, false);
+		if (wound->GetParent() != &owner) return false;
+		wound.release(); return true;
+	};
+	const float unwoundedMass = source->GetMass();
+	if (!addWound(*source, Vector(2, 3)) || !addWound(*source, Vector(-3, 2)) ||
+	    !addWound(*source->GetFGArm(), Vector(4, 0)) || !matches() ||
+	    target->GetWoundList().size() != 2 || target->GetFGArm()->GetWoundList().size() != 1 ||
+	    !near(source->GetMass(), target->GetMass())) return false;
+	AEmitter* retainedWound = target->GetWoundList()[0];
+	using BitmapOwner = std::unique_ptr<BITMAP, void(*)(BITMAP*)>;
+	BitmapOwner wounded(create_bitmap_ex(32, 512, 256), destroy_bitmap);
+	BitmapOwner replica(create_bitmap_ex(32, 512, 256), destroy_bitmap);
+	if (!wounded || !replica) return false;
+	clear_to_color(wounded.get(), 0); clear_to_color(replica.get(), 0);
+	source->Draw(wounded.get(), Vector(), g_DrawColor); target->Draw(replica.get(), Vector(), g_DrawColor);
+	for (int y = 0; y < 256; ++y) for (int x = 0; x < 512; ++x)
+		if (getpixel(wounded.get(), x, y) != getpixel(replica.get(), x, y)) return false;
+	if (!matches() || target->GetWoundList()[0] != retainedWound) return false;
+	const auto& wounds = source->GetWoundList();
+	if (source->SetReplicaWoundOrder({wounds[0], wounds[0]}) ||
+	    !source->SetReplicaWoundOrder({wounds[1], wounds[0]}) || !matches()) return false;
+	if (!source->RemoveReplicaWound(source->GetWoundList()[0]) || !matches() || target->GetWoundList().size() != 1) return false;
+	if (!source->RemoveReplicaWound(source->GetWoundList()[0]) ||
+	    !source->GetFGArm()->RemoveReplicaWound(source->GetFGArm()->GetWoundList()[0]) || !matches()) return false;
+	clear_to_color(replica.get(), 0); target->Draw(replica.get(), Vector(), g_DrawColor);
+	bool pixelsChanged = false;
+	for (int y = 0; y < 256; ++y) for (int x = 0; x < 512; ++x)
+		pixelsChanged = pixelsChanged || getpixel(wounded.get(), x, y) != getpixel(replica.get(), x, y);
+	return pixelsChanged && target->GetWoundList().empty() && target->GetFGArm()->GetWoundList().empty() &&
+	    near(source->GetMass(), unwoundedMass) && near(target->GetMass(), unwoundedMass);
 }
 }

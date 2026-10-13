@@ -400,6 +400,9 @@ namespace RTE {
 		/// Gets a const reference to the list of wounds on this MOSRotating.
 		/// @return A const reference to the list of wounds on this MOSRotating.
 		const std::vector<AEmitter*>& GetWoundList() const { return m_Wounds; }
+		// Replica-only ownership operations: no damage, gibbing or gameplay removal selection.
+		bool RemoveReplicaWound(AEmitter* wound);
+		bool SetReplicaWoundOrder(const std::vector<AEmitter*>& order);
 
 		/// Gets the number of wounds attached to this MOSRotating.
 		/// Includes any Attachables (and their Attachables, etc.) that have a positive damage multiplier.

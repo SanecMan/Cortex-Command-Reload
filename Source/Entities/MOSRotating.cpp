@@ -1,4 +1,5 @@
 #include "MOSRotating.h"
+#include "ObjectScriptExecution.h"
 
 #include "CameraMan.h"
 #include "SettingsMan.h"
@@ -1483,6 +1484,28 @@ void MOSRotating::AddAttachable(Attachable* attachable) {
 	if (attachable) {
 		AddAttachable(attachable, attachable->GetParentOffset());
 	}
+}
+
+bool MOSRotating::RemoveReplicaWound(AEmitter* wound) {
+	const auto found = std::find(m_Wounds.begin(), m_Wounds.end(), wound);
+	if (found == m_Wounds.end()) return false;
+	ObjectScriptExecution::SuppressionScope suppress;
+	m_AttachableAndWoundMass -= wound->GetMass();
+	m_Wounds.erase(found);
+	wound->SetParent(nullptr); // Unregister mod-provided pie slices/listeners before freeing it.
+	wound->DestroyScriptState();
+	delete wound;
+	return true;
+}
+
+bool MOSRotating::SetReplicaWoundOrder(const std::vector<AEmitter*>& order) {
+	if (order.size() != m_Wounds.size()) return false;
+	if (order == m_Wounds) return true;
+	std::unordered_set<AEmitter*> unique;
+	for (AEmitter* wound : order)
+		if (!wound || !unique.insert(wound).second || std::find(m_Wounds.begin(), m_Wounds.end(), wound) == m_Wounds.end()) return false;
+	m_Wounds = order;
+	return true;
 }
 
 bool MOSRotating::SetReplicaAttachmentOrder(const std::vector<Attachable*>& order) {

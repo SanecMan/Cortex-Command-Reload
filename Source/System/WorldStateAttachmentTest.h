@@ -26,7 +26,9 @@ inline bool TestWorldStateAttachmentCodec() {
 	emitter.HandOffsetX = 0; emitter.HasEmitterState = emitter.EmissionEnabled = emitter.FlashVisible = true;
 	AttachmentState flash = gun; flash.Parent = 3; flash.Role = AttachmentRole::EmitterFlash;
 	flash.ClassName = "Attachable"; flash.PresetName = "Flash"; flash.Scale = 0.375F;
-	body.Attachments = {arm, gun, magazine, emitter, flash}; source.Objects.push_back(body);
+	AttachmentState wound = emitter; wound.ClassName = "AEmitter"; wound.PresetName = "Wound Flesh";
+	wound.Role = AttachmentRole::Wound; wound.FlashVisible = false;
+	body.Attachments = {arm, gun, magazine, emitter, flash, wound}; source.Objects.push_back(body);
 	std::vector<std::uint8_t> packet;
 	Snapshot decoded;
 	if (!EncodeSnapshot(source, 1, packet) || !DecodeSnapshot(packet, decoded) || decoded.Objects != source.Objects) return false;
@@ -40,6 +42,9 @@ inline bool TestWorldStateAttachmentCodec() {
 	invalid = source; invalid.Objects[0].Attachments[0].HasEmitterState = true; if (!rejects(invalid)) return false;
 	invalid = source; invalid.Objects[0].Attachments[4].Scale = std::numeric_limits<float>::infinity(); if (!rejects(invalid)) return false;
 	invalid = source; invalid.Objects[0].FlashVisible = true; if (!rejects(invalid)) return false;
+	invalid = source; invalid.Objects[0].Attachments[5].Role = AttachmentRole::Wound; invalid.Objects[0].Attachments[5].ClassName = "Arm"; if (!rejects(invalid)) return false;
+	invalid = source; invalid.Objects[0].Attachments[5].Slot = 1; if (!rejects(invalid)) return false;
+	invalid = source; invalid.Objects[0].Attachments[5].HasEmitterState = false; if (!rejects(invalid)) return false;
 	invalid = source; invalid.Objects[0].Attachments[0].Parent = 0; if (!rejects(invalid)) return false;
 	invalid = source; invalid.Objects[0].Attachments[1].Parent = 2; if (!rejects(invalid)) return false;
 	invalid = source; invalid.Objects[0].Attachments.push_back(arm); if (!rejects(invalid)) return false;

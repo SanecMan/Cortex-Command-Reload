@@ -5,6 +5,7 @@
 #include "Arm.h"
 #include "HDFirearm.h"
 #include "Magazine.h"
+#include "AEmitter.h"
 #include "MovableMan.h"
 #include "PresetMan.h"
 #include "ThreadMan.h"
@@ -61,6 +62,15 @@ inline HDFirearm* CloneInventoryFixtureGun(int rounds) {
 	if (!gun || !gun->GetMagazine()) return nullptr;
 	gun->SetTeam(0); gun->GetMagazine()->SetRoundCount(rounds); clone.release(); return gun;
 }
+inline bool AddInventoryFixtureWound(MOSRotating& parent, Vector offset) {
+	const Entity* preset = g_PresetMan.GetEntityPreset("AEmitter", "Wound Flesh", "Base.rte");
+	std::unique_ptr<AEmitter> wound(preset ? dynamic_cast<AEmitter*>(preset->Clone()) : nullptr);
+	if (!wound) return false;
+	wound->EnableEmission(false); wound->SetLifetime(0);
+	parent.AddWound(wound.get(), offset, false);
+	if (wound->GetParent() != &parent) return false;
+	wound.release(); return true;
+}
 inline bool CreateWorldStateInventoryFixture() {
 	if (InventoryFixtureCarrier && g_MovableMan.IsActor(InventoryFixtureCarrier)) return false;
 	g_ThreadMan.GetPriorityThreadPool().wait_for_tasks();
@@ -87,6 +97,8 @@ inline bool CreateWorldStateInventoryFixture() {
 		passenger->GetFGArm()->SetRotAngle(0.8F + index * 0.3F);
 		passenger->GetFGArm()->SetParentOffset(Vector(3 + index, 2));
 		passenger->GetFGArm()->SetHandCurrentOffset(Vector(7, -2));
+		if (index == 0 && (!AddInventoryFixtureWound(*passenger, Vector(2, 3)) ||
+		    !AddInventoryFixtureWound(*passenger, Vector(-3, 2)) || !AddInventoryFixtureWound(*passenger->GetFGArm(), Vector(4, 0)))) return false;
 		if (index == 0) {
 			const Entity* shieldPreset = g_PresetMan.GetEntityPreset("HeldDevice", "Combat Shield", "Coalition.rte");
 			std::unique_ptr<Entity> shield(shieldPreset ? shieldPreset->Clone() : nullptr);
@@ -122,6 +134,9 @@ inline bool MutateWorldStateInventoryFixture() {
 	passenger->GetBGArm()->SetHeldDevice(background.release());
 	second->GetBGArm()->SetHeldDevice(nullptr);
 	if (!passenger->GetFGArm()) return false;
+	while (!passenger->GetWoundList().empty())
+		if (!passenger->RemoveReplicaWound(passenger->GetWoundList().back())) return false;
+	if (!AddInventoryFixtureWound(*passenger, Vector(9, 1))) return false;
 	Arm* removedArm = passenger->GetFGArm();
 	removedArm->SetDeleteWhenRemovedFromParent(false); removedArm->SetGibWhenRemovedFromParent(false); removedArm->SetToDelete(false);
 	std::unique_ptr<Attachable> retiredArm(passenger->RemoveAttachable(removedArm, false, false));
@@ -139,13 +154,17 @@ inline int ObserveWorldStateInventoryFixture(const WorldStateProtocol::Snapshot&
 			const auto& background = item.Object.BackgroundDevice;
 			if (item.Object.Health==42.25F) {
 				const auto& object = item.Object;
+				const auto wounds = std::count_if(object.Attachments.begin(), object.Attachments.end(), [](const auto& node) { return node.Role == WorldStateProtocol::AttachmentRole::Wound; });
+				const bool changedWound = wounds == 1 && std::any_of(object.Attachments.begin(), object.Attachments.end(), [](const auto& node) {
+					return node.Role == WorldStateProtocol::AttachmentRole::Wound && node.Parent == WorldStateProtocol::c_AttachmentRoot && std::abs(node.ParentOffsetX - 9) < 0.0001F;
+				});
 				const auto arm = std::find_if(object.Attachments.begin(), object.Attachments.end(), [](const auto& node) {
 					return node.Parent == WorldStateProtocol::c_AttachmentRoot && node.Role == WorldStateProtocol::AttachmentRole::HumanFGArm;
 				});
 				initialPose = object.HasAttachmentState && arm != object.Attachments.end() &&
 				    std::abs(arm->RotationFromRoot - 0.95F) < 0.0001F && std::abs(object.AimAngle - 0.3F) < 0.0001F;
 				removedArm = object.HasAttachmentState && arm == object.Attachments.end() && std::abs(object.AimAngle + 0.4F) < 0.0001F;
-				passenger=item.Object.NetworkId; initialOrder=item.Slot==0; swappedOrder=item.Slot==1;
+				passenger=item.Object.NetworkId; initialOrder=item.Slot==0 && wounds==3; swappedOrder=item.Slot==1 && changedWound;
 				backgroundInitial=background.Present && background.ClassName=="HeldDevice" && background.PresetName=="Combat Shield";
 				backgroundChanged=background.Present && background.ClassName=="HDFirearm" && background.HasMagazine && background.MagazineRounds==4;
 			} else if (item.Object.Health==43.25F) {
