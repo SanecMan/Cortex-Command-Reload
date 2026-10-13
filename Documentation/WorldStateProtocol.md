@@ -1,5 +1,26 @@
 # World-state protocol
 
+## Screen messages (v19)
+
+Each player view now carries its authoritative screen message as UTF-8, a
+32-bit nonnegative blink interval and a one-byte centered flag. Text is bounded
+to 16 KiB; the decoder rejects malformed UTF-8, oversized lengths, invalid
+boolean flags and blink intervals outside the engine's signed integer range.
+The server normalizes legacy Windows-1251 text and truncates oversized messages
+at a UTF-8 boundary. Existing resource/preset strings retain their 1024-byte cap.
+
+Capture uses the Activity's player-to-screen mapping. An assigned active client
+applies that player's message to local screen zero, bypassing its local minimum
+display-duration lock. Empty messages clear old text; spectators and inactive
+slots clear their local screen message. Blink animation uses the client's local
+UI timer. This covers FrameMan messages produced through C++ or Lua
+`SetScreenText`; arbitrary Lua drawing primitives/HUD state remain separate.
+
+This changes the wire format: rebuild client and server together. Version 18
+peers are rejected by the existing connection-version check. The standalone
+`Tools/WorldStateScreenTextTest.cpp` exercises round trips, maximum text size,
+Unicode and malformed packets without engine globals or graphics.
+
 ## Background hand (v15)
 
 Each AHuman object record now includes a background-hand presence byte after

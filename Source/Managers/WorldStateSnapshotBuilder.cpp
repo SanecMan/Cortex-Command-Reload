@@ -5,6 +5,7 @@
 #include "ActivityMan.h"
 #include "Actor.h"
 #include "CameraMan.h"
+#include "FrameMan.h"
 #include "AHuman.h"
 #include "HDFirearm.h"
 #include "HeldDevice.h"
@@ -214,6 +215,17 @@ WorldStateProtocol::Snapshot WorldStateSnapshotBuilder::Capture(std::uint32_t ti
 			}
 			player.CameraX = camera.GetX();
 			player.CameraY = camera.GetY();
+			const int screen = activity->ScreenOfPlayer(slot);
+			if (screen >= 0 && screen < Players::MaxPlayerCount) {
+				player.ScreenText = UTF8::PreserveLegacyWindows1251(g_FrameMan.GetScreenText(screen));
+				if (player.ScreenText.size() > WorldStateProtocol::c_MaxScreenTextBytes) {
+					std::size_t end = WorldStateProtocol::c_MaxScreenTextBytes;
+					while (end > 0 && (static_cast<unsigned char>(player.ScreenText[end]) & 0xC0) == 0x80) --end;
+					player.ScreenText.resize(end);
+				}
+				player.TextBlinkInterval = static_cast<std::uint32_t>(g_FrameMan.GetScreenTextBlinkInterval(screen));
+				player.TextCentered = g_FrameMan.IsScreenTextCentered(screen);
+			}
 		}
 	}
 	for (auto networkIdEntry = m_NetworkIdsByRuntimeId.begin(); networkIdEntry != m_NetworkIdsByRuntimeId.end();) {

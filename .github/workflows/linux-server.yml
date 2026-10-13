@@ -43,6 +43,10 @@ jobs:
         run: python Tools/check_tracy_build.py --compile-commands build-server/compile_commands.json --expect disabled
       - name: Compile
         run: meson compile -C build-server -j 2
+      - name: Verify screen text codec
+        run: |
+          g++-13 -std=c++20 -Wall -Wextra -I Source/System Tools/WorldStateScreenTextTest.cpp -o build-server/world-state-screen-text-test
+          build-server/world-state-screen-text-test
       - name: Check dependencies
         run: |
           ldd build-server/CortexCommandServer | tee build-server/runtime-dependencies.txt
@@ -50,7 +54,7 @@ jobs:
       - name: Run without display or audio drivers
         run: >-
           python Tools/run_server_smoke.py --exe build-server/CortexCommandServer
-          --game-dir . --output-prefix LinuxDedicatedCI --timeout 300 --self-test --probe-clients
+          --game-dir . --output-prefix LinuxDedicatedCI --timeout 300 --self-test --probe-clients --screen-text
       - name: Package server
         run: |
           mkdir -p build-server/package
@@ -66,7 +70,7 @@ jobs:
           tar -C "$package_check" -xzf build-server/CortexCommandServer-linux-x64.tar.gz
           ldd "$package_check/CortexCommandServer" | tee build-server/package-runtime-dependencies.txt
           if grep -q 'not found' build-server/package-runtime-dependencies.txt; then exit 1; fi
-          python Tools/run_server_smoke.py --exe "$package_check/CortexCommandServer" --game-dir . --output-prefix LinuxPackagedCI --timeout 300 --probe-clients
+          python Tools/run_server_smoke.py --exe "$package_check/CortexCommandServer" --game-dir . --output-prefix LinuxPackagedCI --timeout 300 --probe-clients --screen-text
       - name: Collect runtime diagnostics
         if: always()
         uses: actions/upload-artifact@v4

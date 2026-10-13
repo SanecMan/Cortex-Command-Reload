@@ -174,6 +174,10 @@ namespace RTE {
 		/// @param whichScreen Which player screen to get message from.
 		/// @return Current message shown to player.
 		std::string GetScreenText(int whichScreen = 0) const { return (whichScreen >= 0 && whichScreen < c_MaxScreenCount) ? m_ScreenText[whichScreen] : ""; }
+		int GetScreenTextBlinkInterval(int whichScreen = 0) const { return (whichScreen >= 0 && whichScreen < c_MaxScreenCount) ? std::max(0, m_TextBlinking[whichScreen]) : 0; }
+		bool IsScreenTextCentered(int whichScreen = 0) const { return whichScreen >= 0 && whichScreen < c_MaxScreenCount && m_TextCentered[whichScreen]; }
+		/// Authoritative replica text bypasses the local minimum-display-duration lock.
+		void ApplyNetworkScreenText(const std::string& message, int blinkInterval, bool centered, int whichScreen = 0);
 
 		/// Sets the message to be displayed on top of each player's screen
 		/// @param message An std::string that specifies what should be displayed.

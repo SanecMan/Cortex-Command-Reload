@@ -18,7 +18,10 @@ def main():
     parser.add_argument('--timeout', type=float, default=180)
     parser.add_argument('--self-test', action='store_true', help='Run the server binary device-free diagnostics before startup checks.')
     parser.add_argument('--probe-clients', action='store_true', help='Connect two separate device-free client processes to the live server.')
+    parser.add_argument('--screen-text', action='store_true', help='Require server HUD messages in the separate client probes.')
     args = parser.parse_args()
+    if args.screen_text and not args.probe_clients:
+        parser.error('--screen-text requires --probe-clients.')
     if not re.fullmatch(r'[A-Za-z0-9_-]{1,48}', args.output_prefix) or args.timeout <= 0:
         parser.error('Use a simple output prefix and a positive timeout.')
     game = args.game_dir.resolve(strict=True)
@@ -101,12 +104,14 @@ def main():
                     break
                 time.sleep(0.1)
             if args.probe_clients:
+                if args.screen_text:
+                    process.stdin.write(b'debug-screen-text\n'); process.stdin.flush()
                 probes = []
                 with contextlib.ExitStack() as streams:
                     try:
                         for index in range(2):
                             output = streams.enter_context((root / f'client-{index}.log').open('wb'))
-                            probes.append(subprocess.Popen([str(binary), '--probe-client', '127.0.0.1', str(port)],
+                            probes.append(subprocess.Popen([str(binary), '--probe-client', '127.0.0.1', str(port)] + (['--screen-text'] if args.screen_text else []),
                                 cwd=game, env=environment, stdout=output, stderr=subprocess.STDOUT,
                                 creationflags=creation_flags))
                         observed_two = False
@@ -129,11 +134,15 @@ def main():
                     report = (root / f'client-{index}.log').read_text(encoding='utf-8')
                     if not re.search(r'result=passed snapshots=\d+ objects=[1-9]\d* tick_delta=\d+ input_queued=[1-9]\d*', report):
                         raise RuntimeError('Separate client did not receive an advancing populated world.')
+                    if args.screen_text and 'hud_received=1' not in report:
+                        raise RuntimeError('Separate client did not receive a server HUD message.')
                 network_log = (logs / 'WorldStateServer.log').read_text(encoding='utf-8')
                 if not re.search(r'INFO: applied [1-9]\d* client input commands to player slot', network_log):
                     raise RuntimeError('Server did not apply neutral input from a probe client.')
                 result['separate_clients'] = 2
                 result['probe_input_applied'] = True
+                if args.screen_text:
+                    result['screen_text_received'] = True
             first_tick = None
             while True:
                 check()

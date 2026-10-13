@@ -20,7 +20,7 @@
 namespace RTE::WorldStateProtocol {
 
 inline constexpr std::uint32_t c_Magic = 0x31524343; // "CCR1" on the wire.
-inline constexpr std::uint16_t c_Version = 18;
+inline constexpr std::uint16_t c_Version = 19;
 inline constexpr std::size_t c_TeamCount = 4;
 inline constexpr std::int8_t c_NoActivity = -1;
 inline constexpr std::int8_t c_MaxActivityState = 6;
@@ -28,6 +28,7 @@ inline constexpr std::size_t c_HeaderSize = 16;
 inline constexpr std::size_t c_MaxPacketSize = 4 * 1024 * 1024;
 inline constexpr std::size_t c_MaxObjects = 65535;
 inline constexpr std::size_t c_MaxStringBytes = 1024;
+inline constexpr std::size_t c_MaxScreenTextBytes = 16384;
 inline constexpr std::uint16_t c_ObjectFlagActor = 0x0001;
 inline constexpr std::uint16_t c_ObjectFlagItem = 0x0002;
 inline constexpr std::uint16_t c_ObjectFlagParticle = 0x0004;
@@ -116,6 +117,9 @@ struct PlayerState {
 	float CameraY = 0.0F;
 	std::int16_t Team = c_NoTeam;
 	bool ActiveHuman = false;
+	std::string ScreenText;
+	std::uint32_t TextBlinkInterval = 0;
+	bool TextCentered = false;
 	bool operator==(const PlayerState&) const = default;
 };
 
@@ -203,8 +207,8 @@ namespace Detail {
 		return std::isfinite(value);
 	}
 
-	inline bool WriteString(std::vector<std::uint8_t>& output, const std::string& value) {
-		if (value.size() > c_MaxStringBytes || !UTF8::IsValid(value)) {
+	inline bool WriteString(std::vector<std::uint8_t>& output, const std::string& value, std::size_t maxBytes = c_MaxStringBytes) {
+		if (value.size() > maxBytes || value.size() > 65535 || !UTF8::IsValid(value)) {
 			return false;
 		}
 		WriteUnsigned(output, value.size(), sizeof(std::uint16_t));
@@ -212,9 +216,9 @@ namespace Detail {
 		return true;
 	}
 
-	inline bool ReadString(std::span<const std::uint8_t> input, std::size_t& offset, std::string& value) {
+	inline bool ReadString(std::span<const std::uint8_t> input, std::size_t& offset, std::string& value, std::size_t maxBytes = c_MaxStringBytes) {
 		std::uint64_t length = 0;
-		if (!ReadUnsigned(input, offset, sizeof(std::uint16_t), length) || length > c_MaxStringBytes || offset > input.size() || length > input.size() - offset) {
+		if (!ReadUnsigned(input, offset, sizeof(std::uint16_t), length) || length > maxBytes || offset > input.size() || length > input.size() - offset) {
 			return false;
 		}
 		value.assign(reinterpret_cast<const char*>(input.data() + offset), static_cast<std::size_t>(length));
@@ -726,6 +730,10 @@ inline bool EncodeSnapshot(const Snapshot& snapshot, std::uint32_t sequence, std
 		Detail::WriteFloat(packet, player.CameraY);
 		Detail::WriteUnsigned(packet, static_cast<std::uint16_t>(player.Team), sizeof(player.Team));
 		Detail::WriteUnsigned(packet, player.ActiveHuman ? 1 : 0, sizeof(std::uint8_t));
+		if (player.TextBlinkInterval > static_cast<std::uint32_t>(std::numeric_limits<int>::max()) ||
+		    !Detail::WriteString(packet, player.ScreenText, c_MaxScreenTextBytes)) return false;
+		Detail::WriteUnsigned(packet, player.TextBlinkInterval, 4);
+		Detail::WriteUnsigned(packet, player.TextCentered ? 1 : 0, 1);
 	}
 	Detail::WriteUnsigned(packet,snapshot.Inventory.size(),2);
 	for (const auto& item:snapshot.Inventory) {
@@ -803,6 +811,11 @@ inline bool DecodeSnapshot(std::span<const std::uint8_t> packet, Snapshot& snaps
 		if (player.Team < c_NoTeam || player.Team >= c_MaxTeamCount ||
 		    !Detail::ReadUnsigned(packet, offset, sizeof(std::uint8_t), value) || value > 1) return false;
 		player.ActiveHuman = value != 0;
+		if (!Detail::ReadString(packet, offset, player.ScreenText, c_MaxScreenTextBytes) ||
+		    !Detail::ReadUnsigned(packet, offset, 4, value) || value > static_cast<std::uint32_t>(std::numeric_limits<int>::max())) return false;
+		player.TextBlinkInterval = static_cast<std::uint32_t>(value);
+		if (!Detail::ReadUnsigned(packet, offset, 1, value) || value > 1) return false;
+		player.TextCentered = value != 0;
 		if (!player.ActiveHuman && player.ControlledActorId != 0) return false;
 		if (player.ControlledActorId != 0 && std::none_of(decoded.Objects.begin(), decoded.Objects.end(), [&player](const ObjectState& object) {
 			return object.NetworkId == player.ControlledActorId && object.Flags == c_ObjectFlagActor;

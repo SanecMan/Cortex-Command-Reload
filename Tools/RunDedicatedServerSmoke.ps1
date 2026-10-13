@@ -12,6 +12,7 @@ param(
     [switch]$CheckPurchasePricing,
     [switch]$CheckInventory,
     [switch]$CheckMenuConnection,
+    [switch]$CheckScreenText,
     [ValidateRange(60, 600)]
     [int]$TimeoutSeconds = 360
 )
@@ -81,6 +82,7 @@ try {
         }
     }
     Write-Host "Dedicated server ready on $port; connecting two separate clients."
+    if ($CheckScreenText) { $server.StandardInput.WriteLine('debug-screen-text'); $server.StandardInput.Flush() }
     $clients = [Collections.Generic.List[Diagnostics.Process]]::new()
     $displayedStockPriceObserved = $false
     foreach ($index in 1..2) {
@@ -96,11 +98,25 @@ try {
         $processes.Add($client)
         $clients.Add($client)
     }
+    $screenTextApplied = $false
+    $screenTextFixtureTimer = [Diagnostics.Stopwatch]::StartNew()
     $fundsChanged = $false
     $policyChanged = $false
     $inventoryMutated = $false
     $inventoryCreated = $false
     while (@($clients | Where-Object { !$_.HasExited }).Count -gt 0) {
+        if ($CheckScreenText) {
+            # Activity updates may clear ordinary messages while clients load.
+            # Refresh only this disposable fixture until the GUI check completes.
+            if ($screenTextFixtureTimer.ElapsedMilliseconds -ge 500) {
+                $server.StandardInput.WriteLine('debug-screen-text'); $server.StandardInput.Flush()
+                $screenTextFixtureTimer.Restart()
+            }
+            foreach ($index in 1..2) {
+                $screenTextReport = Join-Path $gameDirectory "ScreenShots\$OutputPrefix-Client$index\DebugRun.log"
+                $screenTextApplied = $screenTextApplied -or (Read-Report $screenTextReport) -match '(?m)^world_state_screen_text_received=passed'
+            }
+        }
         Check-Time
         if ($server.HasExited) { throw 'Server stopped while clients were running.' }
         if ($CheckInventory -and !$inventoryCreated) {
@@ -148,6 +164,13 @@ try {
     foreach ($client in $clients) {
         $client.WaitForExit(); $client.Refresh()
         if ($client.ExitCode -ne 0) { throw 'Client failed.' }
+    }
+    if ($CheckScreenText) {
+        foreach ($index in 1..2) {
+            $report = Join-Path $gameDirectory "ScreenShots\$OutputPrefix-Client$index\DebugRun.log"
+            $screenTextApplied = $screenTextApplied -or (Read-Report $report) -match '(?m)^world_state_screen_text_received=passed'
+        }
+        if (!$screenTextApplied) { throw 'No assigned client applied the server screen text.' }
     }
     # Ask for status until disconnects have propagated, then prove ticking
     # continues for at least 60 more updates without connected clients.

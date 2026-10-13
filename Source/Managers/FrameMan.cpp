@@ -359,6 +359,14 @@ void FrameMan::SetScreenText(const std::string& message, int whichScreen, int bl
 	}
 }
 
+void FrameMan::ApplyNetworkScreenText(const std::string& message, int blinkInterval, bool centered, int whichScreen) {
+	if (whichScreen < 0 || whichScreen >= c_MaxScreenCount) return;
+	m_ScreenText[whichScreen] = message;
+	m_TextBlinking[whichScreen] = std::max(0, blinkInterval);
+	m_TextCentered[whichScreen] = centered;
+	m_TextDuration[whichScreen] = -1;
+}
+
 void FrameMan::ClearScreenText(int whichScreen) {
 	if (whichScreen >= 0 && whichScreen < c_MaxScreenCount) {
 		m_ScreenText[whichScreen].clear();

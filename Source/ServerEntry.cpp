@@ -21,8 +21,9 @@ namespace {
 // Separate-process transport diagnostic. It loads no content or devices and
 // does not stand in for a graphical client's replica/gameplay validation.
 int RunClientProbe(const std::vector<std::string>& arguments) {
-	if (arguments.size() != 4 || arguments[2].empty()) {
-		std::cerr << "Usage: CortexCommandServer --probe-client ADDRESS PORT\n"; return 2;
+	const bool requireText = arguments.size() == 5 && arguments[4] == "--screen-text";
+	if ((arguments.size() != 4 && !requireText) || arguments[2].empty()) {
+		std::cerr << "Usage: CortexCommandServer --probe-client ADDRESS PORT [--screen-text]\n"; return 2;
 	}
 	unsigned int port = 0;
 	const auto& text = arguments[3];
@@ -36,7 +37,7 @@ int RunClientProbe(const std::vector<std::string>& arguments) {
 	}
 	const auto started = std::chrono::steady_clock::now();
 	std::uint32_t firstTick = 0, commands = 0;
-	bool receivedWorld = false;
+	bool receivedWorld = false, receivedText = false;
 	while (std::chrono::steady_clock::now() - started < std::chrono::seconds(30)) {
 		client.Update();
 		if (!client.GetConnectionError().empty()) {
@@ -44,6 +45,9 @@ int RunClientProbe(const std::vector<std::string>& arguments) {
 		}
 		if (client.IsConnected() && client.HasPlayerAssignment() && client.HasSnapshot()) {
 			const auto& snapshot = client.GetLatestSnapshot();
+			receivedText = receivedText || std::any_of(snapshot.Players.begin(), snapshot.Players.end(), [](const auto& player) {
+				return player.ActiveHuman && !player.ScreenText.empty();
+			});
 			if (!snapshot.Objects.empty() && !snapshot.ScenePreset.empty() && !snapshot.ActivityPreset.empty()) {
 				if (!receivedWorld) { firstTick = snapshot.Tick; receivedWorld = true; }
 				RTE::WorldStateProtocol::InputCommand command;
@@ -52,10 +56,10 @@ int RunClientProbe(const std::vector<std::string>& arguments) {
 					std::cerr << "Probe failed to queue neutral input.\n"; client.Disconnect(); return 1;
 				}
 				if (client.GetReceivedSnapshotCount() >= 10 && static_cast<std::int32_t>(snapshot.Tick - firstTick) >= 60 &&
-				    std::chrono::steady_clock::now() - started >= std::chrono::seconds(3)) {
+				    std::chrono::steady_clock::now() - started >= std::chrono::seconds(3) && (!requireText || receivedText)) {
 					std::cout << "result=passed snapshots=" << client.GetReceivedSnapshotCount() << " objects=" << snapshot.Objects.size()
 					          << " tick_delta=" << snapshot.Tick - firstTick << " input_queued=" << commands
-					          << " assigned_slot=" << client.GetAssignedPlayerSlot() << '\n';
+					          << " assigned_slot=" << client.GetAssignedPlayerSlot() << " hud_received=" << receivedText << '\n';
 					client.Disconnect(); return 0;
 				}
 			}

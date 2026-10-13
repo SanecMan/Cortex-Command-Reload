@@ -25,6 +25,38 @@ client's normal debug output directory. The explicit client option is
 `-debug-run 60 -debug-run-menu-connect 127.0.0.1 PORT`; normal launches never
 perform these automated menu actions.
 
+Protocol v19 additionally replicates FrameMan screen messages for the assigned
+player, including UTF-8 text, blinking and centered placement. See
+[the message wire format](WorldStateProtocol.md#screen-messages-v19).
+For an automated headless check of screen-message capture, use
+`Tools/run_server_smoke.py --probe-clients --screen-text` with the usual executable
+and game-directory arguments, or run
+`CortexCommandServer --probe-client ADDRESS PORT --screen-text` directly.
+The runner creates a fixed Cyrillic message through the server console's
+`debug-screen-text` fixture before connecting clients. `debug-screen-text-clear`
+clears it. Tutorial instructions themselves are drawn through a separate native
+HUD path; this fixture does not establish replication of those instructions.
+The fixture resets the Activity message timer as well as setting FrameMan text;
+otherwise ordinary Activity updates clear it after five seconds. The graphical
+runner refreshes it while clients load.
+For graphical clients, use `Tools/RunDedicatedServerSmoke.ps1 -CheckScreenText`
+with the matching client/server binary paths; `-CheckMenuConnection` can be added.
+Both diagnostic probes must receive a message from an active player; a spectator
+probe can inspect all player records but does not display their messages locally.
+
+Windows Meson verification on 2026-10-14: the headless screen-text run passed in
+19.28 seconds with two separate clients and 127 additional ticks after disconnect.
+Two consecutive graphical menu/message runs passed in 28.95 and 30.15 seconds,
+with 62 and 63 additional server ticks and clean exits from both clients. The
+assigned client's final screenshot visibly showed the centered Cyrillic message.
+The v19 Linux checks and updated native Final delivery are pending.
+
+Those runs exposed a metadata-only FMOD system being released during CRT teardown.
+Audio shutdown now resets it explicitly even when the regular playback device is
+disabled. The metadata cache and logical voices are cleared together; later
+initialization can lazily reopen metadata access. Repeated graphical shutdown
+passed after this change. This does not implement network sound event playback.
+
 Windows validation on 2026-10-08: `MultiplayerMenuPair` passed with two clients
 using the real GUI handlers and the native world-state transport in 40.79 seconds.
 Both debug runs passed port validation, cancellation, retry, scene loading and

@@ -295,6 +295,7 @@ namespace {
 	}
 
 	struct DebugRunState {
+		bool NetworkScreenTextVerified = false;
 		bool Enabled = false;
 		bool StressStarted = false;
 		bool PerformanceCountersObserved = false;
@@ -806,6 +807,35 @@ namespace {
 			}
 		}
 		state.Log << "world_state_team_funds_codec=" << (fundsCodecPassed ? "passed" : "failed") << '\n' << std::flush;
+		auto textProbe = networkSnapshot;
+		textProbe.Players[1].ScreenText = "HUD: Привет, Ёжик!\nActivity message";
+		textProbe.Players[1].TextBlinkInterval = 250;
+		textProbe.Players[1].TextCentered = true;
+		std::vector<std::uint8_t> textPacket;
+		WorldStateProtocol::Snapshot decodedText;
+		bool textCodecPassed = WorldStateProtocol::EncodeSnapshot(textProbe, 1, textPacket) &&
+		    WorldStateProtocol::DecodeSnapshot(textPacket, decodedText) && decodedText.Players == textProbe.Players;
+		for (const std::string& invalidText : {std::string("\xFF", 1), std::string(WorldStateProtocol::c_MaxScreenTextBytes + 1, 'x')}) {
+			auto invalid = textProbe; invalid.Players[1].ScreenText = invalidText;
+			std::vector<std::uint8_t> rejected;
+			textCodecPassed = textCodecPassed && !WorldStateProtocol::EncodeSnapshot(invalid, 1, rejected);
+		}
+		auto invalidBlink = textProbe;
+		invalidBlink.Players[1].TextBlinkInterval = std::numeric_limits<std::uint32_t>::max();
+		std::vector<std::uint8_t> rejectedTextPacket;
+		textCodecPassed = textCodecPassed && !WorldStateProtocol::EncodeSnapshot(invalidBlink, 1, rejectedTextPacket);
+		const auto textStart = std::search(textPacket.begin(), textPacket.end(), textProbe.Players[1].ScreenText.begin(), textProbe.Players[1].ScreenText.end(),
+		    [](std::uint8_t byte, char character) { return byte == static_cast<unsigned char>(character); });
+		if (textStart == textPacket.end()) textCodecPassed = false;
+		else {
+			const auto index = static_cast<std::size_t>(textStart - textPacket.begin());
+			auto invalid = textPacket; invalid[index] = 0xFF;
+			textCodecPassed = textCodecPassed && !WorldStateProtocol::DecodeSnapshot(invalid, decodedText);
+			invalid = textPacket; invalid[index + textProbe.Players[1].ScreenText.size() + 4] = 2;
+			textCodecPassed = textCodecPassed && !WorldStateProtocol::DecodeSnapshot(invalid, decodedText);
+		}
+		state.Log << "world_state_screen_text_codec=" << (textCodecPassed ? "passed" : "failed") << '\n' << std::flush;
+		fundsCodecPassed = fundsCodecPassed && textCodecPassed;
 		if (!truncatedNetworkPacket.empty()) truncatedNetworkPacket.pop_back();
 		std::vector<std::uint8_t> unsupportedVersionPacket = networkPacket;
 		if (unsupportedVersionPacket.size() > 4) unsupportedVersionPacket[4] = static_cast<std::uint8_t>(WorldStateProtocol::c_Version + 1);
@@ -2062,6 +2092,14 @@ int RunPersistentHeadlessServer(const ServerConfiguration& config) {
 		for (const std::string& command : console.Poll()) {
 			if (command == "quit" || command == "exit" || command == "stop") ServerConsole::StopRequested.store(true);
 			else if (command == "status") log("INFO status tick=" + std::to_string(tick) + " clients=" + std::to_string(session.GetConnectedClientCount()) + " actors=" + std::to_string(g_MovableMan.GetActorCount()));
+			else if (command == "debug-screen-text") {
+				if (Activity* activity = g_ActivityMan.GetActivity()) activity->ResetMessageTimer();
+				g_FrameMan.ClearScreenText(0);
+				g_FrameMan.SetScreenText("Network HUD: Привет, Ёжик!", 0, 250, 60000, true);
+				log("INFO debug_screen_text=created");
+			} else if (command == "debug-screen-text-clear") {
+				g_FrameMan.ClearScreenText(0); log("INFO debug_screen_text=cleared");
+			}
 			else if (command == "debug-inventory-create") log(CreateWorldStateInventoryFixture() ? "INFO debug_inventory=create_passed" : "ERROR debug_inventory=create_failed");
 			else if (command == "debug-inventory-mutate") log(MutateWorldStateInventoryFixture() ? "INFO debug_inventory=mutation_passed" : "ERROR debug_inventory=mutation_failed");
 			else if (command == "debug-purchase-policy" || command == "debug-purchase-pricing") {
@@ -2774,6 +2812,7 @@ void RunGameLoop() {
 				const bool activeView = slot >= Players::PlayerOne && slot < Players::MaxPlayerCount &&
 				    worldStateClient->GetLatestSnapshot().Players[slot].ActiveHuman;
 				if (!activeView) {
+					g_FrameMan.ApplyNetworkScreenText("", 0, false);
 					if (Activity* activity = g_ActivityMan.GetActivity(); activity && activity->GetControlledActor(Players::PlayerOne))
 						activity->ClearReplicaControlledActor(Players::PlayerOne);
 				}
@@ -2781,6 +2820,13 @@ void RunGameLoop() {
 					const auto& snapshot = worldStateClient->GetLatestSnapshot();
 					const auto& player = snapshot.Players[slot];
 					if (player.ActiveHuman) {
+						g_FrameMan.ApplyNetworkScreenText(player.ScreenText, static_cast<int>(player.TextBlinkInterval), player.TextCentered);
+						if (System::IsDebugRun() && !GetDebugRunState().NetworkScreenTextVerified && player.ScreenText == "Network HUD: Привет, Ёжик!") {
+							const bool applied = g_FrameMan.GetScreenText() == player.ScreenText &&
+							    g_FrameMan.GetScreenTextBlinkInterval() == 250 && g_FrameMan.IsScreenTextCentered();
+							GetDebugRunState().Log << "world_state_screen_text_received=" << (applied ? "passed" : "failed") << " slot=" << slot << '\n' << std::flush;
+							GetDebugRunState().NetworkScreenTextVerified = applied;
+						}
 						worldStateClientReplica.BindPlayerView(player.ControlledActorId, player.Team);
 						Vector camera(player.CameraX, player.CameraY);
 						worldStateClientReplica.AdjustCameraForInterpolation(player.ControlledActorId, camera);
@@ -3071,6 +3117,18 @@ int RunCortexCommand(int argc, char** argv) {
 			g_TimerMan.Initialize();
 			g_GLResourceMan.Initialize(false);
 			const bool frameInitialized = g_FrameMan.Initialize() == 0;
+			bool screenTextApplied = false;
+			if (frameInitialized) {
+				const std::string message = "HUD: Привет, Ёжик!";
+				g_FrameMan.ClearScreenText(3);
+				g_FrameMan.SetScreenText("Local minimum-duration lock", 3, 0, 60000);
+				g_FrameMan.ApplyNetworkScreenText(message, 250, true, 3);
+				screenTextApplied = g_FrameMan.GetScreenText(3) == message &&
+				    g_FrameMan.GetScreenTextBlinkInterval(3) == 250 && g_FrameMan.IsScreenTextCentered(3);
+				g_FrameMan.ApplyNetworkScreenText("", 0, false, 3);
+				screenTextApplied = screenTextApplied && g_FrameMan.GetScreenText(3).empty() && !g_FrameMan.IsScreenTextCentered(3);
+			}
+			GetDebugRunState().Log << "world_state_screen_text_application=" << (screenTextApplied ? "passed" : "failed") << '\n' << std::flush;
 			bool cpuResourcesPassed = false;
 			{
 				RenderTarget target(FloatRect(0, 0, 23, 41), FloatRect(0, 0, 23, 41));
@@ -3096,7 +3154,7 @@ int RunCortexCommand(int argc, char** argv) {
 			if (GetDebugRunState().HeadlessContentPreflight) {
 				const std::string loadingLog = UTF8::PathToString(GetDebugRunState().OutputDirectory / "LogLoading.txt");
 				contentPassed = InitializeHeadlessContent(GetDebugRunState().HeadlessConfig, loadingLog, GetDebugRunState().LoadAllOptionalModules);
-				contentPassed = contentPassed && g_PresetMan.GetOfficialModuleCount() > 0 &&
+				contentPassed = contentPassed && screenTextApplied && g_PresetMan.GetOfficialModuleCount() > 0 &&
 				    g_PresetMan.GetEntityPreset("Scene", "Tutorial Bunker", "Missions.rte") != nullptr &&
 				    SDL_WasInit(SDL_INIT_VIDEO) == 0 && !g_WindowMan.GetWindow();
 				GetDebugRunState().Log << "headless_content_preflight=" << (contentPassed ? "passed" : "failed")
