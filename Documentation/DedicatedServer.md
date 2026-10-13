@@ -374,6 +374,9 @@ FMOD runtime, example config and server documentation. The package needs existin
 Data/ content and the Linux system runtime dependencies; it is not a standalone
 content distribution. Client rendering dependencies remain link dependencies of
 the common engine even in a server-only build.
+The workflow also extracts the package outside the build tree, checks its shared
+library dependencies there and reruns headless startup/config/shutdown checks
+against that extracted executable with the checkout supplying game content.
 
 The Python syntax and workflow YAML syntax/structure were checked locally.
 `PortableServerWindows` passed repeatedly against the existing Windows server on
@@ -388,6 +391,11 @@ non-ZIP64 API. Linux compilation and runtime remain unverified until the repeat
 CI run passes. Windows `DedicatedSelfTestWindows` passed the expanded runner:
 126 simulation ticks, 17 actors, no video initialization, four native loopback
 clients receiving a live world, and device-free sound playback lifetime checks.
+The rebuilt native Windows `Final|x64` client and matching server passed again
+on 2026-10-14: `DedicatedSelfTestFinal` took 15.98 seconds, and
+`LinuxSelfTestFinalMenu` connected two separate clients through the actual menu
+handlers in 32.4 seconds. The server continued 62 updates after disconnection.
+These are Windows results, not evidence of Linux execution or cross-OS gameplay.
 
 ## Tracy build-option consistency
 

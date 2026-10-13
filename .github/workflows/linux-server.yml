@@ -51,17 +51,6 @@ jobs:
         run: >-
           python Tools/run_server_smoke.py --exe build-server/CortexCommandServer
           --game-dir . --output-prefix LinuxDedicatedCI --timeout 300 --self-test
-      - name: Collect runtime diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: linux-server-diagnostics
-          path: |
-            ScreenShots/LinuxDedicatedCI/
-            ScreenShots/LinuxDedicatedCISelfTest/
-            build-server/meson-logs/
-            build-server/runtime-dependencies.txt
-          if-no-files-found: warn
       - name: Package server
         run: |
           mkdir -p build-server/package
@@ -70,6 +59,27 @@ jobs:
           ln -s libfmod.so.13.20 build-server/package/libfmod.so.13
           cp Documentation/DedicatedServer.md build-server/package/
           tar -C build-server/package -czf build-server/CortexCommandServer-linux-x64.tar.gz .
+      - name: Verify extracted server package
+        run: |
+          package_check="$RUNNER_TEMP/cortex-server-package-check"
+          mkdir -p "$package_check"
+          tar -C "$package_check" -xzf build-server/CortexCommandServer-linux-x64.tar.gz
+          ldd "$package_check/CortexCommandServer" | tee build-server/package-runtime-dependencies.txt
+          if grep -q 'not found' build-server/package-runtime-dependencies.txt; then exit 1; fi
+          python Tools/run_server_smoke.py --exe "$package_check/CortexCommandServer" --game-dir . --output-prefix LinuxPackagedCI --timeout 300
+      - name: Collect runtime diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-server-diagnostics
+          path: |
+            ScreenShots/LinuxDedicatedCI/
+            ScreenShots/LinuxDedicatedCISelfTest/
+            ScreenShots/LinuxPackagedCI/
+            build-server/meson-logs/
+            build-server/runtime-dependencies.txt
+            build-server/package-runtime-dependencies.txt
+          if-no-files-found: warn
       - name: Upload server
         uses: actions/upload-artifact@v4
         with:
