@@ -1,5 +1,19 @@
 # World-state protocol
 
+## Sound payload preparation
+
+`WorldStateSoundProtocol.h` defines a separate bounded inner payload schema for
+Play, Stop, Position, Volume, Pitch, Pause and Fade. It uses explicit integer
+widths and little-endian encoding, logical container/voice identities and UTF-8
+module-relative resource names. It rejects invalid UTF-8, traversal/absolute
+path syntax, non-finite numbers, invalid booleans, excessive counts and trailing
+bytes. Priority 256 is retained in a 16-bit field rather than truncated to a byte.
+
+The standalone test covers every action, Unicode resource names, a fixed golden
+layout, truncated/corrupt packets and the 256-event batch bound. This codec is
+not yet connected to capture, session transport or client playback. It does not
+change the active v19 session wire format or provide audible multiplayer sound.
+
 ## Screen messages (v19)
 
 Each player view now carries its authoritative screen message as UTF-8, a
