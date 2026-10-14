@@ -190,6 +190,9 @@ namespace {
 	}
 
 	bool ApplyFields(MovableObject& target, const WorldStateProtocol::ObjectState& state) {
+		// Presence in the authoritative snapshot overrides a local preset or
+		// startup deletion request, including an object adopted from pending adds.
+		target.SetToDelete(false);
 		if (state.HasEmitterState) {
 			auto* emitter = dynamic_cast<AEmitter*>(&target); if (!emitter) return false;
 			emitter->SetReplicaEmissionVisual(state.EmissionEnabled, state.FlashVisible);
@@ -318,6 +321,15 @@ bool WorldStateClientReplica::TestBackgroundEquipment() {
 	const Entity* gunPreset = g_PresetMan.GetEntityPreset("HDFirearm", "Auto Pistol", "Coalition.rte");
 	const auto* gun = dynamic_cast<const HDFirearm*>(gunPreset);
 	if (!body || !gun || !gun->GetMagazine()) return false;
+	{
+		std::unique_ptr<Entity> stale(body->Clone());
+		auto* actor = dynamic_cast<AHuman*>(stale.get());
+		if (!actor) return false;
+		actor->SetToDelete(true);
+		WorldStateProtocol::ObjectState present;
+		present.Health = 100;
+		if (!ApplyFields(*actor, present) || actor->IsSetToDelete()) return false;
+	}
 	WorldStateProtocol::Snapshot snapshot;
 	WorldStateProtocol::ObjectState state;
 	state.NetworkId = std::numeric_limits<std::uint64_t>::max() - 10;
