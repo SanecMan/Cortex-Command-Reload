@@ -74,7 +74,7 @@ bool VerifyConstructionBoundary(RTE::WorldStateClientSession& client) {
 	return checkReply(request, false, spectator ? "spectator" : "stale_request");
 }
 
-bool VerifyBrainConstructionStart(RTE::WorldStateClientSession& client, const std::filesystem::path& exchange) {
+bool VerifyBrainConstructionStart(RTE::WorldStateClientSession& client, const std::filesystem::path& exchange, bool deploymentCheck) {
 	using namespace RTE::WorldStateProtocol;
 	std::array<std::array<int, 3>, 2> terrainSamples{{{{-1, -1, -1}}, {{-1, -1, -1}}}};
 	auto observeTerrain = [&]() {
@@ -257,7 +257,68 @@ bool VerifyBrainConstructionStart(RTE::WorldStateClientSession& client, const st
 	}
 	if (!terrainObserved) { std::cerr << "Construction terrain layers/funds mismatch\n"; return false; }
 	std::cout << "construction_terrain=passed material=177 foreground=89 background=181 charged=" << terrainPlaced.ChargedCost << '\n';
-	request = {}; request.RequestId = nextId + 6; request.SceneRevision = client.GetLatestSnapshot().SceneRevision;
+	std::uint32_t readyId = nextId + 6;
+	if (deploymentCheck) {
+		ConstructionRequest deployment;
+		deployment.RequestId = readyId++; deployment.SceneRevision = request.SceneRevision; deployment.Action = ConstructionAction::PlaceObject;
+		deployment.X = 812.0F + 100.0F * slot; deployment.Y = 70; deployment.HFlipped = true;
+		deployment.Preset = {"Deployment", "Base.rte", "Default"};
+		ConstructionResult deployed, deploymentReplay;
+		if (!send(deployment, affordable, affordable ? "" : "insufficient_funds", &deployed, affordable) ||
+		    !send(deployment, affordable, affordable ? "" : "insufficient_funds", &deploymentReplay, affordable) || deployed != deploymentReplay ||
+		    (affordable && deployed.ChargedCost != 188)) return false;
+		if (affordable) {
+			ObjectState actor;
+			const auto actorDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(8);
+			bool actorObserved = false;
+			while (std::chrono::steady_clock::now() < actorDeadline) {
+				client.Update(); client.SendInputCommand({}); observeTerrain();
+				const auto& world = client.GetLatestSnapshot();
+				const auto found = std::find_if(world.Objects.begin(), world.Objects.end(), [&](const auto& object) {
+					return object.ClassName == "AHuman" && object.ModuleName == "Coalition.rte" && object.PresetName == "Soldier Light" && object.Team == team;
+				});
+				if (found != world.Objects.end() && found->HasEquippedDevice && found->EquippedDevicePresetName == "Assault Rifle" &&
+				    found->HFlipped && std::abs(found->VelocityX) < 2 && std::abs(found->VelocityY) < 2 &&
+				    world.TeamFunds[team] == expectedFunds - terrainPlaced.ChargedCost - deployed.ChargedCost) {
+					actor = *found; actorObserved = true; break;
+				}
+				std::this_thread::sleep_for(std::chrono::milliseconds(20));
+			}
+			if (!actorObserved) { std::cerr << "Deployment actor/loadout/funds not observed\n"; return false; }
+			auto pistolCount = [&](const Snapshot& world) {
+				int count = static_cast<int>(std::count_if(world.Inventory.begin(), world.Inventory.end(), [&](const auto& item) {
+					return item.ParentNetworkId == actor.NetworkId && item.Object.ModuleName == "Coalition.rte" && item.Object.PresetName == "Auto Pistol";
+				}));
+				for (const auto& object : world.Objects) if (object.NetworkId == actor.NetworkId) {
+					if (object.HasEquippedDevice && object.EquippedDeviceModuleName == "Coalition.rte" && object.EquippedDevicePresetName == "Auto Pistol") ++count;
+					if (object.BackgroundDevice.Present && object.BackgroundDevice.ModuleName == "Coalition.rte" && object.BackgroundDevice.PresetName == "Auto Pistol") ++count;
+				}
+				return count;
+			};
+			const int initialPistols = pistolCount(client.GetLatestSnapshot());
+			ConstructionRequest gift;
+			gift.RequestId = readyId++; gift.SceneRevision = request.SceneRevision; gift.Action = ConstructionAction::PlaceObject;
+			gift.X = actor.PositionX; gift.Y = actor.PositionY; gift.Preset = {"HDFirearm", "Coalition.rte", "Auto Pistol"};
+			ConstructionResult gifted, giftReplay;
+			if (!send(gift, true, "", &gifted, true) || !send(gift, true, "", &giftReplay, true) || gifted != giftReplay || gifted.ChargedCost != 18) return false;
+			const auto giftDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(6);
+			bool giftObserved = false;
+			while (std::chrono::steady_clock::now() < giftDeadline) {
+				client.Update(); client.SendInputCommand({}); observeTerrain();
+				const auto& world = client.GetLatestSnapshot();
+				const bool onGround = std::any_of(world.Objects.begin(), world.Objects.end(), [&](const auto& object) { return object.ClassName == "HDFirearm" && object.ModuleName == "Coalition.rte" && object.PresetName == "Auto Pistol" && object.Team == team; });
+				if (!onGround && pistolCount(world) == initialPistols + 1 && world.TeamFunds[team] == expectedFunds - terrainPlaced.ChargedCost - deployed.ChargedCost - gifted.ChargedCost) { giftObserved = true; break; }
+				std::this_thread::sleep_for(std::chrono::milliseconds(20));
+			}
+			if (!giftObserved) { std::cerr << "Inventory gift/replay/funds not observed\n"; return false; }
+			ConstructionRequest attachedRemoval;
+			attachedRemoval.RequestId = readyId++; attachedRemoval.SceneRevision = request.SceneRevision; attachedRemoval.Action = ConstructionAction::RemoveObject; attachedRemoval.ObjectId = gifted.ObjectId;
+			if (!send(attachedRemoval, false, "object_attached")) return false;
+			std::cout << "construction_inventory_gift=passed gifted=1 charged=18\n";
+		} else std::cout << "construction_inventory_gift=passed gifted=0\n";
+		std::cout << "construction_deployment=passed deployed=" << affordable << " charged=" << deployed.ChargedCost << '\n';
+	}
+	request = {}; request.RequestId = readyId; request.SceneRevision = client.GetLatestSnapshot().SceneRevision;
 	request.Action = ConstructionAction::SetReady; request.Ready = true;
 	return send(request, true, "");
 }
@@ -269,6 +330,7 @@ int RunClientProbe(const std::vector<std::string>& arguments) {
 	unsigned int expectedHumans = 0;
 	bool constructionCheck = false, constructionPassed = false;
 	bool brainStart = false, brainPlaced = false;
+	bool deploymentCheck = false;
 	std::filesystem::path constructionExchange;
 	if (arguments.size() < 4 || arguments[2].empty()) {
 		std::cerr << "Usage: CortexCommandServer --probe-client ADDRESS PORT [--screen-text] [--probe-seconds 3..3600] [--input-silence]\n"; return 2;
@@ -279,6 +341,7 @@ int RunClientProbe(const std::vector<std::string>& arguments) {
 		else if (arguments[index] == "--require-control") requireControl = true;
 		else if (arguments[index] == "--construction-check") constructionCheck = true;
 		else if (arguments[index] == "--brain-start") { brainStart = true; requireControl = true; }
+		else if (arguments[index] == "--deployment-check") deploymentCheck = true;
 		else if (arguments[index] == "--construction-share-dir" && index + 1 < arguments.size()) constructionExchange = RTE::UTF8::PathFromString(arguments[++index]);
 		else if (arguments[index] == "--expected-humans" && index + 1 < arguments.size()) {
 			const auto& value = arguments[++index];
@@ -303,6 +366,7 @@ int RunClientProbe(const std::vector<std::string>& arguments) {
 			}
 		} else { std::cerr << "Unknown or incomplete probe option.\n"; return 2; }
 	}
+	if (deploymentCheck && !brainStart) { std::cerr << "Deployment checks require brain-start.\n"; return 2; }
 	if (!constructionExchange.empty()) {
 		std::error_code error;
 		if (!brainStart || !std::filesystem::is_directory(constructionExchange, error) || error) {
@@ -323,7 +387,7 @@ int RunClientProbe(const std::vector<std::string>& arguments) {
 	std::uint32_t firstTick = 0, commands = 0;
 	bool receivedWorld = false, receivedText = false, receivedObjectives = false, wasSilent = false;
 	unsigned int silenceWindows = 0;
-	while (std::chrono::steady_clock::now() - started < std::chrono::seconds(probeSeconds + 30)) {
+	while (std::chrono::steady_clock::now() - started < std::chrono::seconds(probeSeconds + (deploymentCheck ? 60 : 30))) {
 		client.Update();
 		if (client.HasSnapshot()) {
 			// A transport-only probe still consumes presentation streams. It has
@@ -341,7 +405,7 @@ int RunClientProbe(const std::vector<std::string>& arguments) {
 				const auto& before = client.GetLatestSnapshot();
 				const auto humans = std::count_if(before.Players.begin(), before.Players.end(), [](const auto& player) { return player.ActiveHuman; });
 				if (client.GetAssignedPlayerSlot() < 0 || humans != 2) { client.SendInputCommand({}); std::this_thread::sleep_for(std::chrono::milliseconds(20)); continue; }
-				if (before.ActivityState != 2 || !VerifyBrainConstructionStart(client, constructionExchange)) { client.Disconnect(); return 1; }
+				if (before.ActivityState != 2 || !VerifyBrainConstructionStart(client, constructionExchange, deploymentCheck)) { client.Disconnect(); return 1; }
 				brainPlaced = true;
 			}
 			if (constructionCheck && !constructionPassed) {

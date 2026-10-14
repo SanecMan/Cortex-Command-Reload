@@ -16,6 +16,9 @@ teams. Base.rte was rejected as a non-faction with exit code 1.
 checks in 29.78 seconds with 130 further ticks. `TeamTechVisualRegression` passed
 the existing two-client graphical construction/menu/attachment/audio regression
 in 58.56 seconds with 63 further updates. These runs omitted TeamTech.
+Native Final compiled and linked. The delivered root server also passed the
+Coalition deployment/gift fixture and config/CLI precedence checks. An unknown
+UTF-8 faction name was rejected with exit 1 and its name preserved in the log.
 
 # Dedicated server
 

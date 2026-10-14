@@ -153,6 +153,12 @@ jobs:
           python Tools/run_server_smoke.py --exe build-server/CortexCommandServer --game-dir .
           --output-prefix LinuxBrainConstructionCI --timeout 300 --probe-clients --brain-start
           --activity-class GAScripted --activity "Skirmish Defense" --scene "Ketanot Hills"
+      - name: Verify deployment loadouts and inventory gifting
+        run: >-
+          python Tools/run_server_smoke.py --exe build-server/CortexCommandServer --game-dir .
+          --output-prefix LinuxDeploymentCI --timeout 300 --probe-clients --brain-start
+          --deployment-check --team-tech Coalition.rte --activity-class GAScripted
+          --activity "Skirmish Defense" --scene "Ketanot Hills"
       - name: Verify late Army participants
         run: |
           python Tools/run_server_smoke.py --exe build-server/CortexCommandServer --game-dir . --output-prefix LinuxArmyLateCI --timeout 300 --probe-clients --probe-seconds 12 --second-client-delay 3 --require-control --require-players 2 --activity-class GAScripted --activity "One-Man Army" --scene "Ketanot Hills"

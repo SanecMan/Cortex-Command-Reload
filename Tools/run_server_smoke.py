@@ -25,6 +25,8 @@ def main():
     parser.add_argument('--activity-class', default='GATutorial')
     parser.add_argument('--activity', default='Tutorial Mission')
     parser.add_argument('--scene', default='Tutorial Bunker')
+    parser.add_argument('--team-tech', default='', help='Explicit faction module override for all server teams; empty preserves the Activity.')
+    parser.add_argument('--deployment-check', action='store_true', help='Exercise Coalition deployment and inventory gifting during brain-start.')
     parser.add_argument('--require-players', type=int, default=0, help='Require this many distinct active player slots (0..2).')
     parser.add_argument('--restart-with-clients', action='store_true', help='Restart the Activity after both peers connect.')
     parser.add_argument('--require-control', action='store_true', help='Require distinct controlled actors, with or without restart.')
@@ -56,6 +58,10 @@ def main():
             parser.error('Brain start needs two concurrent probes and a separate editing fixture.')
         args.require_control = True
         args.require_players = 2
+    if args.deployment_check and (not args.brain_start or args.team_tech != 'Coalition.rte'):
+        parser.error('Deployment checks require brain-start and Coalition.rte team-tech.')
+    if args.team_tech and (len(args.team_tech) > 1024 or '\n' in args.team_tech or '\r' in args.team_tech):
+        parser.error('Team tech must be a single-line faction module name.')
     if not 0 <= args.second_client_delay <= 30 or (args.second_client_delay and (not args.probe_clients or args.probe_seconds < args.second_client_delay + 3)):
         parser.error('Second client delay needs probes lasting at least delay + 3 seconds.')
     if args.second_client_delay and args.disconnect_one_restart:
@@ -87,6 +93,9 @@ def main():
     config.write_text('[Server]\nListenAddress = 0.0.0.0\nPort = 1\nPlayers = 2\n'
                       'Name = Сервер config Ж\nActivityClass = ' + args.activity_class + '\nActivity = ' + args.activity + '\n'
                       'Scene = ' + args.scene + '\nIncludeMods = false\nLogDirectory = "' + str(logs) + '"\n', encoding='utf-8')
+    if args.team_tech:
+        with config.open('a', encoding='utf-8') as output:
+            output.write('TeamTech = Base.rte\n')  # CLI must replace this non-faction value.
     environment = os.environ.copy()
     environment.pop('DISPLAY', None)
     environment.pop('WAYLAND_DISPLAY', None)
@@ -134,7 +143,7 @@ def main():
             raise RuntimeError('Invalid player limit was not rejected.')
         with (root / 'stdout.log').open('wb') as stdout, (root / 'stderr.log').open('wb') as stderr:
             process = subprocess.Popen([str(binary), '--config', str(config), '--listen', '127.0.0.1',
-                                        '--port', '0', '--name', 'Сервер CLI Ёжик'], cwd=game, env=environment,
+                                        '--port', '0', '--name', 'Сервер CLI Ёжик'] + (['--team-tech', args.team_tech] if args.team_tech else []), cwd=game, env=environment,
                                        stdin=subprocess.PIPE, stdout=stdout, stderr=stderr, creationflags=creation_flags)
             while True:
                 check()
@@ -144,6 +153,8 @@ def main():
                     port = int(ready.group(1))
                     if not 0 < port <= 65535 or port == 1 or 'INFO starting name=Сервер CLI Ёжик' not in text:
                         raise RuntimeError('UTF-8 config/CLI override check failed.')
+                    if args.team_tech and any(f'INFO team_tech team={team} value={args.team_tech}' not in text for team in range(4)):
+                        raise RuntimeError('CLI faction override did not replace the configuration on every team.')
                     break
                 time.sleep(0.1)
             if args.probe_clients:
@@ -168,7 +179,7 @@ def main():
                             control_options = ['--require-control', '--minimum-revision', str(minimum_revision)] if args.require_control else []
                             if args.disconnect_one_restart:
                                 control_options += ['--expected-humans', str(2 if index == 0 else 1)]
-                            probes.append(subprocess.Popen([str(binary), '--probe-client', '127.0.0.1', str(port), '--probe-seconds', str(duration)] + (['--screen-text'] if args.screen_text else []) + (['--objectives'] if args.objectives else []) + control_options + (['--input-silence'] if args.input_silence else []) + (['--construction-check'] if args.construction_check else []) + (['--brain-start', '--construction-share-dir', str(construction_exchange)] if args.brain_start else []),
+                            probes.append(subprocess.Popen([str(binary), '--probe-client', '127.0.0.1', str(port), '--probe-seconds', str(duration)] + (['--screen-text'] if args.screen_text else []) + (['--objectives'] if args.objectives else []) + control_options + (['--input-silence'] if args.input_silence else []) + (['--construction-check'] if args.construction_check else []) + (['--brain-start', '--construction-share-dir', str(construction_exchange)] if args.brain_start else []) + (['--deployment-check'] if args.deployment_check else []),
                                 cwd=game, env=environment, stdout=output, stderr=subprocess.STDOUT,
                                 creationflags=creation_flags))
                         observed_two = False
@@ -208,6 +219,7 @@ def main():
                 controlled_actors = set()
                 construction_purchase_observed = False
                 foreign_removal_denied = False
+                deployment_gift_observed = False
                 for index in range(2):
                     report = (root / f'client-{index}.log').read_text(encoding='utf-8')
                     object_count_pattern = r'\d+' if args.construction_check and 'activity_state=2 ' in report else r'[1-9]\d*'
@@ -220,6 +232,10 @@ def main():
                     if args.construction_check and 'construction_checks=7' not in report:
                         raise RuntimeError('Construction command checks were not verified.')
                     editing_probes &= 'activity_state=2 ' in report
+                    if args.deployment_check:
+                        if 'construction_deployment=passed' not in report or 'construction_inventory_gift=passed' not in report:
+                            raise RuntimeError('Deployment/inventory gift checks were not verified.')
+                        deployment_gift_observed |= 'construction_inventory_gift=passed gifted=1 charged=18' in report and 'construction_deployment=passed deployed=1 charged=188' in report
                     if args.brain_start and ('brain_start=1' not in report or 'activity_state=4 ' not in report):
                         raise RuntimeError('Native brain placement/start was not verified.')
                     if args.brain_start:
@@ -271,6 +287,10 @@ def main():
                     result['construction_removal_and_replay'] = True
                     result['foreign_construction_removal_denied'] = True
                     result['construction_terrain_layers_and_replay'] = True
+                if args.deployment_check:
+                    if not deployment_gift_observed:
+                        raise RuntimeError('No real paid deployment and inventory gift were observed.')
+                    result['deployment_loadout_and_inventory_gift'] = True
                 if args.construction_check:
                     result['construction_checks_per_client'] = 7
                 result['probe_seconds'] = args.probe_seconds
@@ -332,7 +352,7 @@ def main():
             server_log = service_logs / 'Server.log'
             with (root / 'service-stdout.log').open('wb') as stdout, (root / 'service-stderr.log').open('wb') as stderr:
                 process = subprocess.Popen([str(binary), '--config', str(config), '--port', '0',
-                                            '--log-directory', str(service_logs)], cwd=game, env=environment,
+                                            '--log-directory', str(service_logs)] + (['--team-tech', args.team_tech] if args.team_tech else []), cwd=game, env=environment,
                                            stdin=subprocess.DEVNULL, stdout=stdout, stderr=stderr)
                 while 'video_initialized=0' not in read_log():
                     check(); time.sleep(0.1)

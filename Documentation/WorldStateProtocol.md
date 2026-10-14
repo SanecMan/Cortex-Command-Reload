@@ -337,6 +337,38 @@ checks passed; the delivered terrain screenshot was inspected without a selected
 object preview. Linux terrain run `38592076787` succeeded for `ac7487c274c`.
 Linux cross-peer authorization run `38588875168` succeeded for `1ec61b9636d`.
 
+### Deployment loadouts and inventory gifting
+
+The optional device-free `--deployment-check` fixture requires `--brain-start`
+and `--team-tech Coalition.rte`. It places Base.rte Default Deployment over the
+previously constructed block, verifies one Coalition Soldier Light with flipped
+pose and equipped Assault Rifle, and requires the native Default loadout charge
+of 188 (120 actor + 50 rifle + 18 pistol). Exact request replay must preserve the
+response and team funds. The actor must settle before the next operation.
+
+It places an additional Coalition Auto Pistol at that actor's position, checks
+a single additional owned inventory/hand item, no top-level dropped pistol,
+charge 18, and exact replay. Removing the inventory item through the construction
+removal command must return object_attached. This validates the existing safe
+refusal; it does not implement inventory deletion. The other peer exercises
+insufficient funds. Both subsequently require normal native start and distinct
+controlled brains, retaining the deployed actor in the world.
+
+`ConstructionDeployment` and `ConstructionDeploymentLogged` passed two separate
+clients in 25.83/25.78 seconds with 128/129 further ticks and video disabled.
+The root server passed `ConstructionDeploymentDelivered` in 25.71 seconds with
+128 further ticks. `DeploymentCliOverride` passed in 25.60 seconds with 130 ticks:
+the CLI Coalition override replaced an intentionally invalid Base.rte config
+value on all four teams. The earlier config-only Coalition run also passed.
+The Linux service-mode launch retains the same CLI override. A dedicated Linux
+CI step runs this fixture. Workflow YAML parsing passed locally.
+
+These checks cover one native Default actor loadout and gifting to an ordinary
+AHuman. They do not prove deployments containing only devices, custom loadouts,
+resident-brain gifting, graphical rendering of this deployment transaction or
+safe deletion from an inventory. Those remain separate validation/implementation
+work. Durations are validation wall times, not performance comparisons.
+
 ### Brain placement and native start
 
 `SceneEditorGUI::InstallNetworkBrain` clones the server's selected brain, existing
