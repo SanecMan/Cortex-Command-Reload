@@ -20,6 +20,12 @@ duration and queries FMOD's actual cursor before destroying the owner. It also
 checks the existing group pause/resume and ownership lifecycle regressions.
 These checks do not establish audible continuity for joining clients.
 
+Native MSBuild `Final|x64` also compiled and linked. The root client and matching
+server passed `SoundPlaybackSeekDelivered` in 33.71 seconds: two audio-enabled
+clients connected through the menu, channel seeking/lifetime and group
+pause/resume checks passed, both exited cleanly and the server continued 62
+updates after disconnect. Linux CI for the cursor change is a separate check.
+
 ## v22 sound mix controls
 
 Development sources add GlobalPitch (a three-bit bus mask), BusPause, Pan and
