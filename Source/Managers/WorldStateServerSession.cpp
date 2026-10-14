@@ -57,6 +57,7 @@ bool WorldStateServerSession::Start(const std::string& bindAddress, unsigned sho
 	m_TerrainPatchBroadcastCount = 0;
 	m_PendingTerrainPatches.clear();
 	m_LastInputSequenceByClient.clear();
+	m_LastInputTimeByClient.clear();
 	m_LastPurchaseByClient.clear();
 	m_LastPolicyByClient.clear(); m_LastPolicyTick=0; m_PolicySequence=0;
 	m_LastPurchaseTimeByClient.clear();
@@ -112,6 +113,7 @@ void WorldStateServerSession::Stop() {
 	m_ClientAddresses.clear();
 	m_ReportedPlayerSlots.clear();
 	m_LastInputSequenceByClient.clear();
+	m_LastInputTimeByClient.clear();
 	m_ResetVotesByClient.clear();
 	m_RestartVotesByClient.clear();
 	m_PreviousResetInputByClient.clear();
@@ -278,6 +280,7 @@ void WorldStateServerSession::PollNetwork(std::uint32_t simulationTick) {
 			const std::string clientAddress(packet.Sender.ToString(true));
 			m_PendingSoundBaselines.push_back(clientAddress);
 			m_LastInputSequenceByClient.erase(clientAddress);
+			m_LastInputTimeByClient.erase(clientAddress);
 			m_LastPurchaseByClient.erase(clientAddress);
 			m_LastPolicyByClient.erase(clientAddress);
 			m_LastPurchaseTimeByClient.erase(clientAddress);
@@ -315,6 +318,7 @@ void WorldStateServerSession::PollNetwork(std::uint32_t simulationTick) {
 			m_LastPurchaseTimeByClient.erase(clientAddress);
 			m_ReportedPlayerSlots.erase(clientAddress);
 			m_LastInputSequenceByClient.erase(clientAddress);
+			m_LastInputTimeByClient.erase(clientAddress);
 			m_ResetVotesByClient.erase(clientAddress);
 			m_RestartVotesByClient.erase(clientAddress);
 			m_PreviousResetInputByClient.erase(clientAddress);
@@ -519,6 +523,7 @@ void WorldStateServerSession::Update(std::uint32_t simulationTick) {
 			continue;
 		}
 		m_LastInputSequenceByClient[clientAddress] = sequence;
+		m_LastInputTimeByClient[clientAddress] = std::chrono::steady_clock::now();
 		const bool previousReset = m_PreviousResetInputByClient[clientAddress];
 		const bool previousRestart = m_PreviousRestartInputByClient[clientAddress];
 		if (command.ResetActivityVote && !previousReset) {
@@ -547,6 +552,19 @@ void WorldStateServerSession::Update(std::uint32_t simulationTick) {
 			Log("INFO: applied " + std::to_string(m_InputCommandCount) + " client input commands to player slot " +
 			    std::to_string(playerSlot->second) + "; latest held mask=" + std::to_string(command.HeldElements));
 		}
+	}
+	const auto inputNow = std::chrono::steady_clock::now();
+	for (auto it = m_LastInputTimeByClient.begin(); it != m_LastInputTimeByClient.end();) {
+		if (inputNow - it->second < std::chrono::seconds(1)) { ++it; continue; }
+		if (const auto slot = m_PlayerSlotByClient.find(it->first); slot != m_PlayerSlotByClient.end()) {
+			// Keep the slot in network mode: a silent client must not fall back
+			// to the host's local keyboard/controller input.
+			g_UInputMan.SetNetworkInputState(slot->second, 0, Vector(), 0, 0, Vector(), Vector());
+			m_PreviousResetInputByClient.erase(it->first);
+			m_PreviousRestartInputByClient.erase(it->first);
+			Log("WARNING: neutralized stale network input for player slot " + std::to_string(slot->second));
+		}
+		it = m_LastInputTimeByClient.erase(it);
 	}
 	ProcessActivityVotes();
 	PublishPurchasePolicies(simulationTick);

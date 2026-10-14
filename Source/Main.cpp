@@ -1391,6 +1391,7 @@ namespace {
 			return client.GetReceivedSnapshotCount() > 0;
 		});
 		bool networkInputApplied = false;
+		bool networkInputFreshness = false;
 		int networkInputPlayer = Players::NoPlayer;
 		if (allConnectedAndReceived) {
 			WorldStateProtocol::InputCommand inputCommand;
@@ -1429,6 +1430,38 @@ namespace {
 			networkInputApplied = networkInputPlayer == clients.front().GetAssignedPlayerSlot() && serverSession.GetInputCommandCount() >= initialInputCount + 2 &&
 			                      g_UInputMan.ElementReleased(networkInputPlayer, InputElements::INPUT_FIRE) &&
 			                      g_UInputMan.MouseButtonReleased(MouseButtons::MOUSE_LEFT, networkInputPlayer);
+			if (networkInputApplied) {
+				auto sendAndApply = [&](bool fire) {
+					++inputCommand.ClientTick;
+					inputCommand.HeldElements = fire ? std::uint64_t{1} << InputElements::INPUT_FIRE : 0;
+					inputCommand.MouseButtonsHeld = fire ? static_cast<std::uint8_t>(1U << MouseButtons::MOUSE_LEFT) : 0;
+					const auto before = serverSession.GetInputCommandCount();
+					if (!clients.front().SendInputCommand(inputCommand)) return false;
+					const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+					while (serverSession.GetInputCommandCount() == before && std::chrono::steady_clock::now() < deadline) {
+						serverSession.Update(++worldStateServerSimulationTick);
+						for (auto& peer : clients) peer.Update();
+						std::this_thread::sleep_for(std::chrono::milliseconds(5));
+					}
+					return serverSession.GetInputCommandCount() > before;
+				};
+				const bool heldApplied = sendAndApply(true) && g_UInputMan.ElementHeld(networkInputPlayer, InputElements::INPUT_FIRE);
+				const auto quietBegin = std::chrono::steady_clock::now();
+				while (heldApplied && g_UInputMan.ElementHeld(networkInputPlayer, InputElements::INPUT_FIRE) &&
+				       std::chrono::steady_clock::now() - quietBegin < std::chrono::seconds(3)) {
+					serverSession.Update(++worldStateServerSimulationTick);
+					for (auto& peer : clients) peer.Update();
+					std::this_thread::sleep_for(std::chrono::milliseconds(5));
+				}
+				const bool neutralized = heldApplied && g_UInputMan.IsNetworkInputActive(networkInputPlayer) &&
+				    !g_UInputMan.ElementHeld(networkInputPlayer, InputElements::INPUT_FIRE) &&
+				    !g_UInputMan.MouseButtonHeld(MouseButtons::MOUSE_LEFT, networkInputPlayer) &&
+				    std::chrono::steady_clock::now() - quietBegin >= std::chrono::milliseconds(900);
+				const bool recovered = sendAndApply(true) && g_UInputMan.ElementHeld(networkInputPlayer, InputElements::INPUT_FIRE);
+				const bool released = sendAndApply(false) && !g_UInputMan.ElementHeld(networkInputPlayer, InputElements::INPUT_FIRE);
+				networkInputFreshness = neutralized && recovered && released && serverSession.GetConnectedClientCount() == expectedClientCount;
+				log << "world_state_input_freshness=" << (networkInputFreshness ? "passed" : "failed") << '\n' << std::flush;
+			}
 		}
 		for (WorldStateClientSession& client : clients) {
 			client.Disconnect();
@@ -1440,7 +1473,7 @@ namespace {
 		}
 		serverSession.DisableDebugEmptyWorldSnapshotSmoke();
 		const bool remainedAvailableAfterDisconnect = serverSession.IsStarted() && serverSession.GetConnectedClientCount() == 0;
-		const bool passed = idleServerSkippedSnapshot && allConnectedAndReceived && playerAssignmentsPassed && networkInputApplied && remainedAvailableAfterDisconnect && (!requireLiveWorld || liveWorldReceived);
+		const bool passed = idleServerSkippedSnapshot && allConnectedAndReceived && playerAssignmentsPassed && networkInputApplied && networkInputFreshness && remainedAvailableAfterDisconnect && (!requireLiveWorld || liveWorldReceived);
 		log << "world_state_host_session_smoke=" << (passed ? "passed" : "failed")
 		    << " clients_accepted=" << expectedClientCount
 		    << " clients_received=" << clientsReceivedSnapshotCount

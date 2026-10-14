@@ -1,5 +1,13 @@
 # UTF-8 text support
 
+Linux CI run `38531330475` for `00cd3b5cb6d` passed build, standalone line-layout
+tests, content self-test (`utf8_wrapped_raster_layout=passed` and
+`utf8_text_input_policy=passed`), two separate clients, UTF-8 CLI/config/screen
+text, clean SIGTERM and extracted-package verification. Build-tree runtime took
+13.24 seconds; package runtime took 9.62 seconds, both with no video initialization
+and 120 observed ticks. Selection-boundary changes are in the following commit
+and are not covered by that run.
+
 Programmatic selection and cursor positions retain their byte-index API. Values
 are clamped to the text extent; an index inside a valid UTF-8 sequence snaps back
 to its starting byte. Forward and reversed selections therefore cannot extract

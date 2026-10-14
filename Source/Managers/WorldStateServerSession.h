@@ -81,6 +81,7 @@ namespace RTE {
 		std::deque<WorldStateProtocol::TerrainPatch> m_PendingTerrainPatches;
 		unsigned short m_ConnectedClients = 0;
 		std::unordered_map<std::string, std::uint32_t> m_LastInputSequenceByClient;
+		std::unordered_map<std::string, std::chrono::steady_clock::time_point> m_LastInputTimeByClient;
 		std::unordered_map<std::string, int> m_PlayerSlotByClient;
 		std::unordered_map<std::string, RakNet::SystemAddress> m_ClientAddresses;
 		std::unordered_map<std::string, int> m_ReportedPlayerSlots;

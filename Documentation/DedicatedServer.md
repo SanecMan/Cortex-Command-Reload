@@ -88,6 +88,25 @@ Its total verification time was 167.71 seconds including startup, not a benchmar
 
 ## Connection failure handling
 
+The authoritative host neutralizes held buttons, mouse/analog input after one
+second without an accepted fresh input command. This uses a monotonic wall clock,
+independent of simulation speed. The transport connection and player assignment
+remain intact; fresh commands resume control. The slot stays in network input
+mode, so it cannot fall back to the host keyboard. Stale sequence packets do not
+renew the deadline. Disconnect/Stop clear the deadline state. This is a fixed
+one-second safety timeout, not automatic reconnect or identity restoration.
+
+`InputFreshnessHeadless` passed the real RakNet loopback regression:
+`world_state_input_freshness=passed` verifies held fire, silence, neutralization,
+fresh-command recovery and explicit release while all four loopback peers remain
+connected. The wider headless run passed separate-client input, UTF-8 screen text,
+no video initialization and 130 observed ticks in 37.86 seconds. That duration
+includes concurrent native linking and is not a performance benchmark.
+Meson and native MSBuild `Final|x64` compiled and linked. The two-client
+menu/screen-text/audio regression passed in 65.16 seconds with 67 post-disconnect
+updates for Meson, and 33.93 seconds with 63 updates for the delivered root pair
+(`InputFreshnessDelivered`). The wire format is unchanged.
+
 The world-state client now reports explicit transport failures: server capacity,
 bans, password rejection, incompatible RakNet protocol, connection refusal,
 server shutdown and lost connection. The direct-connect menu displays that
