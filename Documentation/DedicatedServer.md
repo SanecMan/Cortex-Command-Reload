@@ -218,6 +218,13 @@ skipping this check. Windows `ReplicaSpawnFinalHeadless` passed the full
 content/UTF-8/objective and two-client suite in 34.56 seconds with 123 further
 ticks and no video initialization.
 
+Native Final compiled/linked with this fixture. The delivered root client/server
+passed `ReplicaSpawnDelivered` (51.87 seconds, two GUI clients, unchanged scene
+revision, strict sampled membership/attachments, audio shutdown and 63 further
+updates). `ReplicaSpawnRootHeadless` passed the required spawn marker and full
+device-free suite in 19.60 seconds with 128 further ticks. Linux verification
+run `38561184555` is pending for commit `aec4cde9a71`.
+
 Linux run `38557226570` passed the preceding Army admission stage, including the
 actual-script LuaJIT loadout test and delayed connections in both Army modes.
 
