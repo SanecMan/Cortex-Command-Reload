@@ -2,6 +2,7 @@
 #include "../Managers/PresetMan.h"
 #include "../System/System.h"
 #include "../System/UTF8.h"
+#include "FontGlyphDecode.h"
 
 #include <cassert>
 #include <filesystem>
@@ -181,7 +182,7 @@ void GUIFont::Draw(GUIBitmap* Bitmap, int X, int Y, const std::string& Text, uns
 	for (std::size_t i = 0; i < Text.size();) {
 		std::uint32_t codePoint = 0;
 		std::size_t byteCount = 1;
-		UTF8::Decode(Text, i, codePoint, byteCount);
+		DecodeFontGlyph(Text, i, codePoint, byteCount);
 		if (codePoint == '\n') {
 			Y += m_FontHeight;
 			X = initX;
@@ -329,7 +330,7 @@ int GUIFont::CalculateWidth(const std::string& Text) {
 	for (std::size_t i = 0; i < Text.size();) {
 		std::uint32_t codePoint = 0;
 		std::size_t byteCount = 1;
-		UTF8::Decode(Text, i, codePoint, byteCount);
+		DecodeFontGlyph(Text, i, codePoint, byteCount);
 		// Reset line counting if newline encountered
 		if (codePoint == '\n') {
 			if (Width > WidestLine) {
@@ -373,7 +374,7 @@ int GUIFont::CalculateHeight(const std::string& Text, int MaxWidth) {
 	for (std::size_t i = 0; i < Text.size();) {
 		std::uint32_t codePoint = 0;
 		std::size_t byteCount = 1;
-		UTF8::Decode(Text, i, codePoint, byteCount);
+		DecodeFontGlyph(Text, i, codePoint, byteCount);
 
 		// Add the new line's height if newline encountered
 		if (codePoint == '\n') {

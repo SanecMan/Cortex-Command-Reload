@@ -3446,6 +3446,40 @@ int RunCortexCommand(int argc, char** argv) {
 					GetDebugRunState().Log << "utf8_raster_color_smoke=" << (rasterPassed ? "passed" : "failed")
 					    << " pixels=" << foregroundPixels << " wrong_color=" << wrongColorPixels << '\n' << std::flush;
 					contentPassed = contentPassed && rasterPassed;
+					bool iconsPassed = true;
+					GUIFont* iconFont = g_FrameMan.GetLargeFont();
+					BITMAP* rawPixels = create_bitmap_ex(8, 80, 24);
+					BITMAP* utf8Pixels = create_bitmap_ex(8, 80, 24);
+					iconsPassed = iconFont && rawPixels && utf8Pixels;
+					if (iconsPassed) {
+						AllegroBitmap rawTarget(rawPixels), utf8Target(utf8Pixels);
+						for (unsigned int icon : {200U, 207U, 217U, 219U, 229U}) {
+							const std::string raw(1, static_cast<char>(icon));
+							std::string encoded;
+							UTF8::AppendCodepoint(encoded, icon);
+							clear_to_color(rawPixels, 0); clear_to_color(utf8Pixels, 0);
+							iconFont->Draw(&rawTarget, 2, 2, raw);
+							iconFont->Draw(&utf8Target, 2, 2, encoded);
+							iconsPassed = iconsPassed && iconFont->CalculateWidth(raw) == iconFont->CalculateWidth(raw[0]) &&
+							    iconFont->CalculateWidth(raw) == iconFont->CalculateWidth(encoded) &&
+							    iconFont->CalculateHeight(raw) == iconFont->CalculateHeight(encoded);
+							int visiblePixels = 0;
+							for (int row = 0; row < rawPixels->h; ++row) for (int column = 0; column < rawPixels->w; ++column) {
+								const int pixel = getpixel(rawPixels, column, row);
+								if (pixel) ++visiblePixels;
+								iconsPassed = iconsPassed && pixel == getpixel(utf8Pixels, column, row);
+							}
+							// Atlas slot 207 is the blank spacer in one-handed reload strings.
+							iconsPassed = iconsPassed && (icon == 207U ? visiblePixels == 0 : visiblePixels > 0);
+							GetDebugRunState().Log << "legacy_hud_icon=" << icon << " width=" << iconFont->CalculateWidth(raw)
+							    << " byte_width=" << iconFont->CalculateWidth(raw[0]) << " encoded_width=" << iconFont->CalculateWidth(encoded)
+							    << " pixels=" << visiblePixels << '\n';
+						}
+					}
+					if (rawPixels) destroy_bitmap(rawPixels);
+					if (utf8Pixels) destroy_bitmap(utf8Pixels);
+					GetDebugRunState().Log << "legacy_hud_icon_raster=" << (iconsPassed ? "passed" : "failed") << '\n' << std::flush;
+					contentPassed = contentPassed && iconsPassed;
 				}
 				if (contentPassed && GetDebugRunState().HeadlessSimulationPreflight) {
 					// A remote slot can exist before its presentation menus are initialized.

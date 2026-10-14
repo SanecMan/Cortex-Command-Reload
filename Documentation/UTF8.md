@@ -1,5 +1,15 @@
 # UTF-8 text support
 
+Legacy HUD icons remain compatible with the bitmap atlas: font drawing and
+measurement preserve an isolated non-UTF-8 byte as its original unsigned atlas
+index. Valid UTF-8 is always decoded as Unicode. This rule belongs only to the
+font layer; the strict decoder used for files and network data is unchanged.
+Byte sequences that also form valid UTF-8 are necessarily treated as Unicode;
+new content should encode glyph code points explicitly. The device-free content
+diagnostic checks actual icon pixels and width/height against their UTF-8 encoded
+atlas indices, in addition to the Cyrillic raster check. The portable decoder
+regression is `Tools/FontGlyphDecodeTest.cpp`.
+
 Absolute resource paths remain absolute when resolved by PresetMan. They are
 normalized to generic separators and passed through the same UTF-8/legacy-path
 conversion as relative module paths, without adding `Mods/`. Relative `.rte`
