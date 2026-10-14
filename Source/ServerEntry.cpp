@@ -153,8 +153,30 @@ bool VerifyBrainConstructionStart(RTE::WorldStateClientSession& client) {
 	if (!send(object, false, "prohibited_item")) return false;
 	object.RequestId = 6; object.Preset = {"HDFirearm", "Ronin.rte", "AK-47"}; object.X = -1;
 	if (!send(object, false, "outside_scene")) return false;
+	ConstructionRequest removal;
+	removal.RequestId = 7; removal.SceneRevision = request.SceneRevision; removal.Action = ConstructionAction::RemoveObject;
+	removal.ObjectId = affordable ? placed.ObjectId : std::numeric_limits<std::uint64_t>::max();
+	ConstructionResult removed, removedReplay;
+	if (!send(removal, affordable, affordable ? "" : "object_not_owned", &removed) ||
+	    !send(removal, affordable, affordable ? "" : "object_not_owned", &removedReplay) || removed != removedReplay ||
+	    (affordable && removed.ObjectId != placed.ObjectId)) return false;
+	removal.RequestId = 8;
+	if (!send(removal, false, "object_not_owned")) return false;
+	const auto removeDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(6);
+	bool deletionObserved = false;
+	while (std::chrono::steady_clock::now() < removeDeadline) {
+		client.Update(); client.SendInputCommand({});
+		const auto& world = client.GetLatestSnapshot();
+		const bool present = std::any_of(world.Objects.begin(), world.Objects.end(), [&](const auto& entry) {
+			return entry.ClassName == "HDFirearm" && entry.ModuleName == "Ronin.rte" && entry.PresetName == "AK-47" && entry.Team == team;
+		});
+		if (!present && world.TeamFunds[team] == expectedFunds) { deletionObserved = true; break; }
+		std::this_thread::sleep_for(std::chrono::milliseconds(20));
+	}
+	if (!deletionObserved) { std::cerr << "Construction removal/funds mismatch\n"; return false; }
+	std::cout << "construction_removal=passed removed=" << affordable << '\n';
 	std::cout << "construction_objects=passed placed=" << affordable << " charged=" << placed.ChargedCost << '\n';
-	request = {}; request.RequestId = 7; request.SceneRevision = client.GetLatestSnapshot().SceneRevision;
+	request = {}; request.RequestId = 9; request.SceneRevision = client.GetLatestSnapshot().SceneRevision;
 	request.Action = ConstructionAction::SetReady; request.Ready = true;
 	return send(request, true, "");
 }

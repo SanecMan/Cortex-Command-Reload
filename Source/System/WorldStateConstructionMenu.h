@@ -27,6 +27,13 @@ public:
 	bool IsReady() const { return m_Slot >= 0 && m_Slot < WorldStateProtocol::c_PlayerSlotCount && m_State.Players[m_Slot].Ready; }
 	const Vector& GetCursor() const { return m_Cursor; }
 	float LastChargedCost() const { return m_LastCost; }
+	std::uint64_t LastPlacedObjectId() const { return m_LastPlacedId; }
+	bool RemoveLastObject(WorldStateClientSession& client) {
+		if (!m_Active || m_Slot < 0 || m_Pending || !m_State.SceneRevision || !m_LastPlacedId) return false;
+		WorldStateProtocol::ConstructionRequest request;
+		request.Action = WorldStateProtocol::ConstructionAction::RemoveObject; request.ObjectId = m_LastPlacedId;
+		return Send(client, request);
+	}
 	const std::string& LastRejection() const { return m_LastReason; }
 	const SceneObject* GetSelectedObject() const { return m_Selected.get(); }
 	ObjectPickerGUI* GetPicker() const { return m_Picker.get(); }
@@ -56,7 +63,7 @@ public:
 	}
 	void Reset() {
 		const ObjectScriptExecution::SuppressionScope suppress;
-		ClearSelection(); m_Picker.reset(); m_LastCost = 0; m_LastReason.clear();
+		ClearSelection(); m_Picker.reset(); m_LastCost = 0; m_LastReason.clear(); m_LastPlacedId = 0;
 		for (auto& preview : m_Previews) { if (preview.Object) preview.Object->DestroyScriptState(); preview = {}; }
 		m_Active = m_Pending = m_LastAccepted = false; m_Revision = 0; m_Slot = -1; m_State = {}; m_Status.clear();
 	}
@@ -98,7 +105,10 @@ public:
 			m_Pending = false; m_LastAccepted = reply.Accepted;
 			m_LastCost = reply.ChargedCost;
 			m_LastReason = reply.Reason;
+			if (reply.Accepted && m_Request.Action == WorldStateProtocol::ConstructionAction::PlaceObject && reply.ObjectId) m_LastPlacedId = reply.ObjectId;
+			if (m_Request.Action == WorldStateProtocol::ConstructionAction::RemoveObject && (reply.Accepted || reply.Reason == "object_missing")) m_LastPlacedId = 0;
 			m_Status = reply.Accepted ? "Server confirmed" : RejectionText(reply.Reason);
+			if (reply.Accepted && m_Request.Action == WorldStateProtocol::ConstructionAction::RemoveObject) m_Status = "Object removed; placement cost is not refunded";
 		}
 		for (int player = 0; player < WorldStateProtocol::c_PlayerSlotCount; ++player) {
 			auto& preview = m_Previews[player]; const auto& brain = m_State.Players[player].Brain;
@@ -130,6 +140,7 @@ public:
 				m_Controller.RelativeCursorMovement(m_Cursor); g_SceneMan.ForceBounds(m_Cursor);
 				if (m_Selected && !m_Pending && g_UInputMan.KeyPressed(SDLK_F8)) m_Selected->SetRotAngle(m_Selected->GetRotAngle() + 0.2617994F);
 				if (m_Selected && !m_Pending && g_UInputMan.KeyPressed(SDLK_F9)) m_Selected->SetHFlipped(!m_Selected->IsHFlipped());
+				if (!m_Pending && g_UInputMan.KeyPressed(SDLK_DELETE)) RemoveLastObject(client);
 				if (!m_Pending && (m_Controller.IsState(PRESS_PRIMARY) || g_UInputMan.KeyPressed(SDLK_RETURN))) {
 					if (m_Selected) PlaceObject(client, m_Cursor); else PlaceBrain(client, m_Cursor);
 				}
@@ -153,7 +164,7 @@ public:
 		line(target, point.GetFloorIntX() - 20, point.GetFloorIntY(), point.GetFloorIntX() + 20, point.GetFloorIntY(), g_YellowGlowColor);
 		AllegroBitmap bitmap(target);
 		g_FrameMan.GetSmallFont()->DrawAligned(&bitmap, target->w / 2, target->h - 56, m_Selected ? m_Selected->GetPresetName() : "Brain placement", GUIFont::Centre);
-		g_FrameMan.GetSmallFont()->DrawAligned(&bitmap, target->w / 2, target->h - 40, "Click/Enter: place | F7: objects | B: brain | F8/F9: rotate/flip | F6: ready/cancel", GUIFont::Centre);
+		g_FrameMan.GetSmallFont()->DrawAligned(&bitmap, target->w / 2, target->h - 40, "Click: place | F7: objects | B: brain | F8/F9: rotate/flip | Del: last movable | F6: ready", GUIFont::Centre);
 		g_FrameMan.GetSmallFont()->DrawAligned(&bitmap, target->w / 2, target->h - 24, IsReady() ? "Ready - waiting for other players" : (m_Pending ? "Waiting for server..." : m_Status), GUIFont::Centre);
 		if (m_Picker) m_Picker->Draw(target);
 	}
@@ -171,6 +182,10 @@ private:
 		if (reason == "prohibited_item") return "This object is not available for construction";
 		if (reason == "terrain_obstructed") return "Choose a clear position for this object";
 		if (reason == "invalid_preset") return "The server does not have this object";
+		if (reason == "object_not_owned") return "You can only remove objects you placed";
+		if (reason == "object_missing") return "This object no longer exists";
+		if (reason == "object_attached") return "This object is held or attached; it cannot be removed here";
+		if (reason == "construction_limit") return "The construction object limit has been reached";
 		return "Server declined the construction request";
 	}
 	bool Send(WorldStateClientSession& client, WorldStateProtocol::ConstructionRequest request) {
@@ -184,6 +199,7 @@ private:
 	std::unique_ptr<ObjectPickerGUI> m_Picker;
 	std::unique_ptr<SceneObject> m_Selected;
 	float m_LastCost = 0;
+	std::uint64_t m_LastPlacedId = 0;
 	std::string m_LastReason;
 	WorldStateProtocol::ConstructionState m_State;
 	WorldStateProtocol::ConstructionRequest m_Request;

@@ -222,6 +222,8 @@ def main():
                     if args.brain_start:
                         if 'construction_objects=passed' not in report:
                             raise RuntimeError('Construction object placement/replay/funds guards were not verified.')
+                        if 'construction_removal=passed' not in report:
+                            raise RuntimeError('Construction removal/replay/funds guards were not verified.')
                         construction_purchase_observed |= 'construction_objects=passed placed=1' in report
                     silence_match = re.search(r'silence_windows=(\d+)', report)
                     if args.input_silence and (not silence_match or int(silence_match.group(1)) < 2):
@@ -258,6 +260,7 @@ def main():
                         raise RuntimeError('No real paid construction object was placed.')
                     result['brain_placement_and_start'] = True
                     result['construction_purchase_and_replay'] = True
+                    result['construction_removal_and_replay'] = True
                 if args.construction_check:
                     result['construction_checks_per_client'] = 7
                 result['probe_seconds'] = args.probe_seconds

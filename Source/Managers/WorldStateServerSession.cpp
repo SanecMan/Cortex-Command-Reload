@@ -24,6 +24,8 @@
 #include "SoundPlaybackClock.h"
 #include "WorldStateAttachments.h"
 #include "Actor.h"
+#include "MovableMan.h"
+#include <limits>
 
 #include <algorithm>
 #include <utility>
@@ -106,6 +108,7 @@ bool WorldStateServerSession::Start(const std::string& bindAddress, unsigned sho
 
 void WorldStateServerSession::Stop() {
 	m_LastConstructionByClient.clear();
+	m_ConstructionOwners.clear(); m_ConstructionOwnerRevision = 0;
 	m_LastConstructionTimeByClient.clear();
 	m_PendingSoundBaselines.clear();
 	GetWorldStateSoundCapture().End();
@@ -305,6 +308,7 @@ void WorldStateServerSession::PollNetwork(std::uint32_t simulationTick) {
 			m_LastPurchaseByClient.erase(clientAddress);
 			m_LastPolicyByClient.erase(clientAddress);
 			m_LastConstructionByClient.erase(clientAddress);
+			std::erase_if(m_ConstructionOwners, [&](const auto& entry) { return entry.second.Client == clientAddress; });
 			m_LastConstructionTimeByClient.erase(clientAddress);
 			m_LastPurchaseTimeByClient.erase(clientAddress);
 			m_ResetVotesByClient.erase(clientAddress);
@@ -340,6 +344,7 @@ void WorldStateServerSession::PollNetwork(std::uint32_t simulationTick) {
 			m_LastPurchaseByClient.erase(clientAddress);
 			m_LastPurchaseTimeByClient.erase(clientAddress);
 			m_LastConstructionByClient.erase(clientAddress);
+			std::erase_if(m_ConstructionOwners, [&](const auto& entry) { return entry.second.Client == clientAddress; });
 			m_LastConstructionTimeByClient.erase(clientAddress);
 			m_ReportedPlayerSlots.erase(clientAddress);
 			m_LastInputSequenceByClient.erase(clientAddress);
@@ -373,6 +378,7 @@ void WorldStateServerSession::ProcessConstruction(const WorldStateTransport::Rec
 	WorldStateProtocol::ConstructionResult result;
 	result.RequestId = request.RequestId;
 	result.SceneRevision = m_SnapshotBuilder.RefreshSceneRevision();
+	if (m_ConstructionOwnerRevision != result.SceneRevision) { m_ConstructionOwners.clear(); m_ConstructionOwnerRevision = result.SceneRevision; }
 	const auto previous = m_LastConstructionByClient.find(client);
 	const auto slot = m_ReportedPlayerSlots.find(client);
 	auto* activity = dynamic_cast<GameActivity*>(g_ActivityMan.GetActivity());
@@ -387,22 +393,43 @@ void WorldStateServerSession::ProcessConstruction(const WorldStateTransport::Rec
 		const auto lastTime = m_LastConstructionTimeByClient.find(client);
 		if (lastTime != m_LastConstructionTimeByClient.end() && now - lastTime->second < std::chrono::milliseconds(250)) result.Reason = "rate_limit";
 		else if (!activity || activity->GetActivityState() != Activity::Editing) result.Reason = "not_editing";
-		else if (request.Action == WorldStateProtocol::ConstructionAction::RemoveObject) result.Reason = "placement_unavailable";
 		else {
 			g_ThreadMan.GetPriorityThreadPool().wait_for_tasks();
 			g_ThreadMan.GetBackgroundThreadPool().wait_for_tasks();
+			if (request.Action == WorldStateProtocol::ConstructionAction::PlaceObject) {
+				std::erase_if(m_ConstructionOwners, [&](const auto& entry) {
+					const auto* object = entry.first > static_cast<std::uint64_t>(std::numeric_limits<long>::max()) ? nullptr : g_MovableMan.FindObjectByUniqueID(static_cast<long>(entry.first));
+					return !object || object->IsSetToDelete();
+				});
+			}
 			if (request.Action == WorldStateProtocol::ConstructionAction::SetReady) {
 				result.Accepted = activity->SetNetworkConstructionReady(slot->second, request.Ready, result.Reason);
 			} else if (slot->second >= Players::MaxPlayerCount || !activity->PlayerActive(slot->second) || !activity->PlayerHuman(slot->second)) {
 				result.Reason = "inactive_player";
+			} else if (request.Action == WorldStateProtocol::ConstructionAction::RemoveObject) {
+				const auto owner = m_ConstructionOwners.find(request.ObjectId);
+				if (owner == m_ConstructionOwners.end() || owner->second.Client != client || owner->second.Revision != result.SceneRevision ||
+				    owner->second.Team != activity->GetTeamOfPlayer(slot->second)) result.Reason = "object_not_owned";
+				else {
+					auto* object = request.ObjectId > static_cast<std::uint64_t>(std::numeric_limits<long>::max()) ? nullptr :
+					    g_MovableMan.FindObjectByUniqueID(static_cast<long>(request.ObjectId));
+					if (!object || object->IsSetToDelete()) result.Reason = "object_missing";
+					else if (object->GetTeam() != owner->second.Team || object->GetRootParent() != object ||
+					    !(g_MovableMan.IsActor(object) || g_MovableMan.IsDevice(object) || g_MovableMan.IsParticle(object))) result.Reason = "object_attached";
+					else { object->SetToDelete(true); result.Accepted = true; result.ObjectId = request.ObjectId; }
+					if (result.Accepted || result.Reason == "object_missing") m_ConstructionOwners.erase(owner);
+					if (result.Accepted) activity->SetNetworkConstructionReady(slot->second, false, result.Reason);
+				}
 			} else if (auto* editor = activity->GetEditorGUI(slot->second)) {
 				if (request.Action == WorldStateProtocol::ConstructionAction::PlaceObject) {
 					const int module = g_PresetMan.GetModuleID(request.Preset.ModuleName);
 					const auto* preset = module < 0 ? nullptr : dynamic_cast<const SceneObject*>(g_PresetMan.GetEntityPreset(request.Preset.ClassName, request.Preset.PresetName, module));
-					if (!preset || preset->GetClassName() != request.Preset.ClassName || preset->GetModuleName() != request.Preset.ModuleName || preset->GetPresetName() != request.Preset.PresetName)
+					if (m_ConstructionOwners.size() >= 4096) result.Reason = "construction_limit";
+					else if (!preset || preset->GetClassName() != request.Preset.ClassName || preset->GetModuleName() != request.Preset.ModuleName || preset->GetPresetName() != request.Preset.PresetName)
 						result.Reason = "invalid_preset";
 					else result.Accepted = editor->PlaceNetworkObject(preset, Vector(request.X, request.Y), request.Rotation, request.HFlipped,
 					    result.ChargedCost, result.ObjectId, result.Reason);
+					if (result.Accepted && result.ObjectId) m_ConstructionOwners[result.ObjectId] = {client, result.SceneRevision, activity->GetTeamOfPlayer(slot->second)};
 				} else result.Accepted = editor->InstallNetworkBrain(Vector(request.X, request.Y), request.Rotation, request.HFlipped, result.Reason);
 				if (result.Accepted) result.Accepted = activity->SetNetworkConstructionReady(slot->second, false, result.Reason);
 			} else result.Reason = "editor_unavailable";

@@ -17,7 +17,7 @@ Publication follows the snapshot cadence (20 Hz) while peers are connected.
 Outside editing it sends an empty resident baseline. Client sessions retain the
 latest sequence and clear it on disconnect. A consumer must match scene revision
 before using it. The state does not add residents to MovableMan or execute local
-physics/Lua. The client construction menu renders residents and sends brain placement/readiness requests; object removal remains incomplete.
+physics/Lua. The client construction menu renders residents and sends brain placement/readiness requests; terrain/inventory removal and general placed-object selection remain incomplete.
 
 `WorldStateConstructionStateTest.cpp` passed MSVC and MinGW GCC, covering Russian
 identities, atomic decode failure, all truncated prefixes, flags, inactive-slot
@@ -63,7 +63,7 @@ server updates. Both screenshots were inspected: native brain sprites, cursor an
 placement/readiness instructions were visible. `ConstructionMenuHeadlessFinal`
 passed the content/UTF-8/objective/spawn regression in 20.03 seconds with 129
 further ticks and video initialization disabled. These durations are validation
-wall times, not performance comparisons. Object removal,
+wall times, not performance comparisons. Terrain/inventory removal,
 physical-input testing and broader Activity compatibility are still outstanding.
 
 Native Final compiled and linked. The delivered root client/server pair passed
@@ -111,7 +111,7 @@ clients, a paid placement, all construction/camera/replica/menu/audio assertions
 and 63 further server updates. Its catalog screenshot was inspected. The
 headless content/UTF-8/objective/spawn regression passed in 22.50 seconds with
 128 further ticks and no video initialization (`ConstructionPickerFullFinal`).
-Linux CI run `38584475211` is in progress for `6784e34fb00`; previous server
+Linux CI run `38584475211` succeeded for `6784e34fb00`; previous server
 placement run `38581552495` succeeded.
 
 ## Construction command codec foundation
@@ -119,7 +119,7 @@ placement run `38581552495` succeeded.
 `WorldStateConstructionProtocol.h` reserves envelope message kinds 11
 (`ConstructionRequest`) and 12 (`ConstructionResult`). The v29 snapshot layout
 and existing messages are unchanged. Sessions now route readiness requests and
-their responses and brain placement; object removal remains incomplete.
+their responses and brain placement; terrain/inventory removal and general placed-object selection remain incomplete.
 This does not yet establish playable networked construction. Placement integration
 must validate content, ownership, scene bounds and native brain placement before
 modifying the authoritative scene.
@@ -177,8 +177,7 @@ an identical repeat returns the original response without applying an action
 again. Conflicting/stale IDs do not replace that cached original response.
 Connection teardown clears the cache and cooldown.
 
-SetReady, PlaceBrain and PlaceObject are currently applied. RemoveObject returns
-`placement_unavailable` during editing. Outside editing the response is
+SetReady, PlaceBrain, PlaceObject and owned movable RemoveObject are currently applied during editing. Outside editing the response is
 `not_editing`; spectators receive `spectator`. A stale scene is rejected before
 replay handling. `GameActivity::SetNetworkConstructionReady` validates the player
 before accessing arrays and uses the native `TestBrainResidence`, including its
@@ -203,7 +202,7 @@ uses the existing cached reply and does not clone or charge twice.
 
 Returned movable IDs currently identify the server's native unique object in the
 construction response; they are not snapshot IDs. Terrain placement returns zero.
-Removal and undo/refunds still need
+Terrain/inventory removal and undo/refunds still need
 integration. Terrain/deployment/inventory-gift branches need dedicated runtime
 fixtures; a firearm fixture does not prove these branches work.
 
@@ -220,6 +219,39 @@ The delivered graphical construction regression also passed in 54.61 seconds
 with two clients, strict attachment/menu/audio checks and 63 further updates.
 Full content/UTF-8/objective/spawn preflight passed in 25.26 seconds with 128
 further ticks (`ConstructionObjectsFullRegression`). These are validation times.
+
+### Owned movable removal
+
+The server records the authenticated peer, scene revision and original team for
+successful movable placement IDs. RemoveObject requires that record and current
+team, a live native unique ID, and a top-level Actor/device/particle. It uses
+SetToDelete so the normal MovableMan update owns destruction. It clears readiness
+and returns the removed ID with zero charged cost. An identical repeated request
+returns the cached success, while a new request for that deleted ID is refused.
+Placement costs are not refunded. Brains, unrelated objects, inventory/attached
+items and terrain objects cannot be removed through this path.
+
+Ownership records clear on scene revision change, connection teardown and Stop.
+Dead records are pruned before placement. At most 4096 live construction records
+are retained; further placement is refused. The client remembers its latest
+acknowledged movable ID; Delete requests removal of that object. It does not yet
+provide arbitrary cursor-based selection or undo of terrain edits, and reconnect
+does not recover old placement permissions.
+
+The device-free brain-start fixture now checks real removal, response replay,
+an unknown uint64 ID, repeated removal with a fresh request ID, replicated absence
+and unchanged post-purchase funds, before starting both players. It does not yet
+exercise an actual second peer requesting the first peer's recorded placement ID,
+nor inventory/terrain cleanup. The graphical construction fixture uses the same
+client removal method and requires removal success for its paid purchase; it
+calls methods directly rather than synthesizing a physical Delete key.
+
+`ConstructionRemoval` passed with two clients in 63.24 seconds, real purchase and
+removal, distinct controlled actors and 128 further server ticks, with video off.
+`ConstructionRemovalVisual` passed in 57.67 seconds with both graphical clients,
+strict attachments/menu/audio and 63 further updates. The full content/UTF-8/
+objective/spawn regression passed in 38.66 seconds with 129 further ticks
+(`ConstructionRemovalFullRegression`). These are validation wall times.
 
 ### Brain placement and native start
 

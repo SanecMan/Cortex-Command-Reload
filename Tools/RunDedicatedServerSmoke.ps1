@@ -454,6 +454,7 @@ try {
         if ($CheckConstruction -and ($clientReport -notmatch '(?m)^world_state_construction_ui=passed' -or $clientReport -notmatch '(?m)^construction_preview_capture=passed' -or $clientReport -notmatch '(?m)^construction_catalog_capture=passed' -or $clientReport -notmatch '(?m)^construction_object_ui=passed')) { throw 'Construction UI/preview/catalog/purchase/start did not pass.' }
         if ($CheckConstruction -and $clientReport -notmatch '(?m)^construction_object_preview_capture=passed') { throw 'Object preview was not captured.' }
         $constructionPurchased = $constructionPurchased -or $clientReport -match '(?m)^construction_object_ui=passed purchased=1'
+        if ($CheckConstruction -and $clientReport -match '(?m)^construction_object_ui=passed purchased=1' -and $clientReport -notmatch '(?m)^construction_object_removal=passed') { throw 'Purchased object removal was not verified.' }
         if ($RequireControlledActor -and $clientNetwork -notmatch 'controlled_actor=[1-9]') { throw 'Client never received a controlled actor.' }
         if ($CheckLatePlayerJoin -and ($clientNetwork -notmatch 'scene_revision=1 .*controlled_actor=[1-9]' -or $clientNetwork -match 'scene_revision=([2-9]|[1-9][0-9]+) ')) { throw 'Late admission did not preserve the running scene revision.' }
         if ($RequireControlledActor -and $RestartWithConnectedPlayers -and $clientNetwork -notmatch 'scene_revision=[2-9].*controlled_actor=[1-9]') { throw 'Client has no controlled actor after roster restart.' }

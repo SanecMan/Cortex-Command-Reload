@@ -337,6 +337,7 @@ namespace {
 		int ConstructionTestStage = 0;
 		bool ConstructionExpectedAffordable = false;
 		float ConstructionInitialFunds = 0;
+		float ConstructionObjectCost = 0;
 		std::uint64_t ConstructionActionUpdate = 0;
 		bool RequirePurchasePolicyTest = false, PurchasePolicyTestObserved = false, RequirePurchasePricingTest = false;
 		bool RequestInventoryTest=false, InventoryInitialObserved=false, InventoryMutationObserved=false, InventoryReuseObserved=false;
@@ -3382,12 +3383,25 @@ void RunGameLoop() {
 					           (uiTest.ConstructionExpectedAffordable ? worldStateConstructionMenu->LastChargedCost() > 0 : worldStateConstructionMenu->LastRejection() == "insufficient_funds") &&
 					           snapshot.TeamFunds[snapshot.Players[slot].Team] == uiTest.ConstructionInitialFunds - worldStateConstructionMenu->LastChargedCost()) {
 						uiTest.Log << "construction_object_ui=passed purchased=" << uiTest.ConstructionExpectedAffordable << '\n' << std::flush;
+						uiTest.ConstructionObjectCost = worldStateConstructionMenu->LastChargedCost();
 						uiTest.ConstructionTestStage = 12; uiTest.ConstructionActionUpdate = uiTest.SimulationUpdates;
 					} else if (uiTest.ConstructionTestStage == 12 && uiTest.SimulationUpdates >= uiTest.ConstructionActionUpdate + 30) {
 						const std::string image = UTF8::PathToString(uiTest.OutputDirectory.filename()) + "/debug-run-construction-object.png";
 						const int saved = g_FrameMan.SaveScreenToPNGBlocking(image);
 						uiTest.Log << "construction_object_preview_capture=" << (saved == 0 ? "passed" : "failed") << '\n' << std::flush;
-						if (saved == 0 && worldStateConstructionMenu->SetReady(*worldStateClient, true)) uiTest.ConstructionTestStage = 2;
+						if (saved == 0) {
+							if (uiTest.ConstructionExpectedAffordable) { if (worldStateConstructionMenu->RemoveLastObject(*worldStateClient)) uiTest.ConstructionTestStage = 13; }
+							else { uiTest.ConstructionTestStage = 14; uiTest.ConstructionActionUpdate = uiTest.SimulationUpdates; }
+						}
+					} else if (uiTest.ConstructionTestStage == 13 && !worldStateConstructionMenu->IsPending() && worldStateConstructionMenu->LastAccepted() &&
+					           worldStateConstructionMenu->LastPlacedObjectId() == 0 &&
+					           std::none_of(snapshot.Objects.begin(), snapshot.Objects.end(), [&](const auto& object) {
+						           return object.ClassName == "HDFirearm" && object.ModuleName == "Ronin.rte" && object.PresetName == "AK-47" && object.Team == snapshot.Players[slot].Team;
+					           }) && snapshot.TeamFunds[snapshot.Players[slot].Team] == uiTest.ConstructionInitialFunds - uiTest.ConstructionObjectCost) {
+						uiTest.Log << "construction_object_removal=passed\n" << std::flush;
+						uiTest.ConstructionTestStage = 14; uiTest.ConstructionActionUpdate = uiTest.SimulationUpdates;
+					} else if (uiTest.ConstructionTestStage == 14 && uiTest.SimulationUpdates >= uiTest.ConstructionActionUpdate + 30) {
+						if (worldStateConstructionMenu->SetReady(*worldStateClient, true)) uiTest.ConstructionTestStage = 2;
 					} else if (uiTest.ConstructionTestStage == 2 && snapshot.ActivityState == 4 && slot >= 0 && snapshot.Players[slot].ControlledActorId != 0) {
 						uiTest.ConstructionTestPassed = true; uiTest.ConstructionTestStage = 3;
 						uiTest.Log << "world_state_construction_ui_started=passed\n" << std::flush;
