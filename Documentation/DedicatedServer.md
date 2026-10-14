@@ -1,3 +1,22 @@
+## Optional server faction override
+
+`TeamTech = Coalition.rte` in the server configuration, or
+`--team-tech Coalition.rte` on the CLI, overrides all four native teams' faction
+modules before Activity startup. If omitted, the Activity's original settings
+remain unchanged. The module must already be loaded and marked as a faction;
+unknown modules and non-factions are rejected with a server log and failed
+startup. Each applied team value is logged. Native restart retains the configured
+Activity template. This does not add team assignment or faction choice to the
+client lobby, and the construction catalog's default local pricing display still
+needs server editor pricing metadata for nondefault settings.
+
+Windows validation: both Meson targets built; Coalition was logged on all four
+teams. Base.rte was rejected as a non-faction with exit code 1.
+`TeamTechDefaultRegression` passed full headless content/UTF-8/objective/spawn
+checks in 29.78 seconds with 130 further ticks. `TeamTechVisualRegression` passed
+the existing two-client graphical construction/menu/attachment/audio regression
+in 58.56 seconds with 63 further updates. These runs omitted TeamTech.
+
 # Dedicated server
 
 ## Connect from the main menu
@@ -1267,7 +1286,7 @@ The client executable also supports the same persistent startup via `--server`.
 Use the separate console binary for terminal administration.
 
 Configuration uses UTF-8 INI, optionally with a BOM. The supplied example documents
-ListenAddress, Port, Players, Name, ActivityClass, Activity, Scene, IncludeMods and
+ListenAddress, Port, Players, Name, ActivityClass, Activity, Scene, optional TeamTech, IncludeMods and
 LogDirectory. CLI overrides apply after config values, regardless of option order:
 
 ```text
@@ -1279,6 +1298,7 @@ LogDirectory. CLI overrides apply after config values, regardless of option orde
 --activity-class CLASS
 --activity PRESET
 --scene PRESET
+--team-tech FACTION.rte
 --mods true|false
 --log-directory DIRECTORY
 ```

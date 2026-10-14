@@ -17,6 +17,7 @@ struct ServerConfiguration {
 	std::string ActivityClass = "GATutorial";
 	std::string ActivityPreset = "Tutorial Mission";
 	std::string ScenePreset = "Tutorial Bunker";
+	std::string TeamTech;
 	bool IncludeMods = false;
 	std::string LogDirectory = "ServerLogs";
 
@@ -48,6 +49,7 @@ struct ServerConfiguration {
 		else if (key == "ActivityClass") ActivityClass = value;
 		else if (key == "Activity") ActivityPreset = value;
 		else if (key == "Scene") ScenePreset = value;
+		else if (key == "TeamTech") TeamTech = value;
 		else if (key == "LogDirectory") LogDirectory = value;
 		else if (key == "IncludeMods") {
 			if (value != "true" && value != "false" && value != "1" && value != "0") {
@@ -105,6 +107,7 @@ struct ServerConfiguration {
 			else if (option == "--activity-class") key = "ActivityClass";
 			else if (option == "--activity") key = "Activity";
 			else if (option == "--scene") key = "Scene";
+			else if (option == "--team-tech") key = "TeamTech";
 			else if (option == "--mods") key = "IncludeMods";
 			else if (option == "--log-directory") key = "LogDirectory";
 			else if (option == "--server") continue;

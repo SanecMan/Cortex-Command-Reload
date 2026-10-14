@@ -43,6 +43,7 @@
 #include "ConsoleMan.h"
 #include "SettingsMan.h"
 #include "PresetMan.h"
+#include "DataModule.h"
 #include "SoundContainer.h"
 #include "SoundSet.h"
 #include "SoundPlaybackTimeline.h"
@@ -144,6 +145,7 @@ namespace {
 	std::string worldStateServerBindAddress = "0.0.0.0";
 	std::string worldStateServerActivityClass;
 	std::string worldStateServerActivityPreset;
+	std::string worldStateServerTeamTech;
 	std::string worldStateServerScenePreset;
 	std::unique_ptr<WorldStateServerSession> worldStateServer;
 	std::uint32_t worldStateServerSimulationTick = 0;
@@ -289,6 +291,14 @@ namespace {
 			if (GameActivity* gameActivity = dynamic_cast<GameActivity*>(activity)) {
 				gameActivity->SetStartingGold(10000);
 			}
+		}
+		if (!worldStateServerTeamTech.empty()) {
+			auto* gameActivity = dynamic_cast<GameActivity*>(activity);
+			const int module = g_PresetMan.GetModuleID(worldStateServerTeamTech);
+			if (!gameActivity || module < 0 || !g_PresetMan.GetDataModule(module)->IsFaction()) {
+				delete activity; failureReason = "server TeamTech requires a loaded faction module: " + worldStateServerTeamTech; return false;
+			}
+			for (int team = Activity::TeamOne; team < Activity::MaxTeamCount; ++team) gameActivity->SetTeamTech(team, worldStateServerTeamTech);
 		}
 
 		if (g_SceneMan.SetSceneToLoad(worldStateServerScenePreset) < 0) {
@@ -2289,9 +2299,16 @@ int RunPersistentHeadlessServer(const ServerConfiguration& config) {
 		worldStateServerActivityClass = config.ActivityClass;
 		worldStateServerActivityPreset = config.ActivityPreset;
 		worldStateServerScenePreset = config.ScenePreset;
+		worldStateServerTeamTech = config.TeamTech;
 		std::string activityError;
 		success = ConfigureWorldStateHostActivity(activityError) && g_ActivityMan.RestartActivity();
 		if (!activityError.empty()) log("ERROR " + activityError);
+		if (success && !config.TeamTech.empty()) {
+			if (const auto* activity = dynamic_cast<const GameActivity*>(g_ActivityMan.GetActivity())) {
+				for (int team = Activity::TeamOne; team < Activity::MaxTeamCount; ++team)
+					log("INFO team_tech team=" + std::to_string(team) + " value=" + activity->GetTeamTech(team));
+			}
+		}
 		if (success) {
 			g_ActivityMan.ResumeActivity();
 			success = session.Start(config.ListenAddress, config.Port, config.Players, UTF8::PathToString(logDirectory / "WorldStateServer.log"), false, false);
@@ -3875,6 +3892,7 @@ int RunCortexCommand(int argc, char** argv) {
 					worldStateServerActivityClass = serverConfig.ActivityClass;
 					worldStateServerActivityPreset = serverConfig.ActivityPreset;
 					worldStateServerScenePreset = serverConfig.ScenePreset;
+					worldStateServerTeamTech = serverConfig.TeamTech;
 					std::string activityError;
 					const bool started = ConfigureWorldStateHostActivity(activityError) && g_ActivityMan.RestartActivity();
 					if (!activityError.empty()) GetDebugRunState().Log << "headless_activity_error=" << activityError << '\n' << std::flush;
