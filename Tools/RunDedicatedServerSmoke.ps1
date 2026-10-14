@@ -16,6 +16,9 @@ param(
     [switch]$RequireControlledActor,
     [switch]$CheckLatePlayerJoin,
     [switch]$CheckConstruction,
+    [switch]$CheckDeployment,
+    [ValidatePattern('^[^"\r\n]+$')]
+    [string]$TeamTech,
     [ValidatePattern('^[A-Za-z0-9_-]{1,48}$')]
     [string]$OutputPrefix = 'DedicatedServerSmoke',
     [switch]$CheckTeamFunds,
@@ -42,6 +45,10 @@ param(
     [int]$TimeoutSeconds = 360
 )
 $ErrorActionPreference = 'Stop'
+if ($CheckDeployment) {
+    if ($TeamTech -and $TeamTech -ne 'Coalition.rte') { throw 'The deployment fixture requires Coalition.rte.' }
+    $CheckConstruction = $true; $TeamTech = 'Coalition.rte'
+}
 if ($CheckConstruction) {
     if ($RestartWithConnectedPlayers -or $CheckLatePlayerJoin) { throw 'Run construction as a separate two-player editing fixture.' }
     $RequireControlledActor = $true; $RequireActivePlayers = 2
@@ -129,6 +136,7 @@ try {
     $server.StartInfo.WorkingDirectory = $gameDirectory
     $server.StartInfo.Arguments = '--listen 127.0.0.1 --port 0 --players 4 --log-directory "' + $logDirectory + '"'
     $server.StartInfo.Arguments += ' --activity-class "' + $ActivityClass + '" --activity "' + $ActivityName + '" --scene "' + $SceneName + '"'
+    if ($TeamTech) { $server.StartInfo.Arguments += ' --team-tech "' + $TeamTech + '"' }
     $server.StartInfo.UseShellExecute = $false
     $server.StartInfo.CreateNoWindow = $true
     $server.StartInfo.RedirectStandardInput = $true
@@ -175,6 +183,7 @@ try {
 		if ($CheckPurchasePricing) { $purchaseArguments = @('-debug-run-world-state-purchase-pricing') }
 		if ($CheckInventory) { $purchaseArguments = @('-debug-run-world-state-inventory') }
         if ($CheckConstruction) { $purchaseArguments = @('-debug-run-world-state-construction') }
+        if ($CheckDeployment) { $purchaseArguments = @('-debug-run-world-state-deployment') }
         $frameCount = if ($CheckStaggeredSound -and $index -eq 1) { '6000' } else { '600' }
         if ($CheckConstruction) { $frameCount = '1800' }
         if ($CheckLatePlayerJoin -and $index -eq 1) { $frameCount = '1800' }
@@ -453,6 +462,9 @@ try {
         $clientNetwork = Read-Report (Join-Path $clientDirectory 'WorldStateClient.log')
         if ($CheckConstruction -and ($clientReport -notmatch '(?m)^world_state_construction_ui=passed' -or $clientReport -notmatch '(?m)^construction_preview_capture=passed' -or $clientReport -notmatch '(?m)^construction_catalog_capture=passed' -or $clientReport -notmatch '(?m)^construction_object_ui=passed')) { throw 'Construction UI/preview/catalog/purchase/start did not pass.' }
         if ($CheckConstruction -and $clientReport -notmatch '(?m)^construction_object_preview_capture=passed') { throw 'Object preview was not captured.' }
+        if ($CheckDeployment -and ($clientReport -notmatch '(?m)^construction_deployment_ui=passed' -or $clientReport -notmatch '(?m)^construction_deployment_capture=passed')) { throw 'Deployment replica/render capture failed.' }
+        if ($CheckDeployment -and $clientNetwork -notmatch '(?m)^client_local_simulation_ticks=0') { throw 'Replica client executed local simulation.' }
+        if ($CheckDeployment -and $clientReport -match '(?m)^construction_deployment_ui=passed purchased=1' -and $clientReport -notmatch '(?m)^construction_inventory_gift_ui=passed') { throw 'Inventory gift was not applied to the native client actor.' }
         $constructionPurchased = $constructionPurchased -or $clientReport -match '(?m)^construction_object_ui=passed purchased=1'
         if ($CheckConstruction -and $clientReport -match '(?m)^construction_object_ui=passed purchased=1' -and $clientReport -notmatch '(?m)^construction_object_removal=passed') { throw 'Purchased object removal was not verified.' }
         if ($CheckConstruction -and ($clientReport -notmatch '(?m)^construction_terrain_ui=passed' -or $clientReport -notmatch '(?m)^construction_terrain_capture=passed')) { throw 'Construction terrain apply/render capture was not verified.' }

@@ -369,6 +369,30 @@ resident-brain gifting, graphical rendering of this deployment transaction or
 safe deletion from an inventory. Those remain separate validation/implementation
 work. Durations are validation wall times, not performance comparisons.
 
+### Graphical deployment and native inventory application
+
+`Tools/RunDedicatedServerSmoke.ps1 -CheckDeployment -ActivityClass GAScripted
+-ActivityName 'Skirmish Defense' -SceneName 'Ketanot Hills' -CheckMenuConnection
+-RequireAttachmentMatch -EnableAudio` extends construction with the Coalition
+Default Deployment. It selects through the native catalog/selection methods,
+checks the 188 charge or insufficient funds, requires the native client AHuman
+with the correctly identified Assault Rifle, clears the preview and captures
+`debug-run-construction-deployment.png` on both clients. The paid client gives
+an Auto Pistol and requires the actual native inventory/hand count to increase
+by exactly one with an 18 charge. Both retain zero local simulation ticks.
+Physical mouse/key events are not synthesized.
+
+`DeploymentVisualCorrect` passed in 51.76 seconds with both clients, native actor/
+weapon and inventory assertions, strict attachments/menu/audio and 62 further
+server updates. Both screenshots were inspected: the replicated soldier and
+rifle are visible standing on the constructed block, with no selected deployment
+preview. The initial fixture incorrectly required NPC Controller::IsDisabled;
+it failed and is excluded. The corrected fixture checks no local player control
+and the real zero-local-simulation counter, retaining actor/equipment assertions.
+The replicated NPC may retain AI controller mode while client simulation is
+skipped. Linux deployment/config/gifting run `38599673678` succeeded for
+`9f6fbb78aeb`.
+
 ### Brain placement and native start
 
 `SceneEditorGUI::InstallNetworkBrain` clones the server's selected brain, existing

@@ -344,6 +344,10 @@ namespace {
 		bool RequestPurchaseTest = false;
 		bool RequestBuyMenuTest = false;
 		bool RequestConstructionTest = false, ConstructionTestPassed = false;
+		bool RequestDeploymentTest = false;
+		std::uint64_t ConstructionDeploymentActorId = 0;
+		int ConstructionDeploymentPistols = 0;
+		float ConstructionDeploymentFunds = 0;
 		int ConstructionTestStage = 0;
 		bool ConstructionExpectedAffordable = false;
 		float ConstructionInitialFunds = 0;
@@ -483,6 +487,7 @@ namespace {
 			if (argument == "-debug-run-world-state-purchase") state.RequestPurchaseTest = true;
 			if (argument == "-debug-run-world-state-buy-menu") state.RequestBuyMenuTest = true;
 			if (argument == "-debug-run-world-state-construction") state.RequestConstructionTest = true;
+			if (argument == "-debug-run-world-state-deployment") { state.RequestConstructionTest = true; state.RequestDeploymentTest = true; }
 			if (argument == "-debug-run-world-state-purchase-policy") { state.RequestBuyMenuTest=true; state.RequirePurchasePolicyTest=true; }
 			if (argument == "-debug-run-world-state-purchase-pricing") { state.RequestBuyMenuTest=true; state.RequirePurchasePolicyTest=true; state.RequirePurchasePricingTest=true; }
 			if (argument == "-debug-run-world-state-inventory") state.RequestInventoryTest=true;
@@ -3387,6 +3392,21 @@ void RunGameLoop() {
 					const auto& snapshot = worldStateClient->GetLatestSnapshot();
 					const int slot = worldStateClient->GetAssignedPlayerSlot();
 					const auto humans = std::count_if(snapshot.Players.begin(), snapshot.Players.end(), [](const auto& player) { return player.ActiveHuman; });
+					const auto deployment = std::find_if(snapshot.Objects.begin(), snapshot.Objects.end(), [](const auto& object) {
+						return object.ClassName == "AHuman" && object.ModuleName == "Coalition.rte" && object.PresetName == "Soldier Light" && object.Team == 1;
+					});
+					AHuman* localDeployment = nullptr;
+					int localPistols = 0;
+					if (uiTest.RequestDeploymentTest) for (auto* actor : *g_MovableMan.GetTeamRoster(1)) {
+						if (actor->GetModuleName() != "Coalition.rte" || actor->GetPresetName() != "Soldier Light") continue;
+						localDeployment = dynamic_cast<AHuman*>(actor);
+						if (!localDeployment) continue;
+						auto countPistol = [&](const MovableObject* object) { return object && object->GetModuleName() == "Coalition.rte" && object->GetPresetName() == "Auto Pistol"; };
+						for (const auto* item : *localDeployment->GetInventory()) if (countPistol(item)) ++localPistols;
+						if (countPistol(localDeployment->GetEquippedItem())) ++localPistols;
+						if (localDeployment->GetBGArm() && countPistol(localDeployment->GetBGArm()->GetHeldDevice())) ++localPistols;
+						break;
+					}
 					if (uiTest.ConstructionTestStage == 0 && humans == 2 && slot >= 0 && worldStateConstructionMenu->IsActive()) {
 						if (worldStateConstructionMenu->PlaceBrain(*worldStateClient, Vector(100 + 100 * slot, 30))) {
 							uiTest.ConstructionTestStage = 1; uiTest.ConstructionActionUpdate = uiTest.SimulationUpdates;
@@ -3451,7 +3471,46 @@ void RunGameLoop() {
 						const std::string image = UTF8::PathToString(uiTest.OutputDirectory.filename()) + "/debug-run-construction-terrain.png";
 						const int saved = g_FrameMan.SaveScreenToPNGBlocking(image);
 						uiTest.Log << "construction_terrain_capture=" << (saved == 0 ? "passed" : "failed") << '\n' << std::flush;
-						if (saved == 0 && worldStateConstructionMenu->SetReady(*worldStateClient, true)) uiTest.ConstructionTestStage = 2;
+						if (saved == 0) {
+							if (!uiTest.RequestDeploymentTest) { if (worldStateConstructionMenu->SetReady(*worldStateClient, true)) uiTest.ConstructionTestStage = 2; }
+							else {
+								const auto* preset = dynamic_cast<const SceneObject*>(g_PresetMan.GetEntityPreset("Deployment", "Default", "Base.rte"));
+								if (worldStateConstructionMenu->OpenPicker() && worldStateConstructionMenu->GetPicker()->SelectGroupByName("Deployments") && worldStateConstructionMenu->SelectObject(preset)) {
+									worldStateConstructionMenu->GetPicker()->SetEnabled(false);
+									uiTest.ConstructionDeploymentFunds = snapshot.TeamFunds[snapshot.Players[slot].Team];
+									if (worldStateConstructionMenu->PlaceObject(*worldStateClient, Vector(812 + 100 * slot, 70))) uiTest.ConstructionTestStage = 17;
+								}
+							}
+						}
+					} else if (uiTest.ConstructionTestStage == 17 && !worldStateConstructionMenu->IsPending() &&
+					           worldStateConstructionMenu->LastAccepted() == uiTest.ConstructionExpectedAffordable &&
+					           (uiTest.ConstructionExpectedAffordable ? worldStateConstructionMenu->LastChargedCost() == 188 : worldStateConstructionMenu->LastRejection() == "insufficient_funds") &&
+					           snapshot.TeamFunds[snapshot.Players[slot].Team] == uiTest.ConstructionDeploymentFunds - worldStateConstructionMenu->LastChargedCost() &&
+					           deployment != snapshot.Objects.end() && deployment->HasEquippedDevice && deployment->EquippedDeviceModuleName == "Coalition.rte" && deployment->EquippedDevicePresetName == "Assault Rifle" &&
+					           std::abs(deployment->VelocityY) < 2 && localDeployment && localDeployment->GetEquippedItem() &&
+					           localDeployment->GetEquippedItem()->GetModuleName() == "Coalition.rte" && localDeployment->GetEquippedItem()->GetPresetName() == "Assault Rifle" && !localDeployment->GetController()->IsPlayerControlled()) {
+						uiTest.ConstructionDeploymentActorId = deployment->NetworkId; uiTest.ConstructionDeploymentPistols = localPistols;
+						uiTest.Log << "construction_deployment_ui=passed purchased=" << uiTest.ConstructionExpectedAffordable << '\n' << std::flush;
+						worldStateConstructionMenu->SelectBrain(); uiTest.ConstructionTestStage = 18; uiTest.ConstructionActionUpdate = uiTest.SimulationUpdates;
+					} else if (uiTest.ConstructionTestStage == 18 && uiTest.SimulationUpdates >= uiTest.ConstructionActionUpdate + 30) {
+						const std::string image = UTF8::PathToString(uiTest.OutputDirectory.filename()) + "/debug-run-construction-deployment.png";
+						const int saved = g_FrameMan.SaveScreenToPNGBlocking(image);
+						uiTest.Log << "construction_deployment_capture=" << (saved == 0 ? "passed" : "failed") << '\n' << std::flush;
+						if (saved == 0 && !uiTest.ConstructionExpectedAffordable) { uiTest.ConstructionTestStage = 20; uiTest.ConstructionActionUpdate = uiTest.SimulationUpdates; }
+						else if (saved == 0 && deployment != snapshot.Objects.end()) {
+							const auto* pistol = dynamic_cast<const SceneObject*>(g_PresetMan.GetEntityPreset("HDFirearm", "Auto Pistol", "Coalition.rte"));
+							if (worldStateConstructionMenu->OpenPicker() && worldStateConstructionMenu->GetPicker()->SelectGroupByName("Weapons") && worldStateConstructionMenu->SelectObject(pistol)) {
+								worldStateConstructionMenu->GetPicker()->SetEnabled(false);
+								if (worldStateConstructionMenu->PlaceObject(*worldStateClient, Vector(deployment->PositionX, deployment->PositionY))) uiTest.ConstructionTestStage = 19;
+							}
+						}
+					} else if (uiTest.ConstructionTestStage == 19 && !worldStateConstructionMenu->IsPending() && worldStateConstructionMenu->LastAccepted() &&
+					           worldStateConstructionMenu->LastChargedCost() == 18 && localDeployment && localPistols == uiTest.ConstructionDeploymentPistols + 1 &&
+					           snapshot.TeamFunds[snapshot.Players[slot].Team] == uiTest.ConstructionDeploymentFunds - 188 - 18) {
+						uiTest.Log << "construction_inventory_gift_ui=passed\n" << std::flush;
+						worldStateConstructionMenu->SelectBrain(); uiTest.ConstructionTestStage = 20; uiTest.ConstructionActionUpdate = uiTest.SimulationUpdates;
+					} else if (uiTest.ConstructionTestStage == 20 && uiTest.SimulationUpdates >= uiTest.ConstructionActionUpdate + 30) {
+						if (worldStateConstructionMenu->SetReady(*worldStateClient, true)) uiTest.ConstructionTestStage = 2;
 					} else if (uiTest.ConstructionTestStage == 2 && snapshot.ActivityState == 4 && slot >= 0 && snapshot.Players[slot].ControlledActorId != 0) {
 						uiTest.ConstructionTestPassed = true; uiTest.ConstructionTestStage = 3;
 						uiTest.Log << "world_state_construction_ui_started=passed\n" << std::flush;
