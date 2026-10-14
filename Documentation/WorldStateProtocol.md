@@ -339,8 +339,12 @@ absence without refund. The initial cursor test exposed native/network ID mixing
 and was stopped; it is not a passing result. ConstructionCursorHeadless passed
 in 25.48 seconds with 128 further ticks, foreign-peer removal refusal, response
 replay, deployment loadout, inventory gift and attached-object removal refusal.
-These tests used Meson binaries; the root Final delivery has not yet been updated
-for cursor selection.
+ConstructionCursorFull passed the full headless UTF-8/config/screen-text/objective
+regression in 32.65 seconds with 124 further ticks. Native Final compiled and
+linked, and the delivered root pair passed ConstructionCursorDelivered in 54.47
+seconds with 62 updates after disconnect, including real snapshot-ID cursor
+selection/removal and the 80-credit price check. Linux CI 38608918143 passed for
+c7be0ab25de; it predates this ID/removal change, which is being submitted separately.
 
 `ConstructionRemoval` passed with two clients in 63.24 seconds, real purchase and
 removal, distinct controlled actors and 128 further server ticks, with video off.
