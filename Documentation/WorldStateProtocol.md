@@ -25,6 +25,12 @@ group pause/resume and owner/fade checks, clean exits and 62 further server
 updates. The rerun reused the same output prefix. Native Final delivery and
 Linux checks for this update are separate stages.
 
+Native MSBuild `Final|x64` also compiled and linked. The root client and matching
+server passed `SoundFadeLifecycleDelivered` in 32.65 seconds with two menu-connected
+FMOD-enabled clients, normalized fade points, natural termination and zero-duration
+checks, group pause/resume and clean exits. The server continued 62 updates after
+disconnect. Linux CI run `38496468668` validates commit `b76a2d44db3` separately.
+
 Late-join fade gain is not yet reconstructed. The headless timeline currently
 freezes fades for both explicit and bus pause, whereas FMOD distinguishes these
 clocks and replicas implement bus pause through individual channels. That
