@@ -1,5 +1,21 @@
 # UTF-8 text support
 
+Programmatic selection and cursor positions retain their byte-index API. Values
+are clamped to the text extent; an index inside a valid UTF-8 sequence snaps back
+to its starting byte. Forward and reversed selections therefore cannot extract
+partial Unicode characters. Isolated invalid/legacy bytes remain separate editable
+positions. Selection works before a font is assigned, without dereferencing one.
+`TextSelectionHeadless` passed in 22.71 seconds with 129 observed ticks,
+two clients and no video initialization. `utf8_selection_boundaries=passed`
+checked Cyrillic/emoji interiors, reversed and out-of-range selections, deletion,
+insertion and preservation of isolated legacy bytes. This is code-point safety,
+not grapheme-cluster editing (combining marks can still be edited independently).
+Meson and native MSBuild `Final|x64` compiled and linked. Two graphical clients
+passed menu connection, screen text and clean audio shutdown: Meson took 63.80
+seconds with 66 post-disconnect updates; the delivered root pair took 32.31
+seconds with 63 updates (`TextSelectionDelivered`). Linux verification of this
+selection change has not yet been submitted, to let the prior CI run finish.
+
 Clipboard paste uses the same `GUITextPanel::OnTextInput` path as typed text:
 UTF-8 decoding, code-point length limits, numeric-only filtering and numeric
 maximum apply to both. Invalid byte sequences and single-line control characters

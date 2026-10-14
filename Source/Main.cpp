@@ -3612,6 +3612,28 @@ int RunCortexCommand(int argc, char** argv) {
 					textInputPassed = textInputPassed && numericProbe.GetText() == "8000";
 					GetDebugRunState().Log << "utf8_text_input_policy=" << (textInputPassed ? "passed" : "failed") << '\n' << std::flush;
 					contentPassed = contentPassed && textInputPassed;
+					GUITextPanel selectionProbe;
+					selectionProbe.SetText("Ж🙂A");
+					selectionProbe.SetSelection(1, 5);
+					bool selectionPassed = selectionProbe.GetSelectionText() == "Ж";
+					selectionProbe.SetSelection(5, 1);
+					selectionPassed = selectionPassed && selectionProbe.GetSelectionText() == "Ж";
+					selectionProbe.SetSelection(-100, 100);
+					selectionPassed = selectionPassed && selectionProbe.GetSelectionText() == "Ж🙂A";
+					selectionProbe.SetSelection(3, 6);
+					selectionPassed = selectionPassed && selectionProbe.GetSelectionText() == "🙂";
+					selectionProbe.RemoveSelectionText();
+					selectionPassed = selectionPassed && selectionProbe.GetText() == "ЖA" && UTF8::IsValid(selectionProbe.GetText());
+					selectionProbe.SetText("Ж🙂A");
+					selectionProbe.SetCursorPos(5);
+					selectionProbe.OnTextInput("Б");
+					selectionPassed = selectionPassed && selectionProbe.GetText() == "ЖБ🙂A";
+					selectionProbe.SetText(std::string("\x80\x81") + "A");
+					selectionProbe.SetCursorPos(1);
+					selectionProbe.OnTextInput("B");
+					selectionPassed = selectionPassed && selectionProbe.GetText() == std::string("\x80") + "B" + "\x81" + "A";
+					GetDebugRunState().Log << "utf8_selection_boundaries=" << (selectionPassed ? "passed" : "failed") << '\n' << std::flush;
+					contentPassed = contentPassed && selectionPassed;
 				}
 				if (contentPassed && GetDebugRunState().HeadlessSimulationPreflight) {
 					// A remote slot can exist before its presentation menus are initialized.

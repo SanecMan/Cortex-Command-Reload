@@ -7,6 +7,24 @@
 
 using namespace RTE;
 
+namespace {
+int ClampTextBoundary(std::string_view text, int index) {
+	const std::size_t offset = std::min(static_cast<std::size_t>(std::max(index, 0)), text.size());
+	// Only a valid multibyte sequence changes an interior byte index. Preserve
+	// isolated legacy/invalid bytes as individual editable positions.
+	if (offset < text.size() && (static_cast<unsigned char>(text[offset]) & 0xC0) == 0x80) {
+		for (std::size_t distance = 1; distance <= 3 && distance <= offset; ++distance) {
+			std::uint32_t cp = 0;
+			std::size_t bytes = 1;
+			if (UTF8::Decode(text, offset - distance, cp, bytes) && bytes > distance) {
+				return static_cast<int>(offset - distance);
+			}
+		}
+	}
+	return static_cast<int>(offset);
+}
+}
+
 GUITextPanel::GUITextPanel(GUIManager* Manager) :
     GUIPanel(Manager) {
 	m_Font = nullptr;
@@ -448,6 +466,8 @@ void GUITextPanel::UpdateText(bool Typing, bool DoIncrement) {
 }
 
 void GUITextPanel::DoSelection(int Start, int End) {
+	Start = ClampTextBoundary(m_Text, Start);
+	End = ClampTextBoundary(m_Text, End);
 	// Start a selection
 	if (!m_GotSelection) {
 		m_GotSelection = true;
@@ -465,6 +485,7 @@ void GUITextPanel::DoSelection(int Start, int End) {
 	}
 
 	// Update the selection coordinates
+	if (!m_Font) return;
 	int StartSel = std::min(m_StartSelection, m_EndSelection);
 	int EndSel = std::max(m_StartSelection, m_EndSelection);
 
@@ -559,19 +580,7 @@ void GUITextPanel::RemoveSelectionText() {
 
 void GUITextPanel::SetCursorPos(int cursorPos) {
 	m_GotSelection = false;
-
-	if (cursorPos <= 0) {
-		cursorPos = 0;
-	}
-	if (cursorPos > static_cast<int>(m_Text.size())) {
-		cursorPos = static_cast<int>(m_Text.size());
-	}
-	while (cursorPos > 0 && cursorPos < static_cast<int>(m_Text.size()) &&
-	       (static_cast<unsigned char>(m_Text[cursorPos]) & 0xC0) == 0x80) {
-		--cursorPos;
-	}
-
-	m_CursorIndex = cursorPos;
+	m_CursorIndex = ClampTextBoundary(m_Text, cursorPos);
 
 	UpdateText();
 }
