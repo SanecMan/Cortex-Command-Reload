@@ -28,9 +28,14 @@ ticks and video_initialized=0. Both peers logged construction_catalog_received.
 CatalogIntegrationVisual passed in 53.25 seconds; both clients logged
 construction_catalog_applied, exercised the native picker, deployment rendering
 and gifts, menu cancellation/connection and attachment/audio checks. The server
-continued for 63 updates after disconnect. These are test binaries, not a new
-root Final delivery. Nondefault filters, live policy changes, missing-module UI
-and reconnect catalog replacement still require focused runtime coverage.
+continued for 63 updates after disconnect. The mandatory-receipt headless rerun
+CatalogIntegrationRequired also passed in 25.54 seconds with 130 further ticks.
+CatalogIntegrationFull passed the full headless UTF-8/config/screen-text/objective
+regression in 44.90 seconds with 131 further ticks. Native Final compiled and
+linked; the delivered root client/server pair passed CatalogIntegrationDelivered
+in 56.41 seconds with 62 server updates after disconnect. Nondefault filters,
+live policy changes, missing-module UI and reconnect catalog replacement still
+require focused runtime coverage.
 
 The standalone test passed MSVC and MinGW GCC, including Russian names, round
 trip, all truncated prefixes, malformed envelope/version/type/reserved/length,
