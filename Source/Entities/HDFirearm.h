@@ -6,6 +6,7 @@
 /// http://www.datarealms.com
 /// Inclusions of header files
 #include "HeldDevice.h"
+#include "ShotFlashPresentation.h"
 
 namespace RTE {
 
@@ -461,7 +462,10 @@ namespace RTE {
 		bool FiredFrame() const { return m_FireFrame; }
 
 		// Network presentation only: never fires rounds, audio or script callbacks.
-		void SetReplicaFireVisual(bool fired) { m_FireFrame = fired; }
+		void SetReplicaFireVisual(bool fired, std::uint32_t sequence = 0, std::uint16_t ageMS = 65535);
+		std::uint32_t GetNetworkShotSequence() const { return m_NetworkShotSequence; }
+		std::uint16_t GetNetworkShotAgeMS() const;
+		bool MuzzleFlashVisible() const { return m_ReplicaFireVisual ? m_ReplicaShotFlash.Visible(ShotFlashPresentation::NowMS()) : m_FireFrame; }
 
 		/// Gets whether this HDFirearm is ready to be fired.
 		/// @return Whether this HDFirearm is ready to pop another Round.
@@ -589,6 +593,12 @@ namespace RTE {
 		// Whether at least one round has already been
 		// fired during the current frame.
 		bool m_FireFrame;
+		std::uint32_t m_NetworkShotSequence = 0;
+		bool m_NetworkHasShot = false;
+		Timer m_NetworkShotTimer;
+		bool m_ReplicaFireVisual = false;
+		std::uint16_t m_ReplicaShotAgeMS = 65535;
+		ShotFlashPresentation m_ReplicaShotFlash;
 		// Whether at least one round was fired during the last frame
 		bool m_FiredLastFrame;
 		// Whether, if this HDFireArm is empty, pin has already clicked once during

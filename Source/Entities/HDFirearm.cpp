@@ -25,6 +25,8 @@ HDFirearm::~HDFirearm() {
 }
 
 void HDFirearm::Clear() {
+	m_NetworkShotSequence = 0; m_NetworkHasShot = false; m_NetworkShotTimer.Reset();
+	m_ReplicaFireVisual = false; m_ReplicaShotAgeMS = 65535; m_ReplicaShotFlash = {};
 	m_ReplicaReloadProgress = -1;
 	m_pMagazineReference = 0;
 	m_pMagazine = 0;
@@ -837,6 +839,9 @@ void HDFirearm::Update() {
 			pRound = 0;
 
 			if (m_FireFrame) {
+				m_NetworkShotSequence += static_cast<std::uint32_t>(m_RoundsFired);
+				m_NetworkHasShot = m_NetworkHasShot || m_RoundsFired > 0;
+				m_NetworkShotTimer.Reset();
 				RunScriptedFunctionInAppropriateScripts("OnFire", false, false);
 			}
 		} else {
@@ -1016,14 +1021,27 @@ float HDFirearm::EstimateDigStrength() const {
 	return m_pMagazine ? m_pMagazine->EstimateDigStrength() : m_pMagazineReference->EstimateDigStrength();
 }
 
+void HDFirearm::SetReplicaFireVisual(bool fired, std::uint32_t sequence, std::uint16_t ageMS) {
+	m_FireFrame = fired; m_NetworkShotSequence = sequence; m_ReplicaFireVisual = true;
+	m_ReplicaShotAgeMS = ageMS;
+	m_ReplicaShotFlash.Observe(sequence, m_ReplicaShotAgeMS, ShotFlashPresentation::NowMS());
+}
+
+std::uint16_t HDFirearm::GetNetworkShotAgeMS() const {
+	if (m_ReplicaFireVisual) return m_ReplicaShotAgeMS;
+	if (!m_NetworkHasShot) return 65535;
+	return static_cast<std::uint16_t>(std::clamp(m_NetworkShotTimer.GetElapsedSimTimeMS(), 0.0, 65535.0));
+}
+
 void HDFirearm::Draw(BITMAP* pTargetBitmap, const Vector& targetPos, DrawMode mode, bool onlyPhysical) const {
-	if (m_pFlash && m_FireFrame && !m_pFlash->IsDrawnAfterParent() && mode == g_DrawColor && !onlyPhysical) {
+	const bool flashVisible = MuzzleFlashVisible();
+	if (m_pFlash && flashVisible && !m_pFlash->IsDrawnAfterParent() && mode == g_DrawColor && !onlyPhysical) {
 		m_pFlash->Draw(pTargetBitmap, targetPos, mode, onlyPhysical);
 	}
 
 	HeldDevice::Draw(pTargetBitmap, targetPos, mode, onlyPhysical);
 
-	if (m_pFlash && m_FireFrame && m_pFlash->IsDrawnAfterParent() && mode == g_DrawColor && !onlyPhysical) {
+	if (m_pFlash && flashVisible && m_pFlash->IsDrawnAfterParent() && mode == g_DrawColor && !onlyPhysical) {
 		m_pFlash->Draw(pTargetBitmap, targetPos, mode, onlyPhysical);
 	}
 }

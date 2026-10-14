@@ -31,6 +31,8 @@ struct DeviceVisualState {
     float ReloadProgress = 1;
     bool FireFrame = false, Recoiled = false;
     float RecoilOffsetX = 0, RecoilOffsetY = 0;
+    std::uint32_t ShotSequence = 0;
+    std::uint16_t ShotAgeMS = 65535;
     bool operator==(const DeviceVisualState&) const = default;
 };
 inline bool ValidDeviceVisual(const DeviceVisualState& state, const std::string& className) {
@@ -38,6 +40,8 @@ inline bool ValidDeviceVisual(const DeviceVisualState& state, const std::string&
     if (!std::isfinite(state.RecoilOffsetX) || !std::isfinite(state.RecoilOffsetY)) return false;
     if (!state.Recoiled && (state.RecoilOffsetX != 0 || state.RecoilOffsetY != 0)) return false;
     if (state.FireFrame && className != "HDFirearm") return false;
+    if (className != "HDFirearm" && (state.ShotSequence != 0 || state.ShotAgeMS != 65535)) return false;
+    if (!state.Present && (state.ShotSequence != 0 || state.ShotAgeMS != 65535)) return false;
     if (!state.Present) return !state.Activated && !state.Reloading && !state.FireFrame && !state.Recoiled && state.ReloadProgress == 1;
     if (state.Reloading) return className == "HDFirearm";
     return state.ReloadProgress == 1;

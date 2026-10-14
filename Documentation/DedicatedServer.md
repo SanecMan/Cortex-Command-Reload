@@ -954,6 +954,16 @@ a Cyrillic filename and server name passed with help/status/quit commands and
 an unavailable video driver. The stderr log contained a preexisting libpng sRGB
 profile warning; no fatal error occurred.
 
+## Recent-shot diagnostic
+
+`Tools/RunDedicatedServerSmoke.ps1 -CheckMenuConnection -CheckRecentShot` tests
+two clients and a real authoritative shot that occurs between snapshots. It
+requires client captures of both the recent muzzle flash and its expiry, stable
+ammunition during the expiry interval, and continued server updates after
+disconnect. The fixture uses `debug-shot-create` and `debug-shot-fire` console
+commands in a disposable session. Screenshot directories are cleaned on repeat
+runs using the same output prefix. Protocol 28 binaries must be paired.
+
 ## Remaining limits
 
 This is a working Windows/Linux headless host foundation. A complete gameplay release

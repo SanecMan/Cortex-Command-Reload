@@ -306,6 +306,10 @@ namespace {
 		bool NetworkSoundFinishRequested = false, NetworkSoundFinishVerified = false;
 		bool NetworkSoundFadeRequested = false, NetworkSoundFadeMidpoint = false, NetworkSoundFadeFrozen = false, NetworkSoundFadeEnded = false;
 		bool ReloadHudInitialCaptured = false, ReloadHudChangedCaptured = false;
+		bool ShotActorReady = false, ShotFlashCaptured = false, ShotFlashExpired = false;
+		std::uint32_t ShotFlashSequence = 0;
+		int ShotFlashRounds = 0;
+		int ShotFlashCaptureUpdate = 0;
 		float NetworkSoundFadePausedVolume = -1;
 		double NetworkSoundFadePauseTime = 0;
 		bool Enabled = false;
@@ -2060,6 +2064,26 @@ namespace {
 		if (worldStateClient && worldStateClient->IsConnected() && worldStateClient->HasSnapshot() && g_ActivityMan.GetActivity()) {
 			auto* actor = dynamic_cast<AHuman*>(g_ActivityMan.GetActivity()->GetControlledActor(Players::PlayerOne));
 			auto* gun = actor ? dynamic_cast<HDFirearm*>(actor->GetEquippedItem()) : nullptr;
+			if (actor && actor->GetHealth() == 61.875F && gun) {
+				if (!state.ShotActorReady && gun->GetNetworkShotSequence() == 0) {
+					state.ShotActorReady = true; state.Log << "world_state_shot_actor_ready=passed\n" << std::flush;
+				}
+				if (!state.ShotFlashCaptured && gun->GetNetworkShotSequence() != 0 && !gun->FiredFrame() && gun->MuzzleFlashVisible()) {
+					if (capture("recent-shot") != 0) { FinishDebugRun(false); return; }
+					state.ShotFlashCaptured = true; state.ShotFlashSequence = gun->GetNetworkShotSequence(); state.ShotFlashRounds = gun->GetRoundInMagCount();
+					state.ShotFlashCaptureUpdate = state.SimulationUpdates;
+					state.Log << "world_state_recent_shot=passed sequence=" << state.ShotFlashSequence << " age_ms=" << gun->GetNetworkShotAgeMS() << " native_fire_frame=0\n" << std::flush;
+				}
+				if (state.ShotFlashCaptured && !state.ShotFlashExpired && state.SimulationUpdates >= state.ShotFlashCaptureUpdate + 2 && !gun->MuzzleFlashVisible()) {
+					if (gun->GetNetworkShotSequence() != state.ShotFlashSequence || gun->GetRoundInMagCount() != state.ShotFlashRounds) {
+						state.Log << "world_state_recent_shot_expired=failed sequence=" << gun->GetNetworkShotSequence() << " expected=" << state.ShotFlashSequence
+						    << " rounds=" << gun->GetRoundInMagCount() << " expected_rounds=" << state.ShotFlashRounds << '\n' << std::flush;
+						FinishDebugRun(false); return;
+					}
+					if (capture("recent-shot-expired") != 0) { FinishDebugRun(false); return; }
+					state.ShotFlashExpired = true; state.Log << "world_state_recent_shot_expired=passed\n" << std::flush;
+				}
+			}
 			if (actor && actor->GetHealth() == 61.125F && gun && gun->IsReloading()) {
 				const float progress = gun->GetReloadProgress();
 				if (!state.ReloadHudInitialCaptured && progress >= 0.34F && progress <= 0.38F) {
@@ -2216,7 +2240,8 @@ int RunPersistentHeadlessServer(const ServerConfiguration& config) {
 		for (const std::string& command : console.Poll()) {
 			if (command == "quit" || command == "exit" || command == "stop") ServerConsole::StopRequested.store(true);
 			else if (command == "status") log("INFO status tick=" + std::to_string(tick) + " clients=" + std::to_string(session.GetConnectedClientCount()) + " actors=" + std::to_string(g_MovableMan.GetActorCount()));
-			else if (command == "debug-reload-hud-create") {
+			else if (command == "debug-reload-hud-create" || command == "debug-shot-create") {
+				const bool shotFixture = command == "debug-shot-create";
 				g_ThreadMan.GetPriorityThreadPool().wait_for_tasks();
 				Activity* activity = g_ActivityMan.GetActivity();
 				const Entity* body = g_PresetMan.GetEntityPreset("AHuman", "Fat Culled Clone", "Base.rte");
@@ -2226,15 +2251,30 @@ int RunPersistentHeadlessServer(const ServerConfiguration& config) {
 				if (!activity || !activity->PlayerActive(0) || !actor || !gun || (diagnosticReloadActor && g_MovableMan.IsActor(diagnosticReloadActor))) {
 					log("ERROR debug_reload_hud=create_failed"); continue;
 				}
-				actor->SetTeam(activity->GetTeamOfPlayer(0)); actor->SetHealth(61.125F); actor->SetHUDVisible(true);
+				actor->SetTeam(activity->GetTeamOfPlayer(0)); actor->SetHealth(shotFixture ? 61.875F : 61.125F); actor->SetHUDVisible(true);
 				actor->SetPos(g_SceneMan.MovePointToGround(Vector(400, 0), 0, 3)); actor->SetGlobalAccScalar(0); actor->SetPinStrength(1000000);
+				if (shotFixture) actor->SetPos(actor->GetPos() + Vector(0, -40));
 				actor->AddInventoryItem(gun.get()); gun.release(); actor->EquipFirearm();
 				auto* equipped = dynamic_cast<HDFirearm*>(actor->GetEquippedItem());
 				if (!equipped || !g_MovableMan.AddMO(actor.get())) { log("ERROR debug_reload_hud=equip_failed"); continue; }
 				diagnosticReloadActor = actor.release(); activity->SetPlayerBrain(diagnosticReloadActor, 0);
 				if (!activity->SwitchToActor(diagnosticReloadActor, 0, diagnosticReloadActor->GetTeam())) { log("ERROR debug_reload_hud=control_failed"); continue; }
-				equipped->SetBaseReloadTime(600000); equipped->Reload(); equipped->SetReloadProgress(0.35F);
-				log(equipped->IsReloading() ? "INFO debug_reload_hud=created" : "ERROR debug_reload_hud=reload_failed");
+				if (shotFixture) log("INFO debug_shot=created");
+				else {
+					equipped->SetBaseReloadTime(600000); equipped->Reload(); equipped->SetReloadProgress(0.35F);
+					log(equipped->IsReloading() ? "INFO debug_reload_hud=created" : "ERROR debug_reload_hud=reload_failed");
+				}
+			} else if (command == "debug-shot-fire") {
+				g_ThreadMan.GetPriorityThreadPool().wait_for_tasks();
+				auto* gun = diagnosticReloadActor && g_MovableMan.IsActor(diagnosticReloadActor) ? dynamic_cast<HDFirearm*>(diagnosticReloadActor->GetEquippedItem()) : nullptr;
+				if (!gun) { log("ERROR debug_shot=missing_gun"); continue; }
+				const auto before = gun->GetNetworkShotSequence(); const int rounds = gun->GetRoundInMagCount();
+				gun->SetActivationDelay(0); gun->SetDeactivationDelay(0); gun->SetFullAuto(false);
+				gun->Activate(); gun->Update(); gun->Deactivate(); gun->Update();
+				// Keep ambient controller input from adding another authoritative shot
+				// during the expiry check; this disposable fixture fires once per minute.
+				gun->SetRateOfFire(1);
+				log(gun->GetNetworkShotSequence() != before && gun->GetRoundInMagCount() == rounds - 1 && !gun->FiredFrame() ? "INFO debug_shot=fired_between_snapshots" : "ERROR debug_shot=fire_failed");
 			} else if (command == "debug-reload-hud-mutate") {
 				auto* gun = diagnosticReloadActor && g_MovableMan.IsActor(diagnosticReloadActor) ? dynamic_cast<HDFirearm*>(diagnosticReloadActor->GetEquippedItem()) : nullptr;
 				if (gun && gun->IsReloading()) { gun->SetReloadProgress(0.75F); log("INFO debug_reload_hud=changed"); }

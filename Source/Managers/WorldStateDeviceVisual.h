@@ -13,6 +13,7 @@ inline WorldStateProtocol::DeviceVisualState Capture(const MovableObject& object
         if (const auto* firearm = dynamic_cast<const HDFirearm*>(device)) {
             state.Reloading = firearm->IsReloading();
             state.FireFrame = firearm->FiredFrame();
+            state.ShotSequence = firearm->GetNetworkShotSequence(); state.ShotAgeMS = firearm->GetNetworkShotAgeMS();
             state.ReloadProgress = state.Reloading ? std::clamp(firearm->GetReloadProgress(), 0.0F, 1.0F) : 1;
         }
     }
@@ -26,7 +27,7 @@ inline bool Apply(MovableObject& object, const WorldStateProtocol::DeviceVisualS
     device->SetRecoil(Vector(), Vector(state.RecoilOffsetX, state.RecoilOffsetY), state.Recoiled);
     if (auto* firearm = dynamic_cast<HDFirearm*>(device)) {
         firearm->SetReplicaReloadVisual(state.Reloading, state.ReloadProgress);
-        firearm->SetReplicaFireVisual(state.FireFrame);
+        firearm->SetReplicaFireVisual(state.FireFrame, state.ShotSequence, state.ShotAgeMS);
     }
     return true;
 }

@@ -361,6 +361,14 @@ bool TestNative() {
 	if (targetGun->FiredFrame() || targetGun->IsRecoiled() || targetGun->GetRecoilOffset() != Vector()) return false;
 	sourceGun->SetReplicaReloadVisual(false, 1);
 	if (!matches() || targetGun->IsReloading() || targetGun->GetReloadProgress() != 1) return false;
+	// A shot occurred between snapshots: its native FireFrame has already cleared.
+	sourceGun->SetReplicaFireVisual(false, 17, 20);
+	if (!matches() || targetGun->FiredFrame() || !targetGun->MuzzleFlashVisible() || targetGun->GetMagazine() != retainedMagazine || targetGun->GetMagazine()->GetRoundCount() != -1) return false;
+	sourceGun->SetReplicaFireVisual(false, 18, 150);
+	if (!matches() || targetGun->MuzzleFlashVisible()) return false;
+	// Preserve an expired received age even when the native frame flag is set.
+	sourceGun->SetReplicaFireVisual(true, 19, 65535);
+	if (!matches() || targetGun->GetNetworkShotAgeMS() != 65535 || targetGun->MuzzleFlashVisible()) return false;
 	Retire(*source, source->GetFGArm());
 	if (!matches() || target->GetFGArm()) return false;
 	std::unique_ptr<Arm> replacement(dynamic_cast<Arm*>(body->GetFGArm()->Clone()));

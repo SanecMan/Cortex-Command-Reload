@@ -10,6 +10,7 @@ int main() {
     gun.DeviceVisual = {true, true, true, 0.35F};
     gun.DeviceVisual.FireFrame = true; gun.DeviceVisual.Recoiled = true;
     gun.DeviceVisual.RecoilOffsetX = -0.75F; gun.DeviceVisual.RecoilOffsetY = 0.125F;
+    gun.DeviceVisual.ShotSequence = 17; gun.DeviceVisual.ShotAgeMS = 20;
     snapshot.Objects.push_back(gun);
     std::vector<std::uint8_t> packet; Snapshot decoded;
     if (!EncodeSnapshot(snapshot, 1, packet) || !DecodeSnapshot(packet, decoded) || decoded.Objects != snapshot.Objects) return 1;

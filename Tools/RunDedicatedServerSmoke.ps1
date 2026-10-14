@@ -12,6 +12,7 @@ param(
     [switch]$CheckPurchasePricing,
     [switch]$CheckInventory,
     [switch]$CheckReloadHud,
+    [switch]$CheckRecentShot,
     [switch]$CheckMenuConnection,
     [switch]$CheckScreenText,
     [switch]$CheckSound,
@@ -44,6 +45,7 @@ if ($CheckPurchases -and $CheckTeamFunds) { throw 'Run purchase and administrati
 if ($CheckBuyMenu -and ($CheckPurchases -or $CheckTeamFunds)) { throw 'Run the buy-menu fixture separately.' }
 if ($CheckInventory -and ($CheckBuyMenu -or $CheckPurchases -or $CheckTeamFunds)) { throw 'Run the inventory fixture separately.' }
 if ($CheckReloadHud -and ($CheckInventory -or $CheckBuyMenu -or $CheckPurchases -or $CheckTeamFunds)) { throw 'Run reload HUD independently from other gameplay fixtures.' }
+if ($CheckRecentShot -and ($CheckReloadHud -or $CheckInventory -or $CheckBuyMenu -or $CheckPurchases -or $CheckTeamFunds)) { throw 'Run recent-shot fixture independently.' }
 if (!$ServerExecutablePath) { $ServerExecutablePath = Join-Path $PSScriptRoot '..\CortexCommandServer.exe' }
 if (!$ClientExecutablePath) { $ClientExecutablePath = Join-Path $PSScriptRoot '..\Cortex Command.exe' }
 $serverBinary = (Resolve-Path -LiteralPath $ServerExecutablePath).Path
@@ -195,6 +197,7 @@ try {
     $inventoryMutated = $false
     $inventoryCreated = $false
     $reloadHudCreated = $false; $reloadHudChanged = $false
+    $shotCreated = $false; $shotFired = $false
     while (@($clients | Where-Object { !$_.HasExited }).Count -gt 0) {
         if ($CheckScreenText) {
             # Activity updates may clear ordinary messages while clients load.
@@ -252,6 +255,16 @@ try {
         }
         Check-Time
         if ($server.HasExited) { throw 'Server stopped while clients were running.' }
+        if ($CheckRecentShot) {
+            $shotClientsReady=$true; $shotActorReady=$false
+            foreach ($index in 1..2) {
+                $shotDirectory=Join-Path $gameDirectory "ScreenShots\$OutputPrefix-Client$index"
+                $shotClientsReady=$shotClientsReady -and ((Read-Report (Join-Path $shotDirectory 'WorldStateClient.log')) -match '(?m)^snapshot=')
+                $shotActorReady=$shotActorReady -or ((Read-Report (Join-Path $shotDirectory 'DebugRun.log')) -match '(?m)^world_state_shot_actor_ready=passed')
+            }
+            if (!$shotCreated -and $shotClientsReady) { $server.StandardInput.WriteLine('debug-shot-create'); $server.StandardInput.Flush(); $shotCreated=$true }
+            if ($shotCreated -and !$shotFired -and $shotActorReady) { $server.StandardInput.WriteLine('debug-shot-fire'); $server.StandardInput.Flush(); $shotFired=$true }
+        }
         if ($CheckReloadHud) {
             $hudClientsReady=$true; $hudInitial=$false
             foreach ($index in 1..2) {
@@ -383,6 +396,22 @@ try {
             $clientNetwork -notmatch 'funds_team0=12345\.250000 funds_team1=-17\.500000')) { throw 'Client team funds replication failed.' }
     }
     if ($CheckPurchasePolicy -and !$displayedStockPriceObserved) { throw 'Client catalog stock discount does not match the server charge.' }
+    if ($CheckRecentShot) {
+        $shotVerified=$false
+        foreach ($index in 1..2) {
+            $shotDirectory=Join-Path $gameDirectory "ScreenShots\$OutputPrefix-Client$index"
+            $shotReport=Read-Report (Join-Path $shotDirectory 'DebugRun.log')
+            $shotImage=Join-Path $shotDirectory 'debug-run-recent-shot.png'
+            $expiredImage=Join-Path $shotDirectory 'debug-run-recent-shot-expired.png'
+            if ((Test-Path $shotImage) -and (Test-Path $expiredImage) -and
+                (Get-FileHash -LiteralPath $shotImage).Hash -eq (Get-FileHash -LiteralPath $expiredImage).Hash) { throw 'Recent-shot screenshots are identical; visual expiry was not captured.' }
+            $shotVerified=$shotVerified -or ($shotReport -match '(?m)^world_state_recent_shot=passed' -and
+                $shotReport -match '(?m)^world_state_recent_shot_expired=passed' -and
+                (Test-Path (Join-Path $shotDirectory 'debug-run-recent-shot.png')) -and
+                (Test-Path (Join-Path $shotDirectory 'debug-run-recent-shot-expired.png')))
+        }
+        if (!$shotFired -or !$shotVerified -or (Read-Report $serverLogPath) -notmatch 'INFO debug_shot=fired_between_snapshots') { throw 'Recent-shot visual fixture failed.' }
+    }
     if ($CheckReloadHud) {
         $hudVerified=$false
         foreach ($index in 1..2) {

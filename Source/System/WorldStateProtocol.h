@@ -20,7 +20,7 @@
 namespace RTE::WorldStateProtocol {
 
 inline constexpr std::uint32_t c_Magic = 0x31524343; // "CCR1" on the wire.
-inline constexpr std::uint16_t c_Version = 27;
+inline constexpr std::uint16_t c_Version = 28;
 inline constexpr std::size_t c_TeamCount = 4;
 inline constexpr std::int8_t c_NoActivity = -1;
 inline constexpr std::int8_t c_MaxActivityState = 6;
@@ -472,6 +472,7 @@ inline void WriteDeviceVisual(std::vector<std::uint8_t>& packet, const DeviceVis
 	WriteUnsigned(packet, (state.Present ? 1 : 0) | (state.Activated ? 2 : 0) | (state.Reloading ? 4 : 0) | (state.FireFrame ? 8 : 0) | (state.Recoiled ? 16 : 0), 1);
 	if (state.Present) WriteFloat(packet, state.ReloadProgress);
 	if (state.Recoiled) { WriteFloat(packet, state.RecoilOffsetX); WriteFloat(packet, state.RecoilOffsetY); }
+	if (state.Present) { WriteUnsigned(packet, state.ShotSequence, 4); WriteUnsigned(packet, state.ShotAgeMS, 2); }
 }
 inline bool ReadDeviceVisual(std::span<const std::uint8_t> packet, std::size_t& offset, DeviceVisualState& state) {
 	std::uint64_t flags = 0;
@@ -480,7 +481,13 @@ inline bool ReadDeviceVisual(std::span<const std::uint8_t> packet, std::size_t& 
 	state.Present = (flags & 1) != 0; state.Activated = (flags & 2) != 0; state.Reloading = (flags & 4) != 0;
 	state.FireFrame = (flags & 8) != 0; state.Recoiled = (flags & 16) != 0;
 	if (state.Present && !ReadFloat(packet, offset, state.ReloadProgress)) return false;
-	return !state.Recoiled || (ReadFloat(packet, offset, state.RecoilOffsetX) && ReadFloat(packet, offset, state.RecoilOffsetY));
+	if (state.Recoiled && (!ReadFloat(packet, offset, state.RecoilOffsetX) || !ReadFloat(packet, offset, state.RecoilOffsetY))) return false;
+	if (state.Present) {
+		std::uint64_t sequence = 0, age = 0;
+		if (!ReadUnsigned(packet, offset, 4, sequence) || !ReadUnsigned(packet, offset, 2, age)) return false;
+		state.ShotSequence = static_cast<std::uint32_t>(sequence); state.ShotAgeMS = static_cast<std::uint16_t>(age);
+	}
+	return true;
 }
 inline bool WriteAttachments(std::vector<std::uint8_t>& packet, const ObjectState& object) {
 	WriteUnsigned(packet, object.HasAttachmentState, 1);

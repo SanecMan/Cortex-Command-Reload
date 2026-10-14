@@ -60,6 +60,10 @@ jobs:
         run: |
           g++-13 -std=c++20 -Wall -Wextra -I Source/System Tools/WorldStateDeviceVisualTest.cpp -o build-server/device-visual-test
           build-server/device-visual-test
+      - name: Verify shot flash presentation timeline
+        run: |
+          g++-13 -std=c++20 -Wall -Wextra Tools/ShotFlashPresentationTest.cpp -o build-server/shot-flash-test
+          build-server/shot-flash-test
       - name: Verify sound payload codec
         run: |
           g++-13 -std=c++20 -Wall -Wextra -pthread -I Source/System Tools/WorldStateSoundProtocolTest.cpp -o build-server/world-state-sound-test

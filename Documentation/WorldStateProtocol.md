@@ -1,5 +1,56 @@
 # World-state protocol
 
+## v28 recent-shot presentation under validation
+
+Device records carry a wrapping unsigned 32-bit shot sequence and unsigned
+16-bit simulation age in milliseconds (65535 means no recent history). Native
+HDFirearm increments the counter by actual rounds fired, before OnFire, and
+resets a dedicated shot timer. The counter is runtime state, not a new .rte
+property or Lua API. Non-firearms and absent devices require empty history.
+Matched protocol 28 client/server binaries are required.
+
+The client preserves the received FireFrame getter separately from its render
+pulse. A changed sequence with age below 100 ms schedules a bounded muzzle-flash
+pulse using a monotonic presentation clock. Duplicate snapshots and interpolation
+cannot restart it. Old history does not flash on late join, and counter wrap is
+handled. No local firing, rounds, audio, scripts or physical impulse are created.
+This makes a recent shot visible even when its native one-frame FireFrame was
+cleared before the snapshot. Existing muzzle attachment frames/poses are used.
+
+Portable tests pass the no-shot baseline, elapsed expiry, duplicate packets,
+skipped sequences, stale history and counter wrap. Native attachment tests now
+check a recent shot with FireFrame false, followed by expired history, while
+retaining the weapon/magazine and unchanged ammunition. The inventory network
+fixture carries sequence 17/age 20 then sequence 18/age 40 with FireFrame false.
+Both Meson executables compiled and linked. MSVC codec/timeline and MinGW GCC
+timeline tests passed. `ShotFlashV28Headless` passed in 22.12 seconds with two
+clients, 127 ticks, native headless content/simulation checks and UTF-8 input/text.
+The corrected `ShotFlashV28Visual` passed in 28.63 seconds with two menu-connected
+clients and 62 server updates after disconnect. The server performed a native
+shot and cleared FireFrame before capture; the client logged sequence 1/age 16
+with native_fire_frame=0, then expired without spending another round. Both PNGs
+were inspected: a visible muzzle flash disappeared. The fixed-camera muzzle
+region (418..431,290..306) had 15 yellow pixels before expiry and zero after.
+
+Use `Tools/RunDedicatedServerSmoke.ps1 -CheckMenuConnection -CheckRecentShot`.
+The console fixture creates a pinned actor above terrain, waits for its client
+view, fires normally and limits only this disposable gun to one round per minute
+to exclude additional controller shots during expiry. The expiry screenshot
+waits two further presentation updates for the scene layer to refresh. Identical
+PNGs fail the script. Early attempts exposed a stale-frame capture and extra
+authoritative shots; those failed observations are not the visual evidence above.
+The same-prefix rerun after the identical-image/expired-age guards passed in
+29.48 seconds with 63 further server updates; both clients passed native
+attachment checks. `ShotFlashV28Inventory` passed sequence/age transitions in
+45.34 seconds with two clients and 64 updates after disconnect. Received stale
+ages are preserved verbatim, even with FireFrame set, and do not create a fresh
+render pulse. Native Final and Linux v28 checks are pending.
+
+This is bounded latest-shot reconstruction rather than a queue of every shot:
+bursts can coalesce, removed weapons have no surviving history, and packet
+latency is not subtracted from the reported simulation age. Arbitrary weapon Lua
+visual state and full Activity-specific presentation remain unverified.
+
 ## v27 firearm flash and device recoil presentation under validation
 
 Protocol 27 extends device presentation with the authoritative firearm FireFrame
@@ -29,7 +80,9 @@ on/off attachment tests. Both clients exited successfully; the server continued
 the root matched client/server pair passed `DeviceVisualV27Delivered` in
 32.45 seconds, including both native attachment tests and inventory changes,
 with 62 server updates after disconnect. Linux CI `38506544539` for
-`94f6fc8b68f` is pending; no Linux v27 runtime result is claimed yet.
+`94f6fc8b68f` passed server compilation, codecs and headless two-client probes.
+Build-tree and packaged runs took 13.24/9.62 seconds, verified input/UTF-8 text,
+initialized no video device, and exited cleanly on SIGTERM.
 
 This is snapshot presentation, not a reliable shot-event stream. A shot entirely
 between snapshot captures can still be missed visually. Event history/counters
