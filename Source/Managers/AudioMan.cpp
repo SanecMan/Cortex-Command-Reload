@@ -894,6 +894,14 @@ bool AudioMan::VerifySoundContainerLifetime() {
 		sound->SetImmobile(true); sound->SetPaused(true); sound->SetLoopSetting(infinite ? -1 : 0);
 		if (!sound->Play() || sound->GetPlayingChannels()->empty()) return false;
 		index = *sound->GetPlayingChannels()->begin();
+		FMOD::Channel* seekChannel = nullptr; FMOD::Sound* sample = nullptr;
+		unsigned int length = 0, position = 0;
+		if (m_AudioSystem->getChannel(index, &seekChannel) != FMOD_OK || !seekChannel ||
+		    seekChannel->getCurrentSound(&sample) != FMOD_OK || !sample ||
+		    sample->getLength(&length, FMOD_TIMEUNIT_MS) != FMOD_OK || length < 2 ||
+		    !sound->SeekNetworkPlayback(length / 2) ||
+		    seekChannel->getPosition(&position, FMOD_TIMEUNIT_MS) != FMOD_OK ||
+		    position != length / 2) return false;
 		sound.reset();
 		return true;
 	};

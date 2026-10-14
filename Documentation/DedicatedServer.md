@@ -1128,14 +1128,15 @@ seconds. The purchase client's final screenshot was inspected and displayed
 Funds: 9500. At that RPC checkpoint, complete inventory replication and the
 visible remote BuyMenu were still outside the completed step. The client menu
 is now described above; complete inventory replication remains outstanding.
-## v21 network sound validation
+## Network sound validation
 
 The development client now plays server-selected SoundContainer resources and
-applies their container controls. Use matching v21 client/server binaries and the
+applies their container controls. Use matching v22 client/server binaries and the
 same installed modules. Sound resources are resolved inside loaded module roots;
 missing resources are skipped rather than causing an assertion. Active loops that
-began before a client joined, global bus pause/pitch changes and dynamic pan updates
-are not yet reconstructed. See `WorldStateProtocol.md` for measured checks and limits.
+began before a client joined are not yet reconstructed. v22 additionally transfers
+bus pause/pitch and container pan/panning controls, including a group-state baseline
+on connection. See `WorldStateProtocol.md` for measured checks and limits.
 
 The automated two-client runner can exercise server-selected looping sound and
 its Stop event:

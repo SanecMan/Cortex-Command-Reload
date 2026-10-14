@@ -1556,6 +1556,7 @@ namespace {
 		const bool soundless = !g_AudioMan.IsAudioEnabled() && !container.IsBeingPlayed();
 		GetWorldStateSoundCapture().Begin();
 		bool playbackPassed = TestSoundPlaybackTimeline() && confirm && confirm->Play() && confirm->IsBeingPlayed();
+		if (playbackPassed) playbackPassed = confirm->SeekNetworkPlayback(100) && confirm->IsBeingPlayed();
 		if (playbackPassed) {
 			confirm->SetSoundOverlapMode(SoundContainer::IGNORE_PLAY);
 			playbackPassed = !confirm->Play();

@@ -1,6 +1,26 @@
 # World-state protocol
 
-## v22 sound mix controls under validation
+## Playback cursor groundwork
+
+`SoundContainer::SeekNetworkPlayback` can move already-playing voices to a
+sample cursor. The metadata-only timeline wraps a cursor inside each sample;
+this is not an absolute elapsed-time or finite-loop-count seek. No cursor has
+been added to the wire format yet, and late-join loop reconstruction is still
+incomplete.
+
+On Windows, `SoundPlaybackSeekTest` passed wrapping, pause/resume, pitch,
+FinishLoops, finite lifetime, invalid cursor and empty timeline checks.
+`SoundPlaybackSeekHeadless` passed in 18.73 seconds with two external clients,
+127 simulation updates, UTF-8 configuration and screen messages, without video
+initialization. Both Meson executables compiled and linked.
+`SoundPlaybackSeekFMOD` passed in 29.88 seconds with two menu-connected,
+audio-enabled clients and 62 server updates after disconnect. The native audio
+fixture seeks both finite and infinite paused voices to half their sample
+duration and queries FMOD's actual cursor before destroying the owner. It also
+checks the existing group pause/resume and ownership lifecycle regressions.
+These checks do not establish audible continuity for joining clients.
+
+## v22 sound mix controls
 
 Development sources add GlobalPitch (a three-bit bus mask), BusPause, Pan and
 Panning to inner sound schema 3 and session protocol 22. Global commands use a
@@ -27,7 +47,14 @@ combinations. Native `Final|x64` compiled and linked successfully. The root pair
 was updated to v22 and `SoundMixV22Delivered` passed in 33.22 seconds with two
 audio-enabled menu-connected clients, FMOD channel pause/resume queries,
 container lifetime checks, clean client shutdown and 62 further server ticks
-after disconnect. Linux v22 verification remains pending.
+after disconnect.
+
+Linux v22 CI run `38486687753` for `547c0a81979` also passed. The build-tree
+check completed in 13.29 seconds and the extracted package in 9.62 seconds.
+Both connected two separate clients, applied client input, received screen text,
+initialized no SDL video, accepted UTF-8 configuration, rejected invalid
+configuration and shut down through SIGTERM. This checks headless simulation
+and logical audio state; it does not measure audible Linux output.
 
 Linux lifecycle-update run `38483629070` (commit `f99ffdecb43`) passed headless
 startup and two external clients in 12.34 seconds, with the extracted package

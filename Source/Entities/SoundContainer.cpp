@@ -471,6 +471,26 @@ void SoundContainer::SetNetworkPitch(float newPitch) {
 	}
 }
 
+bool SoundContainer::SeekNetworkPlayback(unsigned int milliseconds) {
+	if (!g_AudioMan.IsAudioEnabled()) {
+		auto& registry = HeadlessSounds(); std::scoped_lock lock(registry.Mutex);
+		const auto found = registry.Sounds.find(this);
+		if (found == registry.Sounds.end()) return false;
+		bool sought = false;
+		for (auto& timeline : found->second.Timelines)
+			if (timeline.Count(SoundSimulationTime()) > 0) sought = timeline.Seek(SoundSimulationTime(), milliseconds) || sought;
+		return sought;
+	}
+	bool sought = false;
+	for (int index : m_PlayingChannels) {
+		FMOD::Channel* channel = nullptr;
+		if (g_AudioMan.GetAudioSystem()->getChannel(index, &channel) != FMOD_OK || !channel ||
+		    channel->setPosition(milliseconds, FMOD_TIMEUNIT_MS) != FMOD_OK) return false;
+		sought = true;
+	}
+	return sought;
+}
+
 void SoundContainer::SetPaused(bool paused) {
 	if (paused != m_Paused) {
 		m_Paused = paused;

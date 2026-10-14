@@ -26,6 +26,19 @@ public:
     }
     bool Playing(double now) { Advance(now); return !m_Voices.empty(); }
     std::size_t Count(double now) { Advance(now); return m_Voices.size(); }
+    double Phase(double now) { Advance(now); return m_Voices.empty() ? 0 : m_Voices.front().Phase; }
+    bool Seek(double now, double position) {
+        if (!std::isfinite(position) || position < 0) return false;
+        Advance(now);
+        if (m_Voices.empty()) return false;
+        for (auto& voice : m_Voices) {
+            const double target = std::fmod(position, voice.Length);
+            if (std::isfinite(voice.Remaining)) voice.Remaining = std::max(0.0, voice.Remaining + voice.Phase - target);
+            voice.Phase = target;
+        }
+        Advance(now);
+        return !m_Voices.empty();
+    }
     void Pause(double now, bool value) { Advance(now); m_Paused = value; }
     void PauseGroup(double now, bool value) { Advance(now); m_GroupPaused = value; }
     void Pitch(double now, double rate) { Advance(now); if (std::isfinite(rate) && rate > 0) for (auto& voice : m_Voices) voice.Rate = rate; }

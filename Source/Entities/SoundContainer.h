@@ -248,6 +248,8 @@ namespace RTE {
 		void SetPitch(float newPitch);
 		/// Exact server-selected pitch, including variation; normal Lua/API bounds remain unchanged.
 		void SetNetworkPitch(float newPitch);
+		/// Moves playing voices to a sample cursor in milliseconds; no Lua API change.
+		bool SeekNetworkPlayback(unsigned int milliseconds);
 
 		/// Gets the pitch variation the sounds in this SoundContainer are played at.
 		/// @return The pitch variation the sounds in this SoundContainer are played at.
