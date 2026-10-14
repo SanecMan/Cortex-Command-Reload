@@ -11,6 +11,8 @@
 #include "GUIFont.h"
 #include "AllegroBitmap.h"
 #include "UInputMan.h"
+#include "ObjectPickerGUI.h"
+#include "MovableObject.h"
 #include <chrono>
 #include <memory>
 
@@ -24,8 +26,37 @@ public:
 	bool HasOwnPreview() const { return m_Slot >= 0 && m_Slot < WorldStateProtocol::c_PlayerSlotCount && m_Previews[m_Slot].Object != nullptr; }
 	bool IsReady() const { return m_Slot >= 0 && m_Slot < WorldStateProtocol::c_PlayerSlotCount && m_State.Players[m_Slot].Ready; }
 	const Vector& GetCursor() const { return m_Cursor; }
+	float LastChargedCost() const { return m_LastCost; }
+	const std::string& LastRejection() const { return m_LastReason; }
+	const SceneObject* GetSelectedObject() const { return m_Selected.get(); }
+	ObjectPickerGUI* GetPicker() const { return m_Picker.get(); }
+	bool OpenPicker() {
+		if (!m_Active || m_Slot < 0 || m_Pending) return false;
+		if (!m_Picker) { m_Picker = std::make_unique<ObjectPickerGUI>(); if (m_Picker->Create(&m_Controller) < 0) { m_Picker.reset(); return false; } }
+		m_Picker->SetEnabled(true); return true;
+	}
+	bool SelectObject(const SceneObject* preset) {
+		const ObjectScriptExecution::SuppressionScope suppress;
+		if (!m_Picker || !preset || !m_Picker->IsObjectAvailable(*preset)) return false;
+		if (preset->IsInGroup("Brains")) { m_Status = "Press B to place your server-selected brain"; return false; }
+		if (m_Selected && m_Selected->GetModuleAndPresetName() == preset->GetModuleAndPresetName() && m_Selected->GetClassName() == preset->GetClassName()) return true;
+		std::unique_ptr<Entity> clone(preset->Clone());
+		auto* object = dynamic_cast<SceneObject*>(clone.get()); if (!object) return false;
+		ClearSelection(); m_Selected.reset(object); clone.release(); return true;
+	}
+	void SelectBrain() { const ObjectScriptExecution::SuppressionScope suppress; ClearSelection(); m_Picker.reset(); }
+	bool PlaceObject(WorldStateClientSession& client, const Vector& position) {
+		if (!m_Selected || !m_Active || m_Slot < 0 || m_Pending || !m_State.SceneRevision) return false;
+		WorldStateProtocol::ConstructionRequest request;
+		request.Action = WorldStateProtocol::ConstructionAction::PlaceObject; request.X = position.GetX(); request.Y = position.GetY();
+		request.Rotation = m_Selected->GetRotAngle(); request.HFlipped = m_Selected->IsHFlipped();
+		request.Preset = {m_Selected->GetClassName(), m_Selected->GetModuleName(), m_Selected->GetPresetName()};
+		if (!Send(client, request)) return false;
+		m_Cursor = position; return true;
+	}
 	void Reset() {
 		const ObjectScriptExecution::SuppressionScope suppress;
+		ClearSelection(); m_Picker.reset(); m_LastCost = 0; m_LastReason.clear();
 		for (auto& preview : m_Previews) { if (preview.Object) preview.Object->DestroyScriptState(); preview = {}; }
 		m_Active = m_Pending = m_LastAccepted = false; m_Revision = 0; m_Slot = -1; m_State = {}; m_Status.clear();
 	}
@@ -65,6 +96,8 @@ public:
 		for (const auto& reply : client.DrainConstructionResults()) {
 			if (!m_Pending || reply.RequestId != m_Request.RequestId || reply.SceneRevision != m_Revision) continue;
 			m_Pending = false; m_LastAccepted = reply.Accepted;
+			m_LastCost = reply.ChargedCost;
+			m_LastReason = reply.Reason;
 			m_Status = reply.Accepted ? "Server confirmed" : RejectionText(reply.Reason);
 		}
 		for (int player = 0; player < WorldStateProtocol::c_PlayerSlotCount; ++player) {
@@ -88,10 +121,23 @@ public:
 		}
 		if (m_Slot < 0 || m_Slot >= WorldStateProtocol::c_PlayerSlotCount) { m_Status = "Spectator: construction unavailable"; return; }
 		if (physicalInput) {
-			m_Controller.Update(); m_Controller.RelativeCursorMovement(m_Cursor); g_SceneMan.ForceBounds(m_Cursor);
-			if (!m_Pending && (m_Controller.IsState(PRESS_PRIMARY) || g_UInputMan.KeyPressed(SDLK_RETURN))) PlaceBrain(client, m_Cursor);
-			if (!m_Pending && g_UInputMan.KeyPressed(SDLK_F6)) SetReady(client, !IsReady());
+			m_Controller.Update();
+			if (!m_Pending && g_UInputMan.KeyPressed(SDLK_F7)) { if (m_Picker && m_Picker->IsEnabled()) m_Picker->SetEnabled(false); else OpenPicker(); }
+			if (!m_Pending && g_UInputMan.KeyPressed(SDLK_B)) SelectBrain();
+			const bool pickerVisible = m_Picker && m_Picker->IsVisible();
+			if (m_Picker) { m_Picker->Update(); if (pickerVisible) { if (const auto* picked = m_Picker->ObjectPicked()) SelectObject(picked); } }
+			if (!pickerVisible) {
+				m_Controller.RelativeCursorMovement(m_Cursor); g_SceneMan.ForceBounds(m_Cursor);
+				if (m_Selected && !m_Pending && g_UInputMan.KeyPressed(SDLK_F8)) m_Selected->SetRotAngle(m_Selected->GetRotAngle() + 0.2617994F);
+				if (m_Selected && !m_Pending && g_UInputMan.KeyPressed(SDLK_F9)) m_Selected->SetHFlipped(!m_Selected->IsHFlipped());
+				if (!m_Pending && (m_Controller.IsState(PRESS_PRIMARY) || g_UInputMan.KeyPressed(SDLK_RETURN))) {
+					if (m_Selected) PlaceObject(client, m_Cursor); else PlaceBrain(client, m_Cursor);
+				}
+				if (!m_Pending && g_UInputMan.KeyPressed(SDLK_F6)) SetReady(client, !IsReady());
+			}
 		}
+		if (!physicalInput && m_Picker) m_Picker->Update();
+		if (m_Selected) { m_Selected->SetPos(m_Cursor); m_Selected->SetTeam(m_State.Players[m_Slot].Team); }
 		g_CameraMan.SetScrollTarget(m_Cursor, 0.1F, Players::PlayerOne);
 		if (m_Pending) {
 			if (std::chrono::steady_clock::now() - m_Began >= std::chrono::seconds(8)) { m_Pending = false; m_Status = "Server confirmation timed out"; }
@@ -101,14 +147,18 @@ public:
 	void Draw(BITMAP* target, int screen, const Vector& offset) const {
 		if (!m_Active || screen != Players::PlayerOne) return;
 		for (const auto& preview : m_Previews) if (preview.Object) preview.Object->Draw(target, offset);
+		if (m_Selected && (!m_Picker || !m_Picker->IsVisible())) m_Selected->Draw(target, offset);
 		const Vector point = m_Cursor - offset;
 		circle(target, point.GetFloorIntX(), point.GetFloorIntY(), 14, g_YellowGlowColor);
 		line(target, point.GetFloorIntX() - 20, point.GetFloorIntY(), point.GetFloorIntX() + 20, point.GetFloorIntY(), g_YellowGlowColor);
 		AllegroBitmap bitmap(target);
-		g_FrameMan.GetSmallFont()->DrawAligned(&bitmap, target->w / 2, target->h - 40, "Mouse/arrows: position | Click/Enter: place brain | F6: ready/cancel", GUIFont::Centre);
+		g_FrameMan.GetSmallFont()->DrawAligned(&bitmap, target->w / 2, target->h - 56, m_Selected ? m_Selected->GetPresetName() : "Brain placement", GUIFont::Centre);
+		g_FrameMan.GetSmallFont()->DrawAligned(&bitmap, target->w / 2, target->h - 40, "Click/Enter: place | F7: objects | B: brain | F8/F9: rotate/flip | F6: ready/cancel", GUIFont::Centre);
 		g_FrameMan.GetSmallFont()->DrawAligned(&bitmap, target->w / 2, target->h - 24, IsReady() ? "Ready - waiting for other players" : (m_Pending ? "Waiting for server..." : m_Status), GUIFont::Centre);
+		if (m_Picker) m_Picker->Draw(target);
 	}
 private:
+	void ClearSelection() { if (auto* movable = dynamic_cast<MovableObject*>(m_Selected.get())) movable->DestroyScriptState(); m_Selected.reset(); }
 	static std::string RejectionText(const std::string& reason) {
 		if (reason == "outside_scene") return "Choose a position inside the map";
 		if (reason == "invalid_brain_placement") return "Your brain needs a clear path to orbit";
@@ -117,16 +167,24 @@ private:
 		if (reason == "not_editing") return "Construction has ended";
 		if (reason == "stale_scene") return "The map changed; choose a position again";
 		if (reason == "spectator") return "Spectators cannot build";
+		if (reason == "insufficient_funds") return "Your team cannot afford this object";
+		if (reason == "prohibited_item") return "This object is not available for construction";
+		if (reason == "terrain_obstructed") return "Choose a clear position for this object";
+		if (reason == "invalid_preset") return "The server does not have this object";
 		return "Server declined the construction request";
 	}
 	bool Send(WorldStateClientSession& client, WorldStateProtocol::ConstructionRequest request) {
 		if (m_NextId == std::numeric_limits<std::uint32_t>::max()) return false;
 		request.RequestId = ++m_NextId; request.SceneRevision = m_Revision;
 		if (!client.SendConstructionRequest(request)) return false;
-		m_Request = std::move(request); m_Pending = true; m_LastAccepted = false; m_Began = m_LastSend = std::chrono::steady_clock::now(); return true;
+	m_Request = std::move(request); m_Pending = true; m_LastAccepted = false; m_LastCost = 0; m_LastReason.clear(); m_Began = m_LastSend = std::chrono::steady_clock::now(); return true;
 	}
 	struct Preview { std::unique_ptr<Actor> Object; std::uint64_t Id = 0; std::string Identity; };
 	std::array<Preview, WorldStateProtocol::c_PlayerSlotCount> m_Previews;
+	std::unique_ptr<ObjectPickerGUI> m_Picker;
+	std::unique_ptr<SceneObject> m_Selected;
+	float m_LastCost = 0;
+	std::string m_LastReason;
 	WorldStateProtocol::ConstructionState m_State;
 	WorldStateProtocol::ConstructionRequest m_Request;
 	Controller m_Controller;

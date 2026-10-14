@@ -443,6 +443,7 @@ try {
     if ($CheckPurchases -and ($networkLog -notmatch 'purchase id=3 accepted=1 charged=500\.000000' -or
         $networkLog -notmatch 'purchase replay id=3' -or ([regex]::Matches($networkLog, 'purchase id=3 accepted=1').Count -ne 1))) { throw 'Purchase/replay server checks failed.' }
     if ($networkLog -notmatch '\(2 connected, input slot') { throw 'Two simultaneous connections not observed.' }
+    $constructionPurchased = $false
     foreach ($index in 1..2) {
         $clientDirectory = Join-Path $gameDirectory "ScreenShots\$OutputPrefix-Client$index"
         $clientReport = Read-Report (Join-Path $clientDirectory 'DebugRun.log')
@@ -450,7 +451,9 @@ try {
             $clientReport -notmatch '(?m)^world_state_objectives_cleared=passed')) { throw 'Client objective create/clear checks failed.' }
         if ($EnableAudio -and $clientReport -notmatch '(?m)^audio_shutdown_complete\r?$') { throw 'Client audio shutdown was not verified.' }
         $clientNetwork = Read-Report (Join-Path $clientDirectory 'WorldStateClient.log')
-        if ($CheckConstruction -and ($clientReport -notmatch '(?m)^world_state_construction_ui=passed' -or $clientReport -notmatch '(?m)^construction_preview_capture=passed')) { throw 'Construction UI/preview/start did not pass.' }
+        if ($CheckConstruction -and ($clientReport -notmatch '(?m)^world_state_construction_ui=passed' -or $clientReport -notmatch '(?m)^construction_preview_capture=passed' -or $clientReport -notmatch '(?m)^construction_catalog_capture=passed' -or $clientReport -notmatch '(?m)^construction_object_ui=passed')) { throw 'Construction UI/preview/catalog/purchase/start did not pass.' }
+        if ($CheckConstruction -and $clientReport -notmatch '(?m)^construction_object_preview_capture=passed') { throw 'Object preview was not captured.' }
+        $constructionPurchased = $constructionPurchased -or $clientReport -match '(?m)^construction_object_ui=passed purchased=1'
         if ($RequireControlledActor -and $clientNetwork -notmatch 'controlled_actor=[1-9]') { throw 'Client never received a controlled actor.' }
         if ($CheckLatePlayerJoin -and ($clientNetwork -notmatch 'scene_revision=1 .*controlled_actor=[1-9]' -or $clientNetwork -match 'scene_revision=([2-9]|[1-9][0-9]+) ')) { throw 'Late admission did not preserve the running scene revision.' }
         if ($RequireControlledActor -and $RestartWithConnectedPlayers -and $clientNetwork -notmatch 'scene_revision=[2-9].*controlled_actor=[1-9]') { throw 'Client has no controlled actor after roster restart.' }
@@ -498,6 +501,7 @@ try {
             $clientNetwork -notmatch 'funds_team0=12345\.250000 funds_team1=-17\.500000')) { throw 'Client team funds replication failed.' }
     }
     if ($RequireControlledActor -and @($controlledActorIDs | Sort-Object -Unique).Count -ne 2) { throw 'Clients share the same controlled actor.' }
+    if ($CheckConstruction -and !$constructionPurchased) { throw 'No client completed a paid object placement.' }
     if ($CheckPurchasePolicy -and !$displayedStockPriceObserved) { throw 'Client catalog stock discount does not match the server charge.' }
     if ($CheckRecentShot) {
         $shotVerified=$false

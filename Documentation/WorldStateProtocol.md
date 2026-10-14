@@ -17,7 +17,7 @@ Publication follows the snapshot cadence (20 Hz) while peers are connected.
 Outside editing it sends an empty resident baseline. Client sessions retain the
 latest sequence and clear it on disconnect. A consumer must match scene revision
 before using it. The state does not add residents to MovableMan or execute local
-physics/Lua. The client construction menu renders residents and sends brain placement/readiness requests; client object-selection controls and removal remain incomplete.
+physics/Lua. The client construction menu renders residents and sends brain placement/readiness requests; object removal remains incomplete.
 
 `WorldStateConstructionStateTest.cpp` passed MSVC and MinGW GCC, covering Russian
 identities, atomic decode failure, all truncated prefixes, flags, inactive-slot
@@ -43,8 +43,8 @@ Linux run `38573595112` succeeded for commit `6c62ee15241`.
 
 During Editing, clients render native resident-brain sprites from the separate
 construction stream without adding them to local physics or running their scripts.
-Mouse/arrows move the placement cursor; Click/Enter requests brain placement;
-F6 toggles ready/cancel. The server validates placement and all-player readiness
+Mouse/arrows move the placement cursor; Click/Enter requests placement of the selected object (brain by default);
+F7 opens the native object catalog, B returns to server-selected brain placement, F8/F9 rotate/flip supported selected objects, and F6 toggles ready/cancel. The server validates placement and all-player readiness
 before starting the native Activity. Pending requests retry the same ID and time
 out after eight seconds. Spectators can see residents but cannot issue commands.
 Scene changes and disconnect clear the previews and pending state.
@@ -63,7 +63,7 @@ server updates. Both screenshots were inspected: native brain sprites, cursor an
 placement/readiness instructions were visible. `ConstructionMenuHeadlessFinal`
 passed the content/UTF-8/objective/spawn regression in 20.03 seconds with 129
 further ticks and video initialization disabled. These durations are validation
-wall times, not performance comparisons. Client ordinary-object construction controls and removal,
+wall times, not performance comparisons. Object removal,
 physical-input testing and broader Activity compatibility are still outstanding.
 
 Native Final compiled and linked. The delivered root client/server pair passed
@@ -71,12 +71,46 @@ Native Final compiled and linked. The delivered root client/server pair passed
 strict attachments and audio shutdown, and 63 further server updates after
 disconnect. Linux run `38578726608` succeeded for commit `3bc24daf821`.
 
+### Client object picker and diagnostic sampling
+
+The construction client now owns a native ObjectPickerGUI and a render-only
+selected SceneObject clone. The preview is not registered in MovableMan and does
+not run object scripts. Scene transition/disconnect destroys its script state
+under the same suppression scope as resident previews. Selection sends only the
+preset identity and pose; the authoritative server resolves eligibility/cost.
+The local catalog uses the normal default native/foreign pricing display;
+nondefault server editor pricing/module restrictions are not yet replicated to
+this catalog, so server confirmation remains authoritative.
+
+The graphical `-CheckConstruction` fixture opens the native Weapons catalog,
+selects AK-47 through the same selection method used by picker input, captures
+catalog and object-preview images, submits placement and checks charged funds
+(or the insufficient-funds response), then sends readiness after the server
+request cooldown. The pair must contain at least one successful paid placement.
+It does not synthesize physical F7, mouse or keyboard events. Captures use the
+`debug-run-` prefix and are covered by repeated-run cleanup.
+
+Two earlier graphical attempts exposed fixture assumptions and are excluded
+from successful validation: immediate readiness after purchase hit the 250 ms
+request limit; sampling the first nonempty world captured a firearm without an
+Actor, making the camera fixture invalid. Diagnostic sampling now waits for an
+Actor and selects an Actor ID explicitly, retaining the full mixed-object
+snapshot for spawn/removal/interpolation checks.
+
+`ConstructionPickerConfirmedVisual` passed with two graphical clients in 50.28
+seconds, a paid placement and an insufficient-funds response, catalog/object
+preview captures, exact funds, native start, camera/view lifetime checks, strict
+attachments/menu/audio and 62 further server updates. Catalog and object preview
+images were visually inspected. A preceding repaired-camera run had one failed
+compressed-version reconnect fixture while its second client passed; this
+intermittent loopback failure is recorded, not claimed fixed by the passing rerun.
+
 ## Construction command codec foundation
 
 `WorldStateConstructionProtocol.h` reserves envelope message kinds 11
 (`ConstructionRequest`) and 12 (`ConstructionResult`). The v29 snapshot layout
 and existing messages are unchanged. Sessions now route readiness requests and
-their responses and brain placement; client object-selection controls and removal remain incomplete.
+their responses and brain placement; object removal remains incomplete.
 This does not yet establish playable networked construction. Placement integration
 must validate content, ownership, scene bounds and native brain placement before
 modifying the authoritative scene.
@@ -160,7 +194,7 @@ uses the existing cached reply and does not clone or charge twice.
 
 Returned movable IDs currently identify the server's native unique object in the
 construction response; they are not snapshot IDs. Terrain placement returns zero.
-Removal, undo/refunds, client object selection and preview controls still need
+Removal and undo/refunds still need
 integration. Terrain/deployment/inventory-gift branches need dedicated runtime
 fixtures; a firearm fixture does not prove these branches work.
 

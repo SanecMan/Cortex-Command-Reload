@@ -335,6 +335,8 @@ namespace {
 		bool RequestBuyMenuTest = false;
 		bool RequestConstructionTest = false, ConstructionTestPassed = false;
 		int ConstructionTestStage = 0;
+		bool ConstructionExpectedAffordable = false;
+		float ConstructionInitialFunds = 0;
 		std::uint64_t ConstructionActionUpdate = 0;
 		bool RequirePurchasePolicyTest = false, PurchasePolicyTestObserved = false, RequirePurchasePricingTest = false;
 		bool RequestInventoryTest=false, InventoryInitialObserved=false, InventoryMutationObserved=false, InventoryReuseObserved=false;
@@ -1149,12 +1151,15 @@ namespace {
 			SpawnDebugStressBatch();
 		}
 		if (!state.HasProtocolSmokeSnapshot) {
-			if (worldStateClient && worldStateClient->HasSnapshot() && !worldStateClient->GetLatestSnapshot().Objects.empty()) {
+			const auto hasActor = [](const WorldStateProtocol::Snapshot& snapshot) {
+				return std::any_of(snapshot.Objects.begin(), snapshot.Objects.end(), [](const auto& object) { return object.Flags == WorldStateProtocol::c_ObjectFlagActor; });
+			};
+			if (worldStateClient && worldStateClient->HasSnapshot() && hasActor(worldStateClient->GetLatestSnapshot())) {
 				state.ProtocolSmokeSnapshot = worldStateClient->GetLatestSnapshot();
 				state.HasProtocolSmokeSnapshot = true;
 			} else if (g_MovableMan.GetMovableObjectCount() > 0) {
 				state.ProtocolSmokeSnapshot = CaptureDebugWorldStateSnapshot();
-				state.HasProtocolSmokeSnapshot = !state.ProtocolSmokeSnapshot.Objects.empty();
+				state.HasProtocolSmokeSnapshot = hasActor(state.ProtocolSmokeSnapshot);
 			}
 		}
 		if (state.RequestHostWorldStateTransition && worldStateServerRequested && worldStateServer &&
@@ -1785,7 +1790,8 @@ namespace {
 		state.Log << "world_state_background_equipment_smoke=" << (backgroundEquipmentPassed ? "passed" : "failed") << '\n' << std::flush;
 		const WorldStateClientReplica::ApplyResult firstApply = replicaSmoke.Apply(worldSnapshot);
 		Vector cameraProbe(320.0F, 240.0F);
-		const std::uint64_t cameraActorId = worldSnapshot.Objects.empty() ? 0 : worldSnapshot.Objects.front().NetworkId;
+		const auto cameraActor = std::find_if(worldSnapshot.Objects.begin(), worldSnapshot.Objects.end(), [](const auto& object) { return object.Flags == WorldStateProtocol::c_ObjectFlagActor; });
+		const std::uint64_t cameraActorId = cameraActor == worldSnapshot.Objects.end() ? 0 : cameraActor->NetworkId;
 		const bool cameraInitiallyResolved = replicaSmoke.AdjustCameraForInterpolation(cameraActorId, cameraProbe);
 		Activity* viewActivity = g_ActivityMan.GetActivity();
 		Actor* previousViewActor = viewActivity ? viewActivity->GetControlledActor(Players::PlayerOne) : nullptr;
@@ -1803,9 +1809,9 @@ namespace {
 		const WorldStateClientReplica::ApplyResult repeatedApply = replicaSmoke.Apply(worldSnapshot);
 		WorldStateProtocol::Snapshot interpolationTarget = worldSnapshot;
 		interpolationTarget.Tick += 3;
-		if (!interpolationTarget.Objects.empty()) {
-			interpolationTarget.Objects.front().PositionX += 30.0F;
-			interpolationTarget.Objects.front().Rotation += c_TwoPI - 0.2F;
+		for (auto& object : interpolationTarget.Objects) if (object.NetworkId == cameraActorId) {
+			object.PositionX += 30.0F;
+			object.Rotation += c_TwoPI - 0.2F;
 		}
 		const WorldStateClientReplica::ApplyResult interpolationApply = replicaSmoke.Apply(interpolationTarget);
 		const std::uint32_t interpolatedObjectCount = replicaSmoke.AdvanceInterpolation();
@@ -3243,7 +3249,7 @@ void RunGameLoop() {
 					const auto& snapshot = worldStateClient->GetLatestSnapshot();
 					const auto& player = snapshot.Players[slot];
 					if (player.ActiveHuman) {
-						if (snapshot.ActivityState == 2) g_FrameMan.ApplyNetworkScreenText("Place your brain, then press F6 when ready", 0, false);
+						if (snapshot.ActivityState == 2) g_FrameMan.ApplyNetworkScreenText("F7: objects | B: brain placement | F6: ready", 0, false);
 						else g_FrameMan.ApplyNetworkScreenText(player.ScreenText, static_cast<int>(player.TextBlinkInterval), player.TextCentered);
 						if (System::IsDebugRun() && !GetDebugRunState().NetworkScreenTextVerified && player.ScreenText == "Network HUD: Привет, Ёжик!") {
 							const bool applied = g_FrameMan.GetScreenText() == player.ScreenText &&
@@ -3359,6 +3365,28 @@ void RunGameLoop() {
 						const std::string image = UTF8::PathToString(uiTest.OutputDirectory.filename()) + "/debug-run-construction-preview.png";
 						const int saved = g_FrameMan.SaveScreenToPNGBlocking(image);
 						uiTest.Log << "construction_preview_capture=" << (saved == 0 ? "passed" : "failed") << '\n' << std::flush;
+						const auto* gun = dynamic_cast<const SceneObject*>(g_PresetMan.GetEntityPreset("HDFirearm", "AK-47", "Ronin.rte"));
+						if (saved == 0 && worldStateConstructionMenu->OpenPicker() && worldStateConstructionMenu->GetPicker()->SelectGroupByName("Weapons") && worldStateConstructionMenu->SelectObject(gun)) {
+							uiTest.ConstructionTestStage = 10; uiTest.ConstructionActionUpdate = uiTest.SimulationUpdates;
+						}
+					} else if (uiTest.ConstructionTestStage == 10 && uiTest.SimulationUpdates >= uiTest.ConstructionActionUpdate + 30) {
+						const std::string image = UTF8::PathToString(uiTest.OutputDirectory.filename()) + "/debug-run-construction-catalog.png";
+						const int saved = g_FrameMan.SaveScreenToPNGBlocking(image);
+						uiTest.Log << "construction_catalog_capture=" << (saved == 0 ? "passed" : "failed") << '\n' << std::flush;
+						worldStateConstructionMenu->GetPicker()->SetEnabled(false);
+						uiTest.ConstructionInitialFunds = snapshot.TeamFunds[snapshot.Players[slot].Team];
+						uiTest.ConstructionExpectedAffordable = uiTest.ConstructionInitialFunds >= 160;
+						if (saved == 0 && worldStateConstructionMenu->PlaceObject(*worldStateClient, Vector(400 + 100 * slot, 30))) uiTest.ConstructionTestStage = 11;
+					} else if (uiTest.ConstructionTestStage == 11 && !worldStateConstructionMenu->IsPending() &&
+					           worldStateConstructionMenu->LastAccepted() == uiTest.ConstructionExpectedAffordable &&
+					           (uiTest.ConstructionExpectedAffordable ? worldStateConstructionMenu->LastChargedCost() > 0 : worldStateConstructionMenu->LastRejection() == "insufficient_funds") &&
+					           snapshot.TeamFunds[snapshot.Players[slot].Team] == uiTest.ConstructionInitialFunds - worldStateConstructionMenu->LastChargedCost()) {
+						uiTest.Log << "construction_object_ui=passed purchased=" << uiTest.ConstructionExpectedAffordable << '\n' << std::flush;
+						uiTest.ConstructionTestStage = 12; uiTest.ConstructionActionUpdate = uiTest.SimulationUpdates;
+					} else if (uiTest.ConstructionTestStage == 12 && uiTest.SimulationUpdates >= uiTest.ConstructionActionUpdate + 30) {
+						const std::string image = UTF8::PathToString(uiTest.OutputDirectory.filename()) + "/debug-run-construction-object.png";
+						const int saved = g_FrameMan.SaveScreenToPNGBlocking(image);
+						uiTest.Log << "construction_object_preview_capture=" << (saved == 0 ? "passed" : "failed") << '\n' << std::flush;
 						if (saved == 0 && worldStateConstructionMenu->SetReady(*worldStateClient, true)) uiTest.ConstructionTestStage = 2;
 					} else if (uiTest.ConstructionTestStage == 2 && snapshot.ActivityState == 4 && slot >= 0 && snapshot.Players[slot].ControlledActorId != 0) {
 						uiTest.ConstructionTestPassed = true; uiTest.ConstructionTestStage = 3;
