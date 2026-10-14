@@ -22,6 +22,8 @@
 #include "WorldStateSoundCapture.h"
 #include "TimerMan.h"
 #include "SoundPlaybackClock.h"
+#include "WorldStateAttachments.h"
+#include "Actor.h"
 
 #include <algorithm>
 #include <utility>
@@ -665,6 +667,33 @@ void WorldStateServerSession::Update(std::uint32_t simulationTick) {
 	g_PerformanceMan.StartPerformanceMeasurement(PerformanceMan::WorldStateSnapshot);
 	const auto snapshotCaptureStarted = std::chrono::steady_clock::now();
 	const WorldStateProtocol::Snapshot snapshot = m_SnapshotBuilder.Capture(simulationTick);
+	WorldStateProtocol::ConstructionState constructionState;
+	constructionState.SceneRevision = snapshot.SceneRevision;
+	constructionState.ActivityState = snapshot.ActivityState;
+	if (const auto* activity = dynamic_cast<const GameActivity*>(g_ActivityMan.GetActivity())) {
+		for (int player = 0; player < Players::MaxPlayerCount; ++player) {
+			auto& target = constructionState.Players[player];
+			target.Active = activity->PlayerActive(player) && activity->PlayerHuman(player);
+			if (!target.Active) continue;
+			target.Team = static_cast<std::int16_t>(activity->GetTeamOfPlayer(player));
+			if (snapshot.ActivityState != Activity::Editing) continue;
+			target.Ready = activity->IsNetworkConstructionReady(player);
+			const auto* brain = g_SceneMan.GetScene() ? dynamic_cast<const Actor*>(g_SceneMan.GetScene()->GetResidentBrain(player)) : nullptr;
+			if (!brain) continue;
+			target.Brain.emplace();
+			auto& state = *target.Brain;
+			state.NetworkId = static_cast<std::uint64_t>(brain->GetUniqueID());
+			state.ClassName = brain->GetClassName(); state.ModuleName = brain->GetModuleName(); state.PresetName = brain->GetPresetName();
+			state.Flags = WorldStateProtocol::c_ObjectFlagActor; state.Team = target.Team;
+			state.PositionX = brain->GetPos().GetX(); state.PositionY = brain->GetPos().GetY();
+			state.Rotation = brain->GetRotAngle(); state.HFlipped = brain->IsHFlipped();
+			state.SpriteFrame = static_cast<std::uint16_t>(std::min(brain->GetFrame(), 65535U));
+			state.Health = brain->GetHealth(); state.AimAngle = brain->GetAimAngle(false); state.ActorStatus = static_cast<std::uint8_t>(brain->GetStatus());
+			if (!WorldStateAttachments::Capture(*brain, state)) { target.Brain.reset(); Log("WARNING: construction brain attachment capture failed"); }
+		}
+	}
+	if (++m_Sequence == 0) ++m_Sequence;
+	const auto constructionSequence = m_Sequence;
 	if ((snapshot.ActivityClassName.empty() || snapshot.ActivityPreset.empty() || snapshot.ScenePreset.empty()) && !m_DebugEmptyWorldSnapshotSmokeEnabled) {
 		g_PerformanceMan.StopPerformanceMeasurement(PerformanceMan::WorldStateSnapshot);
 		if (!m_LoggedWaitingForWorldState) {
@@ -677,6 +706,7 @@ void WorldStateServerSession::Update(std::uint32_t simulationTick) {
 	++m_SnapshotCaptureWindowSamples;
 	m_LastSnapshotObjectCount = snapshot.Objects.size();
 	g_PerformanceMan.StopPerformanceMeasurement(PerformanceMan::WorldStateSnapshot);
+	if (!m_Transport.BroadcastConstructionState(constructionState, constructionSequence)) Log("ERROR: construction state send failed");
 	WorldStateTransport::SnapshotTransmissionMetrics transmissionMetrics;
 	if (!m_Transport.BroadcastSnapshot(snapshot, ++m_Sequence, &transmissionMetrics)) {
 		Log("ERROR: failed to encode or broadcast world snapshot");

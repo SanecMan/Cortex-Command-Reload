@@ -54,7 +54,8 @@ enum class MessageType : std::uint8_t {
 	PurchasePolicy = 9,
 	SoundEvents = 10,
 	ConstructionRequest = 11,
-	ConstructionResult = 12
+	ConstructionResult = 12,
+	ConstructionState = 13
 };
 
 enum class TerrainLayer : std::uint8_t {

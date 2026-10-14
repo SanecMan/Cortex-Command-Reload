@@ -1,5 +1,36 @@
 # World-state protocol
 
+## Resident-brain construction state
+
+Message kind 13 carries construction state separately from the v29 world
+snapshot. The existing snapshot layout is unchanged. A nonzero envelope sequence
+and scene revision identify the message, followed by Activity state and four
+player records: active/ready booleans, team, and an optional resident Actor state
+using the existing object/attachment codec. Brain IDs identify residents within
+this stream; they are not the simulation's snapshot network IDs. The packet limit
+is 512 KiB. Inactive slots must contain no brain/readiness/team, and non-editing
+messages must contain no residents or readiness. Invalid flags, duplicate brain
+IDs, wrong teams, malformed object state, UTF-8, bounds and truncation are rejected.
+
+The simulation thread captures native readiness and resident pose/attachments.
+Publication follows the snapshot cadence (20 Hz) while peers are connected.
+Outside editing it sends an empty resident baseline. Client sessions retain the
+latest sequence and clear it on disconnect. A consumer must match scene revision
+before using it. The state does not add residents to MovableMan or execute local
+physics/Lua; a client renderer and construction controls still need integration.
+
+`WorldStateConstructionStateTest.cpp` passed MSVC and MinGW GCC, covering Russian
+identities, atomic decode failure, all truncated prefixes, flags, inactive-slot
+constraints, team/ID consistency, invalid coordinates/text, packet bounds and
+clearing on transition. `ResidentBrainState` passed two device-free clients in
+11.89 seconds: both received their own resident position before readiness, then
+required resident/readiness clearing in running state, distinct controlled actors
+1/2, revision 1 and 131 further server ticks after disconnect. Full content,
+UTF-8/objective/spawn preflight also passed (`ResidentStateRegression`, 19.40
+seconds, 127 further ticks). These are test durations, not performance measurements
+or visual validation of a construction interface. Linux CI runs the codec and
+the strengthened brain-start fixture.
+
 ## Construction command codec foundation
 
 `WorldStateConstructionProtocol.h` reserves envelope message kinds 11

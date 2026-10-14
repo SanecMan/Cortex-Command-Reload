@@ -44,6 +44,7 @@ void WorldStateClientSession::Disconnect() {
 	m_SoundQueue.Clear();
 	m_PurchaseResults.clear();
 	m_ConstructionResults.clear();
+	m_ConstructionState = {}; m_ConstructionSequence = 0;
 	m_PurchasePolicy={}; m_PolicySequence=0;
 	m_ReceivedSnapshotCount = 0;
 	m_InputCommandSequence = 0;
@@ -153,6 +154,14 @@ void WorldStateClientSession::Update() {
 		}
 		WorldStateProtocol::PurchaseResult purchase;
 		WorldStateProtocol::ConstructionResult construction;
+		WorldStateProtocol::ConstructionState constructionState;
+		std::uint32_t constructionSequence = 0;
+		if (WorldStateProtocol::DecodeConstructionState(snapshotPayload, constructionState, constructionSequence)) {
+			if (!m_ConstructionSequence || static_cast<std::int32_t>(constructionSequence - m_ConstructionSequence) > 0) {
+				m_ConstructionState = std::move(constructionState); m_ConstructionSequence = constructionSequence;
+			}
+			continue;
+		}
 		if (WorldStateProtocol::DecodeConstructionResult(snapshotPayload, construction)) {
 			if (m_ConstructionResults.size() >= 64) m_ConstructionResults.pop_front();
 			m_ConstructionResults.push_back(std::move(construction));

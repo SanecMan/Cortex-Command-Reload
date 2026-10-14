@@ -162,6 +162,11 @@ bool WorldStateTransport::SendConstructionResult(const RakNet::AddressOrGUID& ta
 	return WorldStateProtocol::EncodeConstructionResult(result, packet) && Send(target, packet, false, RELIABLE_ORDERED);
 }
 
+bool WorldStateTransport::BroadcastConstructionState(const WorldStateProtocol::ConstructionState& state, std::uint32_t sequence) {
+	std::vector<std::uint8_t> packet;
+	return WorldStateProtocol::EncodeConstructionState(state, sequence, packet) && Send(RakNet::UNASSIGNED_SYSTEM_ADDRESS, packet, true, RELIABLE_ORDERED);
+}
+
 bool WorldStateTransport::SendPurchaseResult(const RakNet::AddressOrGUID& target, const WorldStateProtocol::PurchaseResult& result) {
 	std::vector<std::uint8_t> packet;
 	return WorldStateProtocol::EncodePurchaseResult(result, packet) && Send(target, packet, false);

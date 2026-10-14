@@ -59,6 +59,10 @@ jobs:
         run: |
           g++-13 -std=c++20 -Wall -Wextra -I Source/System Tools/WorldStateConstructionTest.cpp -o build-server/construction-test
           build-server/construction-test
+      - name: Verify resident brain state codec
+        run: |
+          g++-13 -std=c++20 -Wall -Wextra -I Source/System Tools/WorldStateConstructionStateTest.cpp -o build-server/construction-state-test
+          build-server/construction-state-test
       - name: Verify scene load generations
         run: |
           g++-13 -std=c++20 -Wall -Wextra -I Source/System Tools/SceneLoadGenerationTest.cpp -o build-server/scene-generation-test
