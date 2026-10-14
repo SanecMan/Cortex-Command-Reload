@@ -119,6 +119,13 @@ jobs:
           --probe-clients --probe-seconds 30 --input-silence --restart-with-clients --restart-count 3 --require-control
           --activity-class GAScripted --activity "Bunker Breach"
           --scene "Zekarra Mining Outpost" --require-players 2
+      - name: Verify disconnected and empty rosters
+        run: >-
+          python Tools/run_server_smoke.py --exe build-server/CortexCommandServer
+          --game-dir . --output-prefix LinuxDisconnectedRosterCI --timeout 300
+          --probe-clients --probe-seconds 15 --restart-with-clients --disconnect-one-restart
+          --check-deferred-restart --require-control --require-players 2
+          --activity-class GAScripted --activity "Bunker Breach" --scene "Zekarra Mining Outpost"
       - name: Package server
         run: |
           mkdir -p build-server/package
@@ -146,6 +153,7 @@ jobs:
             ScreenShots/LinuxPackagedCI/
             ScreenShots/LinuxBrainVsBrainCI/
             ScreenShots/LinuxRosterRestartCI/
+            ScreenShots/LinuxDisconnectedRosterCI/
             build-server/meson-logs/
             build-server/runtime-dependencies.txt
             build-server/package-runtime-dependencies.txt

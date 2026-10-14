@@ -24,6 +24,7 @@ int RunClientProbe(const std::vector<std::string>& arguments) {
 	bool requireText = false, inputSilence = false, requireObjectives = false, requireControl = false;
 	unsigned int probeSeconds = 3;
 	unsigned int minimumRevision = 2;
+	unsigned int expectedHumans = 0;
 	if (arguments.size() < 4 || arguments[2].empty()) {
 		std::cerr << "Usage: CortexCommandServer --probe-client ADDRESS PORT [--screen-text] [--probe-seconds 3..3600] [--input-silence]\n"; return 2;
 	}
@@ -31,6 +32,13 @@ int RunClientProbe(const std::vector<std::string>& arguments) {
 		if (arguments[index] == "--screen-text") requireText = true;
 		else if (arguments[index] == "--objectives") requireObjectives = true;
 		else if (arguments[index] == "--require-control") requireControl = true;
+		else if (arguments[index] == "--expected-humans" && index + 1 < arguments.size()) {
+			const auto& value = arguments[++index];
+			const auto number = std::from_chars(value.data(), value.data() + value.size(), expectedHumans);
+			if (number.ec != std::errc{} || number.ptr != value.data() + value.size() || expectedHumans < 1 || expectedHumans > 4) {
+				std::cerr << "Expected human count must be 1..4.\n"; return 2;
+			}
+		}
 		else if (arguments[index] == "--minimum-revision" && index + 1 < arguments.size()) {
 			const auto& value = arguments[++index];
 			const auto number = std::from_chars(value.data(), value.data() + value.size(), minimumRevision);
@@ -78,6 +86,7 @@ int RunClientProbe(const std::vector<std::string>& arguments) {
 			const auto& snapshot = client.GetLatestSnapshot();
 			const int slot = client.GetAssignedPlayerSlot();
 			const auto controlledActor = slot >= 0 ? snapshot.Players[slot].ControlledActorId : 0;
+			const auto humans = std::count_if(snapshot.Players.begin(), snapshot.Players.end(), [](const auto& player) { return player.ActiveHuman; });
 			receivedObjectives = receivedObjectives || std::any_of(snapshot.Objectives.begin(), snapshot.Objectives.end(), [](const auto& objective) {
 				return objective.Description == "Цель сети: Ёжик!" && objective.Team == 0 && objective.Arrow == 0;
 			});
@@ -97,12 +106,13 @@ int RunClientProbe(const std::vector<std::string>& arguments) {
 				}
 				if (client.GetReceivedSnapshotCount() >= 10 && static_cast<std::int32_t>(snapshot.Tick - firstTick) >= 60 &&
 				    std::chrono::steady_clock::now() - started >= std::chrono::seconds(probeSeconds) && (!requireText || receivedText) && (!requireObjectives || receivedObjectives) &&
-				    (!requireControl || (controlledActor != 0 && snapshot.SceneRevision >= minimumRevision))) {
+				    (!requireControl || (controlledActor != 0 && snapshot.SceneRevision >= minimumRevision)) && (!expectedHumans || humans == expectedHumans)) {
 					std::cout << "result=passed snapshots=" << client.GetReceivedSnapshotCount() << " objects=" << snapshot.Objects.size()
 					          << " tick_delta=" << snapshot.Tick - firstTick << " input_queued=" << commands
 					          << " probe_seconds=" << probeSeconds << " silence_windows=" << silenceWindows
 					          << " objectives_received=" << receivedObjectives
 					          << " controlled_actor=" << controlledActor << " scene_revision=" << snapshot.SceneRevision
+					          << " humans=" << humans
 					          << " assigned_slot=" << client.GetAssignedPlayerSlot() << " hud_received=" << receivedText << '\n';
 					client.Disconnect(); return 0;
 				}

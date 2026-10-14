@@ -184,6 +184,36 @@ content/UTF-8/objective headless suite also passed (`ConnectedRosterHeadless`,
 objective stage; the new roster-restart CI scenario is pending. Construction
 editor parity and generic mid-match Lua player admission remain incomplete.
 
+### Restart after disconnects or with an empty server
+
+Before starting a new match, the session now deactivates human slots that have
+no connected peer. It preserves Activity team assignments, CPU configuration
+and the reserved local player in a hosted session. A dedicated `restart` with
+no connected players is deferred: the server logs
+`INFO activity_restart=waiting_for_players`, continues running, then executes
+the requested restart when a player connects. This is an explicitly requested
+new match, not automatic mid-match Lua player admission.
+
+The portable runner supports `--disconnect-one-restart` and
+`--check-deferred-restart`. The first starts two controlled players, disconnects
+one and requires a new revision containing exactly one active human. The second
+disconnects everyone, requests restart, then connects a new player and requires
+a further revision and a controlled actor. Probe `--expected-humans 1..4`
+checks active human count in the received snapshot.
+
+`DisconnectedRosterHeadless` passed both scenarios in 28.36 seconds: revisions
+2/3/4, two initial actor IDs, one human after the subset restart, and one new
+controlled player after the empty-server restart. The server continued for 127
+ticks after disconnect and initialized no video driver. The full device-free
+content/UTF-8/objective suite passed in 45.06 seconds with 131 further ticks.
+The native Final client and matching server passed `DisconnectedRosterDelivered`
+in 35.86 seconds with two GUI connections, distinct controlled actors, exact
+sampled attachment state, audio shutdown and 62 post-disconnect updates.
+These are test durations, not comparative performance measurements. Neutral
+probes do not establish movement/shooting coverage for both players.
+Linux CI includes the subset and empty-server restart scenario; its result
+must be checked separately from these Windows runs.
+
 ### Native objective-point replication (v29)
 
 Activity goals created through `AddObjectivePoint` are now captured by the host

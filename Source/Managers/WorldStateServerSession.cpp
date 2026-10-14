@@ -190,7 +190,15 @@ std::size_t WorldStateServerSession::ConfigureActivityPlayers(Activity& activity
 	std::size_t configuredPlayers = 0;
 	std::vector<int> addedPlayers;
 	auto* gameActivity = dynamic_cast<GameActivity*>(&activity);
-	for (const int playerSlot : GetAssignedPlayerSlots()) {
+	const auto assignedSlots = GetAssignedPlayerSlots();
+	if (beforeStart) {
+		for (int player = Players::PlayerOne; player < Players::MaxPlayerCount; ++player) {
+			if (m_ReserveLocalPlayer && player == Players::PlayerOne) continue;
+			if (activity.PlayerActive(player) && activity.PlayerHuman(player) &&
+			    std::find(assignedSlots.begin(), assignedSlots.end(), player) == assignedSlots.end()) activity.DeactivatePlayer(player);
+		}
+	}
+	for (const int playerSlot : assignedSlots) {
 		if (playerSlot < (m_ReserveLocalPlayer ? Players::PlayerTwo : Players::PlayerOne) || playerSlot >= Players::MaxPlayerCount ||
 		    (activity.PlayerActive(playerSlot) && activity.PlayerHuman(playerSlot))) {
 			continue;

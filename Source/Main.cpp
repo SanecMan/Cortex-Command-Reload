@@ -2270,6 +2270,7 @@ int RunPersistentHeadlessServer(const ServerConfiguration& config) {
 	std::unique_ptr<SoundContainer> diagnosticSound;
 	AHuman* diagnosticReloadActor = nullptr;
 	bool diagnosticObjectives = false;
+	bool restartAwaitingPlayers = false;
 	auto applyDiagnosticObjectives = [&] {
 		if (auto* activity = dynamic_cast<GameActivity*>(g_ActivityMan.GetActivity())) {
 			Vector position = g_CameraMan.GetScrollTarget(0);
@@ -2410,7 +2411,17 @@ int RunPersistentHeadlessServer(const ServerConfiguration& config) {
 			else log("WARNING unknown console command: " + command);
 		}
 		session.PollNetwork(tick);
+		if (restartAwaitingPlayers && !session.GetAssignedPlayerSlots().empty()) {
+			restartAwaitingPlayers = false;
+			g_ActivityMan.SetRestartActivity();
+		}
 		if (g_ActivityMan.ActivitySetToRestart()) {
+			if (session.GetAssignedPlayerSlots().empty()) {
+				g_ActivityMan.SetRestartActivity(false);
+				restartAwaitingPlayers = true;
+				log("INFO activity_restart=waiting_for_players");
+				continue;
+			}
 			g_MovableMan.CompleteQueuedMOIDDrawings();
 			g_ThreadMan.GetPriorityThreadPool().wait_for_tasks();
 			g_ThreadMan.GetBackgroundThreadPool().wait_for_tasks();
