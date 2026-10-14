@@ -52,7 +52,9 @@ enum class MessageType : std::uint8_t {
 	PurchaseRequest = 7,
 	PurchaseResult = 8,
 	PurchasePolicy = 9,
-	SoundEvents = 10
+	SoundEvents = 10,
+	ConstructionRequest = 11,
+	ConstructionResult = 12
 };
 
 enum class TerrainLayer : std::uint8_t {

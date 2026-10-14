@@ -1,5 +1,56 @@
 # World-state protocol
 
+## Construction command codec foundation
+
+`WorldStateConstructionProtocol.h` reserves envelope message kinds 11
+(`ConstructionRequest`) and 12 (`ConstructionResult`). The v29 snapshot layout
+and existing messages are unchanged. These codecs are not yet routed by the
+sessions or exposed by a client construction UI; they do not establish playable
+networked construction. Runtime integration must validate permissions, content,
+ownership, scene bounds, native brain placement and readiness before modifying
+the authoritative scene.
+
+Both packets use the existing 16-byte envelope and carry a nonzero request ID
+in its sequence field. The maximum total packet size is 4096 bytes. Request
+bodies start with a nonzero uint32 scene revision and a uint8 action:
+
+- 0, PlaceBrain: X/Y/rotation float32 and uint8 horizontal flip. The server
+  selects the player's allowed brain; there is no client-supplied brain preset.
+- 1, PlaceObject: the same pose, followed by nonempty UTF-8 class/module/preset
+  identities, each with the existing uint16 byte length and 1024-byte limit.
+- 2, RemoveObject: nonzero uint64 server-assigned construction object ID.
+- 3, SetReady: a strict uint8 boolean, supporting both ready and cancellation.
+
+Requests carry neither a player slot nor a price. The authenticated peer must
+determine the slot, and the server must determine costs. The codec rejects
+nonfinite poses, invalid actions/booleans/UTF-8, oversized/truncated packets,
+trailing bytes, zero IDs/revisions and fields unused by the selected action.
+Coordinates are only checked for finiteness here; scene bounds and placement
+permissions belong to the runtime validator. A construction object ID must not
+be interpreted as a raw pointer or trusted without an ownership check.
+
+Result bodies carry uint32 scene revision, uint8 acceptance, float32 charged
+cost, uint64 construction object ID and a UTF-8 reason string. Accepted results
+have an empty reason and finite nonnegative cost. Rejections require a reason,
+zero cost and zero object ID. A zero object ID is valid for successful operations
+that do not create an object. Both decoders leave the caller's output unchanged
+on failure.
+
+`Tools/WorldStateConstructionTest.cpp` passed MSVC and MinGW GCC. It covers all
+four request forms, positive/negative responses, 64-bit IDs, Russian identities
+and reasons, every truncated prefix, unknown actions, reserved header bits,
+invalid flags, NaN on the wire, Infinity at encode, trailing bytes with a corrected
+body length, unused fields, string/packet bounds and decode-output atomicity.
+The Linux workflow compiles/runs the same codec test.
+
+Windows Meson client/server and native Final builds completed. The headless
+content/UTF-8/objective regression passed (`ConstructionCodecHeadless`, 44.63
+seconds, 123 further ticks). A graphical Bunker Breach check failed an existing
+replica membership gate: 210 live objects versus 211 expected, with one missing
+`AHuman/Browncoats.rte/Exterminator` (`ConstructionCodecVisual`). This is not
+construction gameplay validation or evidence that the missing-object issue is
+resolved. The diagnostic identity details are retained for investigation.
+
 ## v29 native objective points
 
 Full snapshots carry ordered `GameActivity` objective points, before the player
