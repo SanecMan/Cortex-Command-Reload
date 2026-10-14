@@ -92,6 +92,7 @@
 #include "WorldStateTransport.h"
 #include "WorldStateSnapshotBuilder.h"
 #include "WorldStateClientSession.h"
+#include "SceneEditorGUI.h"
 #include "WorldStateClientReplica.h"
 #include "WorldStateAttachments.h"
 #include "WorldStateServerSession.h"
@@ -345,6 +346,8 @@ namespace {
 		bool RequestBuyMenuTest = false;
 		bool RequestConstructionTest = false, ConstructionTestPassed = false;
 		bool RequestDeploymentTest = false;
+		bool RequireConstructionPricingTest = false;
+		float ConstructionQuotedCost = 0;
 		std::uint64_t ConstructionDeploymentActorId = 0;
 		int ConstructionDeploymentPistols = 0;
 		float ConstructionDeploymentFunds = 0;
@@ -487,6 +490,7 @@ namespace {
 			if (argument == "-debug-run-world-state-purchase") state.RequestPurchaseTest = true;
 			if (argument == "-debug-run-world-state-buy-menu") state.RequestBuyMenuTest = true;
 			if (argument == "-debug-run-world-state-construction") state.RequestConstructionTest = true;
+			if (argument == "-debug-run-world-state-construction-pricing") { state.RequestConstructionTest = true; state.RequireConstructionPricingTest = true; }
 			if (argument == "-debug-run-world-state-deployment") { state.RequestConstructionTest = true; state.RequestDeploymentTest = true; }
 			if (argument == "-debug-run-world-state-purchase-policy") { state.RequestBuyMenuTest=true; state.RequirePurchasePolicyTest=true; }
 			if (argument == "-debug-run-world-state-purchase-pricing") { state.RequestBuyMenuTest=true; state.RequirePurchasePolicyTest=true; state.RequirePurchasePricingTest=true; }
@@ -2422,6 +2426,20 @@ int RunPersistentHeadlessServer(const ServerConfiguration& config) {
 			}
 			else if (command == "debug-inventory-create") log(CreateWorldStateInventoryFixture() ? "INFO debug_inventory=create_passed" : "ERROR debug_inventory=create_failed");
 			else if (command == "debug-inventory-mutate") log(MutateWorldStateInventoryFixture() ? "INFO debug_inventory=mutation_passed" : "ERROR debug_inventory=mutation_failed");
+			else if (command == "debug-construction-pricing") {
+				auto* activity = dynamic_cast<GameActivity*>(g_ActivityMan.GetActivity());
+				const int module = g_PresetMan.GetModuleID("Coalition.rte");
+				int applied = 0;
+				if (activity && activity->GetActivityState() == Activity::Editing && module > 0) {
+					for (int player = 0; player < Players::MaxPlayerCount; ++player) {
+						if (!activity->PlayerActive(player) || !activity->PlayerHuman(player)) continue;
+						if (auto* editor = activity->GetEditorGUI(player)) {
+							editor->SetNativeTechModule(module); editor->SetForeignCostMultiplier(2.0F); ++applied;
+						}
+					}
+				}
+				log("INFO debug_construction_pricing=applied players=" + std::to_string(applied));
+			}
 			else if (command == "debug-purchase-policy" || command == "debug-purchase-pricing") {
 				auto* activity=dynamic_cast<GameActivity*>(g_ActivityMan.GetActivity());
 				BuyMenuGUI* menu=activity ? activity->GetBuyGUI(0) : nullptr;
@@ -3407,7 +3425,9 @@ void RunGameLoop() {
 						if (localDeployment->GetBGArm() && countPistol(localDeployment->GetBGArm()->GetHeldDevice())) ++localPistols;
 						break;
 					}
-					if (uiTest.ConstructionTestStage == 0 && humans == 2 && slot >= 0 && worldStateConstructionMenu->IsActive() && worldStateConstructionMenu->HasAppliedCatalog()) {
+					if (uiTest.ConstructionTestStage == 0 && humans == 2 && slot >= 0 && worldStateConstructionMenu->IsActive() && worldStateConstructionMenu->HasAppliedCatalog() &&
+					    (!uiTest.RequireConstructionPricingTest || (worldStateClient->GetConstructionCatalog().NativeModule == "Coalition.rte" &&
+					     worldStateClient->GetConstructionCatalog().ForeignMultiplier == 2.0F))) {
 						if (worldStateConstructionMenu->PlaceBrain(*worldStateClient, Vector(100 + 100 * slot, 30))) {
 							uiTest.ConstructionTestStage = 1; uiTest.ConstructionActionUpdate = uiTest.SimulationUpdates;
 						}
@@ -3431,13 +3451,16 @@ void RunGameLoop() {
 						uiTest.Log << "construction_catalog_capture=" << (saved == 0 ? "passed" : "failed") << '\n' << std::flush;
 						worldStateConstructionMenu->GetPicker()->SetEnabled(false);
 						uiTest.ConstructionInitialFunds = snapshot.TeamFunds[snapshot.Players[slot].Team];
-						uiTest.ConstructionExpectedAffordable = uiTest.ConstructionInitialFunds >= 160;
+						uiTest.ConstructionQuotedCost = worldStateConstructionMenu->GetSelectedCost();
+						uiTest.ConstructionExpectedAffordable = uiTest.ConstructionInitialFunds >= uiTest.ConstructionQuotedCost;
+						if (uiTest.RequireConstructionPricingTest) RTEAssert(uiTest.ConstructionQuotedCost == 80, "Foreign construction quote did not match server metadata");
 						if (saved == 0 && worldStateConstructionMenu->PlaceObject(*worldStateClient, Vector(400 + 100 * slot, 30))) uiTest.ConstructionTestStage = 11;
 					} else if (uiTest.ConstructionTestStage == 11 && !worldStateConstructionMenu->IsPending() &&
 					           worldStateConstructionMenu->LastAccepted() == uiTest.ConstructionExpectedAffordable &&
-					           (uiTest.ConstructionExpectedAffordable ? worldStateConstructionMenu->LastChargedCost() > 0 : worldStateConstructionMenu->LastRejection() == "insufficient_funds") &&
+					           (uiTest.ConstructionExpectedAffordable ? worldStateConstructionMenu->LastChargedCost() == uiTest.ConstructionQuotedCost : worldStateConstructionMenu->LastRejection() == "insufficient_funds") &&
 					           snapshot.TeamFunds[snapshot.Players[slot].Team] == uiTest.ConstructionInitialFunds - worldStateConstructionMenu->LastChargedCost()) {
 						uiTest.Log << "construction_object_ui=passed purchased=" << uiTest.ConstructionExpectedAffordable << '\n' << std::flush;
+						if (uiTest.RequireConstructionPricingTest) uiTest.Log << "construction_pricing_ui=passed quoted=" << uiTest.ConstructionQuotedCost << " charged=" << worldStateConstructionMenu->LastChargedCost() << '\n' << std::flush;
 						uiTest.ConstructionObjectCost = worldStateConstructionMenu->LastChargedCost();
 						uiTest.ConstructionTestStage = 12; uiTest.ConstructionActionUpdate = uiTest.SimulationUpdates;
 					} else if (uiTest.ConstructionTestStage == 12 && uiTest.SimulationUpdates >= uiTest.ConstructionActionUpdate + 30) {

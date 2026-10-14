@@ -34,8 +34,25 @@ CatalogIntegrationFull passed the full headless UTF-8/config/screen-text/objecti
 regression in 44.90 seconds with 131 further ticks. Native Final compiled and
 linked; the delivered root client/server pair passed CatalogIntegrationDelivered
 in 56.41 seconds with 62 server updates after disconnect. Nondefault filters,
-live policy changes, missing-module UI and reconnect catalog replacement still
-require focused runtime coverage.
+missing-module UI and reconnect catalog replacement still require focused
+runtime coverage.
+
+ConstructionPricingVerified passed the nondefault pricing fixture in 51.79
+seconds with two graphical clients and 63 server updates after disconnect. After
+both clients connected, the disposable server console command
+`debug-construction-pricing` set both native editors to Coalition.rte and foreign
+multiplier 2 through normal editor setters. Catalog sequences advanced from 1/2
+to 3/4. Clients waited for the changed metadata before placing brains and opening
+the picker. Ronin AK-47 quoted 80; one client paid exactly 80, and the other had
+insufficient funds and paid zero. All existing terrain/removal/start/menu/audio
+checks passed. Run this fixture using RunDedicatedServerSmoke.ps1
+`-CheckConstructionPricing` with the Skirmish Defense/Ketanot Hills fixture.
+The first attempt's client runtime checks passed, but its runner rejected CRLF
+log endings; the verifier was corrected and the full scenario rerun. Faction
+skin application was visually inspected; the selected Ronin row was collapsed
+in that capture, so the test does not establish a visible AK-47 price screenshot.
+This pricing test used Meson binaries; root Final still corresponds to the
+previous catalog integration delivery.
 
 The standalone test passed MSVC and MinGW GCC, including Russian names, round
 trip, all truncated prefixes, malformed envelope/version/type/reserved/length,

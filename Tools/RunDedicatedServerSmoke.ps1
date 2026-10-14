@@ -16,6 +16,7 @@ param(
     [switch]$RequireControlledActor,
     [switch]$CheckLatePlayerJoin,
     [switch]$CheckConstruction,
+    [switch]$CheckConstructionPricing,
     [switch]$CheckDeployment,
     [ValidatePattern('^[^"\r\n]+$')]
     [string]$TeamTech,
@@ -45,6 +46,10 @@ param(
     [int]$TimeoutSeconds = 360
 )
 $ErrorActionPreference = 'Stop'
+if ($CheckConstructionPricing) {
+    if ($CheckDeployment) { throw 'Run construction pricing independently from deployment pricing.' }
+    $CheckConstruction = $true
+}
 if ($CheckDeployment) {
     if ($TeamTech -and $TeamTech -ne 'Coalition.rte') { throw 'The deployment fixture requires Coalition.rte.' }
     $CheckConstruction = $true; $TeamTech = 'Coalition.rte'
@@ -183,6 +188,7 @@ try {
 		if ($CheckPurchasePricing) { $purchaseArguments = @('-debug-run-world-state-purchase-pricing') }
 		if ($CheckInventory) { $purchaseArguments = @('-debug-run-world-state-inventory') }
         if ($CheckConstruction) { $purchaseArguments = @('-debug-run-world-state-construction') }
+        if ($CheckConstructionPricing) { $purchaseArguments = @('-debug-run-world-state-construction-pricing') }
         if ($CheckDeployment) { $purchaseArguments = @('-debug-run-world-state-deployment') }
         $frameCount = if ($CheckStaggeredSound -and $index -eq 1) { '6000' } else { '600' }
         if ($CheckConstruction) { $frameCount = '1800' }
@@ -263,6 +269,7 @@ try {
     $screenTextFixtureTimer = [Diagnostics.Stopwatch]::StartNew()
     $fundsChanged = $false
     $policyChanged = $false
+    $constructionPricingChanged = $false
     $inventoryMutated = $false
     $inventoryCreated = $false
     $reloadHudCreated = $false; $reloadHudChanged = $false
@@ -277,6 +284,17 @@ try {
                 $rosterReady = $rosterReady -and ((Read-Report $rosterReport) -match '(?m)^snapshot=')
             }
             if ($rosterReady) { $server.StandardInput.WriteLine('restart'); $server.StandardInput.Flush(); $activityRestarted = $true }
+        }
+        if ($CheckConstructionPricing -and !$constructionPricingChanged) {
+            $constructionClientsReady = $true
+            foreach ($index in 1..2) {
+                $path = Join-Path $gameDirectory "ScreenShots\$OutputPrefix-Client$index\WorldStateClient.log"
+                $constructionClientsReady = $constructionClientsReady -and ((Read-Report $path) -match '(?m)^snapshot=')
+            }
+            if ($constructionClientsReady) {
+                $server.StandardInput.WriteLine('debug-construction-pricing'); $server.StandardInput.Flush()
+                $constructionPricingChanged = $true
+            }
         }
         if ($CheckScreenText) {
             # Activity updates may clear ordinary messages while clients load.
@@ -461,6 +479,7 @@ try {
         if ($EnableAudio -and $clientReport -notmatch '(?m)^audio_shutdown_complete\r?$') { throw 'Client audio shutdown was not verified.' }
         $clientNetwork = Read-Report (Join-Path $clientDirectory 'WorldStateClient.log')
         if ($CheckConstruction -and ($clientReport -notmatch '(?m)^world_state_construction_ui=passed' -or $clientReport -notmatch '(?m)^construction_preview_capture=passed' -or $clientReport -notmatch '(?m)^construction_catalog_capture=passed' -or $clientReport -notmatch '(?m)^construction_catalog_applied=passed' -or $clientReport -notmatch '(?m)^construction_object_ui=passed')) { throw 'Construction UI/preview/catalog/purchase/start did not pass.' }
+        if ($CheckConstructionPricing -and $clientReport -notmatch '(?m)^construction_pricing_ui=passed quoted=80 charged=(0|80)\r?$') { throw 'Server construction pricing was not applied and charged correctly.' }
         if ($CheckConstruction -and $clientReport -notmatch '(?m)^construction_object_preview_capture=passed') { throw 'Object preview was not captured.' }
         if ($CheckDeployment -and ($clientReport -notmatch '(?m)^construction_deployment_ui=passed' -or $clientReport -notmatch '(?m)^construction_deployment_capture=passed')) { throw 'Deployment replica/render capture failed.' }
         if ($CheckDeployment -and $clientNetwork -notmatch '(?m)^client_local_simulation_ticks=0') { throw 'Replica client executed local simulation.' }
