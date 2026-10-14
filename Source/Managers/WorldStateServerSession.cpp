@@ -188,6 +188,7 @@ std::vector<int> WorldStateServerSession::GetAssignedPlayerSlots() const {
 
 std::size_t WorldStateServerSession::ConfigureActivityPlayers(Activity& activity, bool beforeStart) const {
 	std::size_t configuredPlayers = 0;
+	std::vector<int> addedPlayers;
 	auto* gameActivity = dynamic_cast<GameActivity*>(&activity);
 	for (const int playerSlot : GetAssignedPlayerSlots()) {
 		if (playerSlot < (m_ReserveLocalPlayer ? Players::PlayerTwo : Players::PlayerOne) || playerSlot >= Players::MaxPlayerCount ||
@@ -215,11 +216,15 @@ std::size_t WorldStateServerSession::ConfigureActivityPlayers(Activity& activity
 			gameActivity->SetTeamIsCPU(playerTeam, false);
 		}
 		activity.AddPlayer(playerSlot, true, playerTeam, 0.0F);
+		addedPlayers.push_back(playerSlot);
 		++configuredPlayers;
 	}
 
 	if (configuredPlayers > 0 || beforeStart) {
 		activity.SetupPlayers();
+	}
+	if (!beforeStart && gameActivity) {
+		for (int player : addedPlayers) gameActivity->InitializeHumanPlayer(player);
 	}
 	if (beforeStart && gameActivity && activity.GetTeamCount() < activity.GetMinTeamsRequired()) {
 		for (int team = Activity::Teams::TeamOne; team < Activity::Teams::MaxTeamCount; ++team) {

@@ -770,6 +770,118 @@ void GameActivity::SetupPlayers() {
 	}
 }
 
+void GameActivity::InitializeHumanPlayer(int player) {
+	if (player < Players::PlayerOne || player >= Players::MaxPlayerCount || !m_IsActive[player] || !m_IsHuman[player]) return;
+
+	// Set the team associations with each screen displayed
+	g_CameraMan.SetScreenTeam(m_Team[player], ScreenOfPlayer(player));
+	// And occlusion
+	g_CameraMan.SetScreenOcclusion(Vector(), ScreenOfPlayer(player));
+
+	// Allocate and (re)create the Inventory Menu GUIs
+	if (m_InventoryMenuGUI[player]) {
+		m_InventoryMenuGUI[player]->Destroy();
+	} else {
+		m_InventoryMenuGUI[player] = new InventoryMenuGUI;
+	}
+	m_InventoryMenuGUI[player]->Create(&m_PlayerController[player]);
+
+	// Allocate and (re)create the Editor GUIs
+	if (m_pEditorGUI[player])
+		m_pEditorGUI[player]->Destroy();
+	else
+		m_pEditorGUI[player] = new SceneEditorGUI;
+	m_pEditorGUI[player]->Create(&m_PlayerController[player]);
+	m_ReadyToStart[player] = false;
+
+	// Allocate and (re)create the Buy GUIs
+	if (m_pBuyGUI[player])
+		m_pBuyGUI[player]->Destroy();
+	else
+		m_pBuyGUI[player] = new BuyMenuGUI;
+	m_pBuyGUI[player]->Create(&m_PlayerController[player]);
+
+	// Load correct loadouts into buy menu if we're starting a non meta-game activity
+	if (m_pBuyGUI[player]->GetMetaPlayer() == Players::NoPlayer) {
+		int techModuleID = g_PresetMan.GetModuleID(GetTeamTech(GetTeamOfPlayer(player)));
+
+		m_pBuyGUI[player]->SetNativeTechModule(techModuleID);
+		m_pBuyGUI[player]->SetForeignCostMultiplier(1.0);
+		m_pBuyGUI[player]->LoadAllLoadoutsFromFile();
+
+		// Change Editor GUI native tech module so it could load and show correct deployment prices
+		m_pEditorGUI[player]->SetNativeTechModule(techModuleID);
+	}
+
+	////////////////////////////////////
+	// GUI split screen setup
+	// If there are split screens, set up the GUIs to draw and their mouses to point correctly
+	if (g_FrameMan.GetScreenCount() > 1) {
+		// Screen 1 Always upper left corner
+		if (ScreenOfPlayer(player) == 0) {
+			m_pEditorGUI[player]->SetPosOnScreen(0, 0);
+			m_pBuyGUI[player]->SetPosOnScreen(0, 0);
+		} else if (ScreenOfPlayer(player) == 1) {
+			// If both splits, or just Vsplit, then in upper right quadrant
+			if ((g_FrameMan.GetVSplit() && !g_FrameMan.GetHSplit()) || (g_FrameMan.GetVSplit() && g_FrameMan.GetVSplit())) {
+				m_pEditorGUI[player]->SetPosOnScreen(g_WindowMan.GetResX() / 2, 0);
+				m_pBuyGUI[player]->SetPosOnScreen(g_WindowMan.GetResX() / 2, 0);
+			}
+			// If only hsplit, then lower left quadrant
+			else {
+				m_pEditorGUI[player]->SetPosOnScreen(0, g_WindowMan.GetResY() / 2);
+				m_pBuyGUI[player]->SetPosOnScreen(0, g_WindowMan.GetResY() / 2);
+			}
+		}
+		// Screen 3 is lower left quadrant
+		else if (ScreenOfPlayer(player) == 2) {
+			m_pEditorGUI[player]->SetPosOnScreen(0, g_WindowMan.GetResY() / 2);
+			m_pBuyGUI[player]->SetPosOnScreen(0, g_WindowMan.GetResY() / 2);
+		}
+		// Screen 4 is lower right quadrant
+		else if (ScreenOfPlayer(player) == 3) {
+			m_pEditorGUI[player]->SetPosOnScreen(g_WindowMan.GetResX() / 2, g_WindowMan.GetResY() / 2);
+			m_pBuyGUI[player]->SetPosOnScreen(g_WindowMan.GetResX() / 2, g_WindowMan.GetResY() / 2);
+		}
+	}
+
+	// Allocate and (re)create the banners
+	if (m_pBannerRed[player])
+		m_pBannerRed[player]->Destroy();
+	else
+		m_pBannerRed[player] = new GUIBanner;
+	m_pBannerRed[player]->Create("Base.rte/GUIs/Fonts/BannerFontRedReg.png", "Base.rte/GUIs/Fonts/BannerFontRedBlur.png", 8);
+
+	// Allocate and (re)create the banners
+	if (m_pBannerYellow[player])
+		m_pBannerYellow[player]->Destroy();
+	else
+		m_pBannerYellow[player] = new GUIBanner;
+	m_pBannerYellow[player]->Create("Base.rte/GUIs/Fonts/BannerFontYellowReg.png", "Base.rte/GUIs/Fonts/BannerFontYellowBlur.png", 8);
+
+	// Resetting the banner repeat counter
+	m_BannerRepeats[player] = 0;
+
+	// Draw GO! game start notification, if it's a new game
+	if (m_ActivityState == ActivityState::NotStarted) {
+		m_pBannerYellow[player]->ShowText("GO!", GUIBanner::FLYBYLEFTWARD, 1000, Vector(g_FrameMan.GetPlayerFrameBufferWidth(player), g_FrameMan.GetPlayerFrameBufferHeight(player)), 0.5, 1500, 500);
+		g_FrameMan.SetScreenText((player % 2 == 0) ? "Mine Gold and buy more firepower with the funds..." : "...then smash the competing brain to claim victory!", ScreenOfPlayer(player), 0);
+	}
+
+	m_ActorCursor[player].Reset();
+	m_LandingZone[player].Reset();
+
+	// Set the initial landing zones to be above the respective brains, but not for the observer player in a three player game
+	if (m_Brain[player] && !(m_PlayerCount == 3 && ScreenOfPlayer(player) == 3)) {
+		// Also set the brain to be the selected actor at start
+		SwitchToActor(m_Brain[player], player, m_Team[player]);
+		m_ActorCursor[player] = m_Brain[player]->GetPos();
+		m_LandingZone[player].m_X = m_Brain[player]->GetPos().m_X;
+		// Set the observation target to the brain, so that if/when it dies, the view flies to it in observation mode
+		m_ObservationTarget[player] = m_Brain[player]->GetPos();
+	}
+}
+
 int GameActivity::Start() {
 	// Set the split screen config before the Scene (and it SceneLayers, specifially) are loaded
 	uint8_t humanCount = GetHumanCount();
@@ -817,116 +929,7 @@ int GameActivity::Start() {
 	// Set up human players
 
 	for (int player = Players::PlayerOne; player < Players::MaxPlayerCount; ++player) {
-		if (!(m_IsActive[player] && m_IsHuman[player]))
-			continue;
-
-		// Set the team associations with each screen displayed
-		g_CameraMan.SetScreenTeam(m_Team[player], ScreenOfPlayer(player));
-		// And occlusion
-		g_CameraMan.SetScreenOcclusion(Vector(), ScreenOfPlayer(player));
-
-		// Allocate and (re)create the Inventory Menu GUIs
-		if (m_InventoryMenuGUI[player]) {
-			m_InventoryMenuGUI[player]->Destroy();
-		} else {
-			m_InventoryMenuGUI[player] = new InventoryMenuGUI;
-		}
-		m_InventoryMenuGUI[player]->Create(&m_PlayerController[player]);
-
-		// Allocate and (re)create the Editor GUIs
-		if (m_pEditorGUI[player])
-			m_pEditorGUI[player]->Destroy();
-		else
-			m_pEditorGUI[player] = new SceneEditorGUI;
-		m_pEditorGUI[player]->Create(&m_PlayerController[player]);
-		m_ReadyToStart[player] = false;
-
-		// Allocate and (re)create the Buy GUIs
-		if (m_pBuyGUI[player])
-			m_pBuyGUI[player]->Destroy();
-		else
-			m_pBuyGUI[player] = new BuyMenuGUI;
-		m_pBuyGUI[player]->Create(&m_PlayerController[player]);
-
-		// Load correct loadouts into buy menu if we're starting a non meta-game activity
-		if (m_pBuyGUI[player]->GetMetaPlayer() == Players::NoPlayer) {
-			int techModuleID = g_PresetMan.GetModuleID(GetTeamTech(GetTeamOfPlayer(player)));
-
-			m_pBuyGUI[player]->SetNativeTechModule(techModuleID);
-			m_pBuyGUI[player]->SetForeignCostMultiplier(1.0);
-			m_pBuyGUI[player]->LoadAllLoadoutsFromFile();
-
-			// Change Editor GUI native tech module so it could load and show correct deployment prices
-			m_pEditorGUI[player]->SetNativeTechModule(techModuleID);
-		}
-
-		////////////////////////////////////
-		// GUI split screen setup
-		// If there are split screens, set up the GUIs to draw and their mouses to point correctly
-		if (g_FrameMan.GetScreenCount() > 1) {
-			// Screen 1 Always upper left corner
-			if (ScreenOfPlayer(player) == 0) {
-				m_pEditorGUI[player]->SetPosOnScreen(0, 0);
-				m_pBuyGUI[player]->SetPosOnScreen(0, 0);
-			} else if (ScreenOfPlayer(player) == 1) {
-				// If both splits, or just Vsplit, then in upper right quadrant
-				if ((g_FrameMan.GetVSplit() && !g_FrameMan.GetHSplit()) || (g_FrameMan.GetVSplit() && g_FrameMan.GetVSplit())) {
-					m_pEditorGUI[player]->SetPosOnScreen(g_WindowMan.GetResX() / 2, 0);
-					m_pBuyGUI[player]->SetPosOnScreen(g_WindowMan.GetResX() / 2, 0);
-				}
-				// If only hsplit, then lower left quadrant
-				else {
-					m_pEditorGUI[player]->SetPosOnScreen(0, g_WindowMan.GetResY() / 2);
-					m_pBuyGUI[player]->SetPosOnScreen(0, g_WindowMan.GetResY() / 2);
-				}
-			}
-			// Screen 3 is lower left quadrant
-			else if (ScreenOfPlayer(player) == 2) {
-				m_pEditorGUI[player]->SetPosOnScreen(0, g_WindowMan.GetResY() / 2);
-				m_pBuyGUI[player]->SetPosOnScreen(0, g_WindowMan.GetResY() / 2);
-			}
-			// Screen 4 is lower right quadrant
-			else if (ScreenOfPlayer(player) == 3) {
-				m_pEditorGUI[player]->SetPosOnScreen(g_WindowMan.GetResX() / 2, g_WindowMan.GetResY() / 2);
-				m_pBuyGUI[player]->SetPosOnScreen(g_WindowMan.GetResX() / 2, g_WindowMan.GetResY() / 2);
-			}
-		}
-
-		// Allocate and (re)create the banners
-		if (m_pBannerRed[player])
-			m_pBannerRed[player]->Destroy();
-		else
-			m_pBannerRed[player] = new GUIBanner;
-		m_pBannerRed[player]->Create("Base.rte/GUIs/Fonts/BannerFontRedReg.png", "Base.rte/GUIs/Fonts/BannerFontRedBlur.png", 8);
-
-		// Allocate and (re)create the banners
-		if (m_pBannerYellow[player])
-			m_pBannerYellow[player]->Destroy();
-		else
-			m_pBannerYellow[player] = new GUIBanner;
-		m_pBannerYellow[player]->Create("Base.rte/GUIs/Fonts/BannerFontYellowReg.png", "Base.rte/GUIs/Fonts/BannerFontYellowBlur.png", 8);
-
-		// Resetting the banner repeat counter
-		m_BannerRepeats[player] = 0;
-
-		// Draw GO! game start notification, if it's a new game
-		if (m_ActivityState == ActivityState::NotStarted) {
-			m_pBannerYellow[player]->ShowText("GO!", GUIBanner::FLYBYLEFTWARD, 1000, Vector(g_FrameMan.GetPlayerFrameBufferWidth(player), g_FrameMan.GetPlayerFrameBufferHeight(player)), 0.5, 1500, 500);
-			g_FrameMan.SetScreenText((player % 2 == 0) ? "Mine Gold and buy more firepower with the funds..." : "...then smash the competing brain to claim victory!", ScreenOfPlayer(player), 0);
-		}
-
-		m_ActorCursor[player].Reset();
-		m_LandingZone[player].Reset();
-
-		// Set the initial landing zones to be above the respective brains, but not for the observer player in a three player game
-		if (m_Brain[player] && !(m_PlayerCount == 3 && ScreenOfPlayer(player) == 3)) {
-			// Also set the brain to be the selected actor at start
-			SwitchToActor(m_Brain[player], player, m_Team[player]);
-			m_ActorCursor[player] = m_Brain[player]->GetPos();
-			m_LandingZone[player].m_X = m_Brain[player]->GetPos().m_X;
-			// Set the observation target to the brain, so that if/when it dies, the view flies to it in observation mode
-			m_ObservationTarget[player] = m_Brain[player]->GetPos();
-		}
+		InitializeHumanPlayer(player);
 	}
 
 	// Set up the AI controllers for everyone

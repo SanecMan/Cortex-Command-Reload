@@ -114,6 +114,39 @@ The full run took 76.31 seconds with no video initialization. This is a soak
 diagnostic, not a gameplay/visual check. Invalid duration values 2, 3601, text
 and a missing duration were rejected with exit code 2.
 
+### Late human-player initialization
+
+The first `Brain vs Brain` two-active-player run exposed a server access violation
+immediately after late assignment. The cloned Activity had allocated menu objects
+for all slots, but `Start` initialized only the humans present at startup. A newly
+active player's BuyMenu then dereferenced its null controller. The old root PDB
+misidentified this release-server stack; the current link map located
+`Controller::IsMouseControlled` called by `BuyMenuGUI::Update`.
+
+`GameActivity::InitializeHumanPlayer` now contains the existing startup setup for
+inventory, buy/editor menus, banners, camera association and landing-zone state.
+`Start` and late server assignment share it. Late assignment calls it after
+`AddPlayer`/`SetupPlayers`, before the next Activity update. Native Lua gameplay
+callbacks remain on the authoritative server; this does not establish visual
+parity for arbitrary scripted HUDs.
+
+The transport probe also consumes sound, terrain and purchase-result queues
+without rendering or playing them. Otherwise a longer active match accumulated
+sound events and disconnected the diagnostic clients despite a healthy server.
+
+The corrected `BrainVsBrainSoak` passed in 38.81 seconds: slots 0 and 1 each
+received 595 snapshots, 1782 advancing ticks and five silence windows; the host
+neutralized each slot five times. Both exited cleanly; 131 further ticks with
+14 actors were observed after disconnect. There was no video initialization.
+Native `Final|x64` and Meson compiled and linked. The delivered graphical
+menu/screen-text/audio regression passed in 34.04 seconds with two clients and
+63 post-disconnect updates (`LatePlayerInitDelivered`). The extended Brain vs
+Brain test uses device-free clients and does not prove graphical gameplay parity.
+`LatePlayerInitHeadless` also passed the full content/simulation self-test,
+two separate probes, UTF-8 config/screen text and 128 observed ticks in 19.28
+seconds, with no video initialization. Linux CI now includes the two-active-player
+Brain vs Brain scenario with repeated input silence; its result is pending.
+
 The authoritative host neutralizes held buttons, mouse/analog input after one
 second without an accepted fresh input command. This uses a monotonic wall clock,
 independent of simulation speed. The transport connection and player assignment

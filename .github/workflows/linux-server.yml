@@ -97,6 +97,13 @@ jobs:
         run: >-
           python Tools/run_server_smoke.py --exe build-server/CortexCommandServer
           --game-dir . --output-prefix LinuxDedicatedCI --timeout 300 --self-test --probe-clients --screen-text
+      - name: Verify two active players and repeated input silence
+        run: >-
+          python Tools/run_server_smoke.py --exe build-server/CortexCommandServer
+          --game-dir . --output-prefix LinuxBrainVsBrainCI --timeout 300
+          --probe-clients --probe-seconds 15 --input-silence
+          --activity-class GAScripted --activity "Brain vs Brain"
+          --scene "Fredeleig Bunkers" --require-players 2
       - name: Package server
         run: |
           mkdir -p build-server/package
@@ -122,6 +129,7 @@ jobs:
             ScreenShots/LinuxDedicatedCI/
             ScreenShots/LinuxDedicatedCISelfTest/
             ScreenShots/LinuxPackagedCI/
+            ScreenShots/LinuxBrainVsBrainCI/
             build-server/meson-logs/
             build-server/runtime-dependencies.txt
             build-server/package-runtime-dependencies.txt

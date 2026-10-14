@@ -325,6 +325,8 @@ namespace RTE {
 		/// @return An error return value signaling sucess or any particular failure.
 		/// Anything below 0 is an error signal.
 		int Start() override;
+		/// Initialize native per-player menus/banners after a human joins a running activity.
+		void InitializeHumanPlayer(int player);
 
 		/// Pauses and unpauses the game.
 		/// @param pause Whether to pause the game or not. (default: true)
