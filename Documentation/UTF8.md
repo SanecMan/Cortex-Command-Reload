@@ -18,6 +18,8 @@ expected palette color. `HudIconUTF8Visual` passed two native clients connecting
 through the menu and rendering authoritative reload progress at 35% and 75%
 (46.26 seconds, 66 updates after disconnect). Its client-one 35% screenshot was
 visually inspected for the restored reload/ammo icons and Cyrillic screen text.
+The delivered root `Final|x64` client and matching server also passed
+`HudIconUTF8Delivered` (33.95 seconds, two clients, 63 updates after disconnect).
 
 Absolute resource paths remain absolute when resolved by PresetMan. They are
 normalized to generic separators and passed through the same UTF-8/legacy-path
