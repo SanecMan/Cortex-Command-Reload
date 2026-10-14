@@ -406,38 +406,39 @@ bool GUIFont::SupportsCodepoint(std::uint32_t codePoint) {
 	if (UseBitmapFontGlyph(codePoint, false, m_CharIndexCap)) {
 		return codePoint >= 32 && m_Characters[codePoint].m_Width > 0;
 	}
-	return m_TrueTypeFont && stbtt_FindGlyphIndex(&m_TrueTypeFont->m_Info, static_cast<int>(codePoint)) != 0 && GetTrueTypeGlyph(codePoint);
+	return GetTrueTypeGlyph(codePoint) != nullptr;
 }
 
 const GUIFont::TrueTypeGlyph* GUIFont::GetTrueTypeGlyph(std::uint32_t codePoint) {
-	if (!m_TrueTypeFont || stbtt_FindGlyphIndex(&m_TrueTypeFont->m_Info, static_cast<int>(codePoint)) == 0) {
+	if (!m_TrueTypeFont || codePoint > 0x10FFFF || (codePoint >= 0xD800 && codePoint <= 0xDFFF)) {
 		return nullptr;
 	}
-	if (const auto existing = m_TrueTypeFont->m_Glyphs.find(codePoint); existing != m_TrueTypeFont->m_Glyphs.end()) {
+	const int glyphIndex = stbtt_FindGlyphIndex(&m_TrueTypeFont->m_Info, static_cast<int>(codePoint));
+	if (glyphIndex <= 0 || glyphIndex >= m_TrueTypeFont->m_Info.numGlyphs) return nullptr;
+	// Cache by font glyph, so cmap aliases share a raster. The font's own
+	// glyph count bounds storage without permanently rejecting new Unicode.
+	if (const auto existing = m_TrueTypeFont->m_Glyphs.find(glyphIndex); existing != m_TrueTypeFont->m_Glyphs.end()) {
 		return &existing->second;
-	}
-	if (m_TrueTypeFont->m_Glyphs.size() >= 512) {
-		return nullptr;
 	}
 
 	TrueTypeGlyph glyph;
 	int xOffset = 0;
 	int yOffset = 0;
-	unsigned char* bitmap = stbtt_GetCodepointBitmap(&m_TrueTypeFont->m_Info, m_TrueTypeFont->m_Scale, m_TrueTypeFont->m_Scale,
-		static_cast<int>(codePoint), &glyph.m_Width, &glyph.m_Height, &xOffset, &yOffset);
+	unsigned char* bitmap = stbtt_GetGlyphBitmap(&m_TrueTypeFont->m_Info, m_TrueTypeFont->m_Scale, m_TrueTypeFont->m_Scale,
+		glyphIndex, &glyph.m_Width, &glyph.m_Height, &xOffset, &yOffset);
 	if (!bitmap && (glyph.m_Width != 0 || glyph.m_Height != 0)) {
 		return nullptr;
 	}
 	glyph.m_OffsetX = xOffset;
 	glyph.m_OffsetY = static_cast<int>(std::lround(m_TrueTypeFont->m_Ascent * m_TrueTypeFont->m_Scale)) + yOffset;
 	int advance = 0;
-	stbtt_GetCodepointHMetrics(&m_TrueTypeFont->m_Info, static_cast<int>(codePoint), &advance, nullptr);
+	stbtt_GetGlyphHMetrics(&m_TrueTypeFont->m_Info, glyphIndex, &advance, nullptr);
 	glyph.m_Advance = std::max(1, static_cast<int>(std::lround(advance * m_TrueTypeFont->m_Scale)));
 	if (bitmap) {
 		glyph.m_Alpha.assign(bitmap, bitmap + static_cast<std::size_t>(glyph.m_Width) * glyph.m_Height);
 		stbtt_FreeBitmap(bitmap, nullptr);
 	}
-	return &m_TrueTypeFont->m_Glyphs.emplace(codePoint, std::move(glyph)).first->second;
+	return &m_TrueTypeFont->m_Glyphs.emplace(glyphIndex, std::move(glyph)).first->second;
 }
 
 int GUIFont::GetCodepointWidth(std::uint32_t codePoint, bool legacyByte) {

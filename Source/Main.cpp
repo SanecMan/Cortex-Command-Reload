@@ -3671,6 +3671,13 @@ int RunCortexCommand(int argc, char** argv) {
 					if (explicitPixels) destroy_bitmap(explicitPixels);
 					GetDebugRunState().Log << "utf8_wrapped_raster_layout=" << (wrapPassed ? "passed" : "failed") << '\n' << std::flush;
 					contentPassed = contentPassed && wrapPassed;
+					std::size_t unicodeCoverage = 0;
+					for (std::uint32_t cp = 128; cp < 0x3000 && unicodeCoverage < 600; ++cp) {
+						if (iconFont->SupportsCodepoint(cp)) ++unicodeCoverage;
+					}
+					const bool unicodeCachePassed = unicodeCoverage >= 600 && iconFont->SupportsCodepoint(0x416) && iconFont->SupportsCodepoint(0x401);
+					GetDebugRunState().Log << "utf8_glyph_cache_coverage=" << (unicodeCachePassed ? "passed" : "failed") << " supported=" << unicodeCoverage << '\n' << std::flush;
+					contentPassed = contentPassed && unicodeCachePassed;
 					GUITextPanel textInputProbe;
 					textInputProbe.Create(0, 0, 300, 24);
 					textInputProbe.SetFont(iconFont);

@@ -1,5 +1,27 @@
 # UTF-8 text support
 
+TrueType rasters are cached by validated font glyph index. Unicode cmap aliases
+share a raster, and the font's actual glyph count bounds the number of entries.
+The previous arbitrary 512-code-point limit permanently rejected additional
+supported letters, changing coverage/width/rendering depending on earlier text.
+The new cache remains lazy; it does not preload every glyph. Unsupported glyphs
+still use the bitmap question-mark fallback; invalid scalar values/surrogates
+are rejected before TrueType lookup. No font asset or bitmap-symbol API changed.
+
+The real headless regression reproduced the old limit:
+`GlyphCacheBeforeSelfTest` failed with `supported=512`. After the fix,
+`GlyphCacheAfterSelfTest` passed `utf8_glyph_cache_coverage=passed supported=600`,
+plus direct icon rasters, Cyrillic, missing-glyph fallback, text wrapping and
+editing. The wider headless run passed two clients, UTF-8 config/screen text,
+objectives, no video and 129 ticks in 20.70 seconds. `GlyphCacheVisual` passed
+two Meson graphical clients, objective create/clear, attachment-state checks and
+clean audio shutdown in 56.01 seconds with 68 post-disconnect ticks. These are
+functional coverage checks and test durations, not an FPS optimization claim.
+Native MSBuild `Final|x64` compiled and linked. `GlyphCacheDelivered` passed the
+root client/server pair in 32.68 seconds with objective create/clear, UTF-8 text,
+strict attachment checks, clean audio shutdown and 62 post-disconnect ticks.
+Linux validation of the cache change is pending.
+
 Linux CI run `38531330475` for `00cd3b5cb6d` passed build, standalone line-layout
 tests, content self-test (`utf8_wrapped_raster_layout=passed` and
 `utf8_text_input_policy=passed`), two separate clients, UTF-8 CLI/config/screen

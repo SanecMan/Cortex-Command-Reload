@@ -134,6 +134,12 @@ membership, strict attachment state, distinct controlled actors, revision 2 and
 clean audio shutdown. These repeats do not erase the earlier intermittent
 failures or establish their complete cause. Linux run `38549019434` for the
 scene-generation/deletion changes is pending.
+That run subsequently passed. A further six consecutive native graphical roster
+tests passed in 35.04, 35.96, 35.12, 36.05, 37.54 and 38.26 seconds, each with
+two distinct actors, exact sampled replica/attachment state, restart and clean
+audio shutdown (62/63/63/62/63/63 further ticks). The earlier one-object
+membership failure has not been reproduced with identity details and remains an
+open investigation rather than a proven complete fix.
 
 ### Activity teams and connected-roster restart
 
