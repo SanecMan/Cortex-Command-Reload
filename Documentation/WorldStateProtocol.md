@@ -23,8 +23,11 @@ including independent UI pitch, SFX pitch, group pause and explicit-pause retent
 and 62 server ticks after disconnect. Pause/resume markers require queries of the
 actual FMOD channels, rather than just packet receipt. `-CheckSoundMix` requires
 resume after pause. This does not prove audible mix quality or all new command
-combinations. Native Final and Linux v22 verification are pending; root delivery
-remains the validated v21 pair during this work.
+combinations. Native `Final|x64` compiled and linked successfully. The root pair
+was updated to v22 and `SoundMixV22Delivered` passed in 33.22 seconds with two
+audio-enabled menu-connected clients, FMOD channel pause/resume queries,
+container lifetime checks, clean client shutdown and 62 further server ticks
+after disconnect. Linux v22 verification remains pending.
 
 Linux lifecycle-update run `38483629070` (commit `f99ffdecb43`) passed headless
 startup and two external clients in 12.34 seconds, with the extracted package
