@@ -16,8 +16,12 @@ those scalar values produced different nonempty rasters. U+10FFFF matched `?`
 in both pixels and measured width. Cyrillic retained its expected palette color.
 `UnicodeAtlasVisual` passed two menu-connected clients, reload HUD and clean
 audio shutdown in 57.63 seconds with 65 updates after disconnect. These elapsed
-durations describe test runs, not performance comparisons. Native Final is
-being built separately. The older encoded-index icon comparison below describes
+durations describe test runs, not performance comparisons. Native MSBuild
+Final|x64 compiled and linked; the root pair passed `UnicodeAtlasDelivered` in
+34.90 seconds with two clients, reload HUD, UTF-8 screen text, audio shutdown
+and 62 server updates after disconnect. The Meson 35% HUD screenshot was
+visually inspected for ammo/reload icons and Cyrillic text. Linux CI
+`38527037754` for `a6e09fc2ddf` is pending. The older encoded-index icon comparison below describes
 the earlier implementation and is superseded by the direct-atlas regression.
 
 Legacy HUD icons remain compatible with the bitmap atlas: font drawing and

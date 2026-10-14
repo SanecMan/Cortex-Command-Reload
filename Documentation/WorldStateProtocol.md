@@ -94,7 +94,11 @@ standalone Tools/FmodAsyncSoundShutdownTest.cpp passed three cycles of 2248
 samples. The root headless regression passed in 18.92 seconds with two clients,
 127 ticks, input/config/text UTF-8, no video device and clean exits. These checks
 cover the reproduced shutdown failure, not every possible FMOD or mod race.
-Linux verification of this cache-release follow-up remains pending.
+Linux CI `38518778663` for `bec44d60d12` subsequently passed the standalone
+asynchronous-sound shutdown regression, server compilation and two-client
+build-tree/package checks in 11.39/8.41 seconds. Both retained UTF-8 input/text,
+initialized no video device and shut down cleanly on SIGTERM. This Linux
+headless evidence is separate from the Windows graphical/audio repeats.
 
 This is bounded latest-shot reconstruction rather than a queue of every shot:
 bursts can coalesce, removed weapons have no surviving history, and packet
