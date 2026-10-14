@@ -45,9 +45,9 @@ function BunkerBreach:SetupAIVariables()
 	end
 end
 
-function BunkerBreach:SetupHumanAttackerBrains()
+function BunkerBreach:SetupHumanAttackerBrains(onlyPlayer)
 	for player = Activity.PLAYER_1, Activity.MAXPLAYERCOUNT - 1 do
-		if self:PlayerActive(player) and self:PlayerHuman(player) and self:GetTeamOfPlayer(player) == self.attackerTeam then
+		if (onlyPlayer == nil or player == onlyPlayer) and self:PlayerActive(player) and self:PlayerHuman(player) and self:GetTeamOfPlayer(player) == self.attackerTeam then
 			local attackingBrain = self:CreateBrainBot(self:GetTeamOfPlayer(player));
 
 			local brainPosition = Vector(self:GetLZArea(self.attackerTeam):GetRandomPoint().X, 0);
@@ -69,6 +69,33 @@ function BunkerBreach:SetupHumanAttackerBrains()
 			self:SetObservationTarget(attackingBrain.Pos, player);
 			self:SetLandingZone(attackingBrain.Pos, player);
 		end
+	end
+end
+
+function BunkerBreach:OnPlayerJoined(player)
+	if not self:PlayerActive(player) or not self:PlayerHuman(player) or self:GetPlayerBrain(player) then
+		return;
+	end
+	local team = self:GetTeamOfPlayer(player);
+	if team == self.attackerTeam then
+		self:SetupHumanAttackerBrains(player);
+	elseif team == self.defenderTeam then
+		local defenderBrain = MovableMan:GetFirstBrainActor(team);
+		local position;
+		if defenderBrain then
+			position = defenderBrain.Pos + Vector(10 * (player + 1), 0);
+		elseif SceneMan.Scene:HasArea("Brain") then
+			position = SceneMan.Scene:GetArea("Brain"):GetCenterPoint();
+		else
+			return;
+		end
+		local brain = self:CreateBrainBot(team);
+		brain.Pos = position;
+		MovableMan:AddActor(brain);
+		self:SwitchToActor(brain, player, team);
+		self:SetPlayerBrain(brain, player);
+		self:SetObservationTarget(brain.Pos, player);
+		self:SetLandingZone(brain.Pos, player);
 	end
 end
 

@@ -126,6 +126,12 @@ jobs:
           --probe-clients --probe-seconds 15 --restart-with-clients --disconnect-one-restart
           --check-deferred-restart --require-control --require-players 2
           --activity-class GAScripted --activity "Bunker Breach" --scene "Zekarra Mining Outpost"
+      - name: Verify admission to a running match
+        run: >-
+          python Tools/run_server_smoke.py --exe build-server/CortexCommandServer
+          --game-dir . --output-prefix LinuxLatePlayerCI --timeout 300
+          --probe-clients --probe-seconds 12 --second-client-delay 3 --require-control --require-players 2
+          --activity-class GAScripted --activity "Bunker Breach" --scene "Zekarra Mining Outpost"
       - name: Package server
         run: |
           mkdir -p build-server/package
@@ -154,6 +160,7 @@ jobs:
             ScreenShots/LinuxBrainVsBrainCI/
             ScreenShots/LinuxRosterRestartCI/
             ScreenShots/LinuxDisconnectedRosterCI/
+            ScreenShots/LinuxLatePlayerCI/
             build-server/meson-logs/
             build-server/runtime-dependencies.txt
             build-server/package-runtime-dependencies.txt

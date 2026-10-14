@@ -27,10 +27,11 @@ def main():
     parser.add_argument('--scene', default='Tutorial Bunker')
     parser.add_argument('--require-players', type=int, default=0, help='Require this many distinct active player slots (0..2).')
     parser.add_argument('--restart-with-clients', action='store_true', help='Restart the Activity after both peers connect.')
-    parser.add_argument('--require-control', action='store_true', help='Require distinct controlled actors after restart.')
+    parser.add_argument('--require-control', action='store_true', help='Require distinct controlled actors, with or without restart.')
     parser.add_argument('--restart-count', type=int, default=1, help='Number of connected-roster restarts (1..16).')
     parser.add_argument('--disconnect-one-restart', action='store_true', help='Restart again after the first probe disconnects; the remaining probe requires one human.')
     parser.add_argument('--check-deferred-restart', action='store_true', help='Request restart with no peers, then connect a new player and require completion.')
+    parser.add_argument('--second-client-delay', type=float, default=0, help='Delay the second peer by 0..30 seconds for late admission checks.')
     args = parser.parse_args()
     if (args.screen_text or args.objectives) and not args.probe_clients:
         parser.error('--screen-text/--objectives require --probe-clients.')
@@ -38,14 +39,18 @@ def main():
         parser.error('Use probe duration 3..3600; input silence requires clients and at least 12 seconds.')
     if not 0 <= args.require_players <= 2 or (args.require_players and not args.probe_clients):
         parser.error('Require players must be 0..2 and needs client probes.')
-    if (args.restart_with_clients and not args.probe_clients) or (args.require_control and not args.restart_with_clients):
-        parser.error('Restart requires clients; control checks require restart.')
-    if not 1 <= args.restart_count <= 16 or (args.restart_count > 1 and (not args.require_control or args.probe_seconds < args.restart_count * 3)):
+    if (args.restart_with_clients or args.require_control) and not args.probe_clients:
+        parser.error('Restart and control checks require clients.')
+    if not 1 <= args.restart_count <= 16 or (args.restart_count > 1 and (not args.restart_with_clients or not args.require_control or args.probe_seconds < args.restart_count * 3)):
         parser.error('Repeated restarts need control checks and at least three probe seconds per restart.')
-    if args.disconnect_one_restart and (not args.require_control or args.restart_count != 1 or args.input_silence or args.probe_seconds < 12):
+    if args.disconnect_one_restart and (not args.restart_with_clients or not args.require_control or args.restart_count != 1 or args.input_silence or args.probe_seconds < 12):
         parser.error('Disconnect/restart needs control checks, one initial restart, no silence and at least 12 seconds.')
     if args.check_deferred_restart and not args.probe_clients:
         parser.error('Deferred restart check requires client probes.')
+    if not 0 <= args.second_client_delay <= 30 or (args.second_client_delay and (not args.probe_clients or args.probe_seconds < args.second_client_delay + 3)):
+        parser.error('Second client delay needs probes lasting at least delay + 3 seconds.')
+    if args.second_client_delay and args.disconnect_one_restart:
+        parser.error('Run delayed admission separately from the short first-peer disconnect fixture.')
     if any(not value or '\n' in value or '\r' in value for value in (args.activity_class, args.activity, args.scene)):
         parser.error('Activity and scene must be nonempty single-line preset names.')
     if not re.fullmatch(r'[A-Za-z0-9_-]{1,48}', args.output_prefix) or args.timeout <= 0:
@@ -138,9 +143,17 @@ def main():
                 with contextlib.ExitStack() as streams:
                     try:
                         for index in range(2):
+                            if index == 1 and args.second_client_delay:
+                                deadline = time.monotonic() + args.second_client_delay
+                                while time.monotonic() < deadline:
+                                    check()
+                                    if probes[0].poll() is not None:
+                                        raise RuntimeError('First peer exited before the delayed join.')
+                                    time.sleep(0.1)
                             output = streams.enter_context((root / f'client-{index}.log').open('wb'))
                             duration = 3 if args.disconnect_one_restart and index == 0 else args.probe_seconds
-                            control_options = ['--require-control', '--minimum-revision', str(3 if args.disconnect_one_restart and index == 1 else args.restart_count + 1)] if args.require_control else []
+                            minimum_revision = (3 if args.disconnect_one_restart and index == 1 else args.restart_count + 1) if args.restart_with_clients else 1
+                            control_options = ['--require-control', '--minimum-revision', str(minimum_revision)] if args.require_control else []
                             if args.disconnect_one_restart:
                                 control_options += ['--expected-humans', str(2 if index == 0 else 1)]
                             probes.append(subprocess.Popen([str(binary), '--probe-client', '127.0.0.1', str(port), '--probe-seconds', str(duration)] + (['--screen-text'] if args.screen_text else []) + (['--objectives'] if args.objectives else []) + control_options + (['--input-silence'] if args.input_silence else []),
@@ -196,9 +209,11 @@ def main():
                         active_slots.add(int(assignment.group(1)))
                     control = re.search(r'controlled_actor=(\d+) scene_revision=(\d+)', report)
                     if args.require_control:
-                        minimum_revision = 3 if args.disconnect_one_restart and index == 1 else args.restart_count + 1
+                        minimum_revision = (3 if args.disconnect_one_restart and index == 1 else args.restart_count + 1) if args.restart_with_clients else 1
                         if not control or int(control.group(1)) == 0 or int(control.group(2)) < minimum_revision:
-                            raise RuntimeError('Client did not receive a controlled actor after restart.')
+                            raise RuntimeError('Client did not receive a controlled actor in the required revision.')
+                        if not args.restart_with_clients and int(control.group(2)) != 1:
+                            raise RuntimeError('Late admission unexpectedly restarted the Activity.')
                         controlled_actors.add(int(control.group(1)))
                     if args.disconnect_one_restart and f'humans={2 if index == 0 else 1} ' not in report:
                         raise RuntimeError('Disconnected human slot survived restart.')
@@ -217,11 +232,12 @@ def main():
                     raise RuntimeError('Server did not neutralize each active silent player repeatedly.')
                 result['separate_clients'] = 2
                 result['probe_seconds'] = args.probe_seconds
+                result['second_client_delay'] = args.second_client_delay
                 result['input_silence'] = args.input_silence
                 result['active_player_slots'] = sorted(active_slots)
                 if args.require_control:
                     result['controlled_actors'] = sorted(controlled_actors)
-                    result['restarts'] = args.restart_count
+                    result['restarts'] = args.restart_count if args.restart_with_clients else 0
                     if args.disconnect_one_restart:
                         result['disconnected_roster_restart'] = True
                 result['probe_input_applied'] = True

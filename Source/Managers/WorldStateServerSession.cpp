@@ -6,6 +6,7 @@
 #include "Activity.h"
 #include "ActivityMan.h"
 #include "GameActivity.h"
+#include "GAScripted.h"
 #include "ACraft.h"
 #include "PresetMan.h"
 #include "ThreadMan.h"
@@ -186,7 +187,7 @@ std::vector<int> WorldStateServerSession::GetAssignedPlayerSlots() const {
 	return playerSlots;
 }
 
-std::size_t WorldStateServerSession::ConfigureActivityPlayers(Activity& activity, bool beforeStart) const {
+std::size_t WorldStateServerSession::ConfigureActivityPlayers(Activity& activity, bool beforeStart) {
 	std::size_t configuredPlayers = 0;
 	std::vector<int> addedPlayers;
 	auto* gameActivity = dynamic_cast<GameActivity*>(&activity);
@@ -226,7 +227,15 @@ std::size_t WorldStateServerSession::ConfigureActivityPlayers(Activity& activity
 		activity.SetupPlayers();
 	}
 	if (!beforeStart && gameActivity) {
-		for (int player : addedPlayers) gameActivity->InitializeHumanPlayer(player);
+		for (int player : addedPlayers) {
+			gameActivity->InitializeHumanPlayer(player);
+			if (auto* scripted = dynamic_cast<GAScripted*>(gameActivity)) {
+				const std::string playerArgument = std::to_string(player);
+				if (scripted->RunLuaFunction("OnPlayerJoined", {}, {playerArgument}) < 0) {
+					Log("ERROR: OnPlayerJoined failed for player slot " + playerArgument);
+				}
+			}
+		}
 	}
 	if (beforeStart && gameActivity && activity.GetTeamCount() < activity.GetMinTeamsRequired()) {
 		for (int team = Activity::Teams::TeamOne; team < Activity::Teams::MaxTeamCount; ++team) {

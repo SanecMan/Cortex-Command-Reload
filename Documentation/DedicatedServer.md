@@ -214,6 +214,54 @@ probes do not establish movement/shooting coverage for both players.
 Linux CI includes the subset and empty-server restart scenario; its result
 must be checked separately from these Windows runs.
 
+Linux run `38554014151` passed on commit `10bdc9cc46f`, including compilation,
+device-free startup, repeated roster restarts, disconnected/empty rosters and
+the extracted server package check.
+
+### Joining a scripted match without restart
+
+`GAScripted` supports an optional `OnPlayerJoined(player)` callback. The
+world-state session calls it on the simulation thread after activating a new
+human slot, setting up input/screens and initializing its native menus. The
+argument is the engine's zero-based player slot. Initial Activity startup still
+uses `StartActivity`; callbacks are not repeated for an already active slot.
+Missing callbacks are ignored by the existing script function dispatcher;
+Lua errors are logged. This adds no required method to older mods.
+
+Bunker Breach implements the callback using its existing brain creation and
+assignment APIs. Attacking humans get a brain at their landing zone; defending
+humans get a separate brain beside a defending brain or in the Brain area.
+The callback does not reload the map, recreate existing players or run
+`StartActivity` a second time. Other scripted activities must implement their
+own admission policy if their normal update does not handle new humans.
+Construction editor replication remains incomplete.
+
+The previous implementation failed `LateJoinBefore`: client slot 1 received
+`controlled_actor=0`. `LatePlayerHeadless` passed with a three-second delay
+before connecting the second peer: actors 23/62, revision 1, zero restarts,
+130 further ticks and no initialized video driver (23.83 seconds elapsed).
+`LatePlayerVisual` passed two actual GUI connections with the second launched
+only after the first received control: actors 23/4853, revision 1, strict sampled
+attachment checks, enabled audio and 63 post-disconnect updates (53.66 seconds).
+Its final screenshot showed both players in the scene. The full device-free
+content/UTF-8/objective regression also passed in 41.65 seconds with 172 further
+ticks. These durations are test elapsed times, not performance measurements;
+neutral client input does not establish two-player movement/shooting coverage.
+
+Native `Final|x64` compiled and linked. The delivered root client and matching
+server passed `LatePlayerDelivered` in 52.52 seconds, with 62 further server
+updates after disconnect. The previous subset/empty-roster restart fixture also
+passed with this callback (`LatePlayerRosterRegression`, 40.38 seconds,
+133 further ticks).
+
+```powershell
+.\Tools\RunDedicatedServerSmoke.ps1 -ActivityClass GAScripted -ActivityName 'Bunker Breach' -SceneName 'Zekarra Mining Outpost' -CheckLatePlayerJoin -CheckMenuConnection -RequireAttachmentMatch -EnableAudio
+```
+
+Portable checks use `--require-control` without `--restart-with-clients`, plus
+`--second-client-delay 3 --probe-seconds 12`. They require distinct actors and
+unchanged scene revision 1. Linux CI runs this scenario separately.
+
 ### Native objective-point replication (v29)
 
 Activity goals created through `AddObjectivePoint` are now captured by the host

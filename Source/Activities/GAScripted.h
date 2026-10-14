@@ -23,7 +23,7 @@ namespace RTE {
 
 		/// Public member variable, method and friend function declarations
 	public:
-		ScriptFunctionNames("StartActivity", "UpdateActivity", "PauseActivity", "EndActivity", "OnSave", "CraftEnteredOrbit", "OnMessage", "IsCompatibleScene", "OnGlobalMessage");
+		ScriptFunctionNames("StartActivity", "UpdateActivity", "PauseActivity", "EndActivity", "OnSave", "CraftEnteredOrbit", "OnMessage", "IsCompatibleScene", "OnGlobalMessage", "OnPlayerJoined");
 
 		// Concrete allocation and cloning definitions
 		EntityAllocation(GAScripted);

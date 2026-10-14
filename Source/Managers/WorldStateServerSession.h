@@ -34,7 +34,7 @@ namespace RTE {
 		unsigned short GetBoundPort() const { return m_Transport.GetBoundPort(); }
 		unsigned short GetConnectedClientCount() const { return m_ConnectedClients; }
 		std::vector<int> GetAssignedPlayerSlots() const;
-		std::size_t ConfigureActivityPlayers(Activity& activity, bool beforeStart) const;
+		std::size_t ConfigureActivityPlayers(Activity& activity, bool beforeStart);
 		std::uint32_t GetSnapshotBroadcastCount() const { return m_SnapshotBroadcastCount; }
 		std::uint32_t GetInputCommandCount() const { return m_InputCommandCount; }
 		bool SendSoundEvents(std::span<const WorldStateSoundProtocol::Event> events);

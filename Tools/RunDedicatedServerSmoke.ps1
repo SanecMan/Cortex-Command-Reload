@@ -14,6 +14,7 @@ param(
     [switch]$RequireAttachmentMatch,
     [switch]$RestartWithConnectedPlayers,
     [switch]$RequireControlledActor,
+    [switch]$CheckLatePlayerJoin,
     [ValidatePattern('^[A-Za-z0-9_-]{1,48}$')]
     [string]$OutputPrefix = 'DedicatedServerSmoke',
     [switch]$CheckTeamFunds,
@@ -40,6 +41,11 @@ param(
     [int]$TimeoutSeconds = 360
 )
 $ErrorActionPreference = 'Stop'
+if ($CheckLatePlayerJoin) {
+    if ($RestartWithConnectedPlayers) { throw 'Late player admission must be checked without restart.' }
+    $RequireControlledActor = $true
+    $RequireActivePlayers = 2
+}
 if ($CheckFadingLateJoin) {
     if ($CheckFinishLoops -or $CheckFinishingLateJoin) { throw 'Run fading and finishing fixtures separately.' }
     $CheckStaggeredSound=$true; $CheckSound=$true
@@ -164,11 +170,19 @@ try {
 		if ($CheckPurchasePricing) { $purchaseArguments = @('-debug-run-world-state-purchase-pricing') }
 		if ($CheckInventory) { $purchaseArguments = @('-debug-run-world-state-inventory') }
         $frameCount = if ($CheckStaggeredSound -and $index -eq 1) { '6000' } else { '600' }
+        if ($CheckLatePlayerJoin -and $index -eq 1) { $frameCount = '1800' }
         $client = Start-Process -FilePath $clientBinary -WorkingDirectory $gameDirectory -WindowStyle Hidden -PassThru -ArgumentList (@(
             '-debug-run',$frameCount,'-debug-run-output',"$OutputPrefix-Client$index",$(if ($CheckMenuConnection) { '-debug-run-menu-connect' } else { '-world-state-client' }),'127.0.0.1',"$port"
         )+$purchaseArguments+$audioArguments)
         $processes.Add($client)
         $clients.Add($client)
+        if ($CheckLatePlayerJoin -and $index -eq 1) {
+            $firstNetwork = Join-Path $gameDirectory "ScreenShots\$OutputPrefix-Client1\WorldStateClient.log"
+            while ((Read-Report $firstNetwork) -notmatch '(?m)^snapshot=.*scene_revision=1 .*controlled_actor=[1-9]') {
+                Check-Time; if ($client.HasExited -or $server.HasExited) { throw 'First player never became controllable before the late join.' }
+                Start-Sleep -Milliseconds 100
+            }
+        }
         if ($CheckStaggeredSound -and $index -eq 1) {
             $firstNetwork = Join-Path $gameDirectory "ScreenShots\$OutputPrefix-Client1\WorldStateClient.log"
             while ((Read-Report $firstNetwork) -notmatch '(?m)^snapshot=') {
@@ -430,6 +444,7 @@ try {
         if ($EnableAudio -and $clientReport -notmatch '(?m)^audio_shutdown_complete\r?$') { throw 'Client audio shutdown was not verified.' }
         $clientNetwork = Read-Report (Join-Path $clientDirectory 'WorldStateClient.log')
         if ($RequireControlledActor -and $clientNetwork -notmatch 'controlled_actor=[1-9]') { throw 'Client never received a controlled actor.' }
+        if ($CheckLatePlayerJoin -and ($clientNetwork -notmatch 'scene_revision=1 .*controlled_actor=[1-9]' -or $clientNetwork -match 'scene_revision=([2-9]|[1-9][0-9]+) ')) { throw 'Late admission did not preserve the running scene revision.' }
         if ($RequireControlledActor -and $RestartWithConnectedPlayers -and $clientNetwork -notmatch 'scene_revision=[2-9].*controlled_actor=[1-9]') { throw 'Client has no controlled actor after roster restart.' }
         if ($RequireControlledActor) {
             $controlPattern = if ($RestartWithConnectedPlayers) { 'scene_revision=[2-9].*?controlled_actor=([1-9][0-9]*)' } else { 'controlled_actor=([1-9][0-9]*)' }

@@ -23,7 +23,7 @@ namespace {
 int RunClientProbe(const std::vector<std::string>& arguments) {
 	bool requireText = false, inputSilence = false, requireObjectives = false, requireControl = false;
 	unsigned int probeSeconds = 3;
-	unsigned int minimumRevision = 2;
+	unsigned int minimumRevision = 1;
 	unsigned int expectedHumans = 0;
 	if (arguments.size() < 4 || arguments[2].empty()) {
 		std::cerr << "Usage: CortexCommandServer --probe-client ADDRESS PORT [--screen-text] [--probe-seconds 3..3600] [--input-silence]\n"; return 2;
@@ -42,8 +42,8 @@ int RunClientProbe(const std::vector<std::string>& arguments) {
 		else if (arguments[index] == "--minimum-revision" && index + 1 < arguments.size()) {
 			const auto& value = arguments[++index];
 			const auto number = std::from_chars(value.data(), value.data() + value.size(), minimumRevision);
-			if (number.ec != std::errc{} || number.ptr != value.data() + value.size() || minimumRevision < 2 || minimumRevision > 65535) {
-				std::cerr << "Minimum scene revision must be 2..65535.\n"; return 2;
+			if (number.ec != std::errc{} || number.ptr != value.data() + value.size() || minimumRevision < 1 || minimumRevision > 65535) {
+				std::cerr << "Minimum scene revision must be 1..65535.\n"; return 2;
 			}
 		}
 		else if (arguments[index] == "--input-silence") inputSilence = true;
