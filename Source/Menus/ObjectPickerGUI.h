@@ -109,6 +109,8 @@ namespace RTE {
 		/// Reports whether and which object has been picked by the player. There may be an object picked even when the player is not done with the picker, as scrolling through objects (but not mousing over them) picks them.
 		/// @return A pointer to the object picked by the player, or nullptr if none was picked. Ownership is NOT transferred!
 		const SceneObject* ObjectPicked() const { return m_PickedObject; }
+		/// Check server-side placement eligibility using this picker's module/type/groups.
+		bool IsObjectAvailable(const SceneObject& object) const;
 
 		/// Reports whether the player has finished using the picker, and the final picked object is returned.
 		/// @return The object the player picked before they closed the picker, or nullptr if none was picked. Ownership is NOT transferred!

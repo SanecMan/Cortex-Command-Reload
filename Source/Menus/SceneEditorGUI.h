@@ -14,6 +14,7 @@
 
 #include <memory>
 #include <list>
+#include <cstdint>
 
 struct BITMAP;
 
@@ -152,6 +153,8 @@ namespace RTE {
 		bool TestBrainResidence(bool noBrainIsOK = false);
 		/// Install the server-selected brain on the simulation thread using native path validation.
 		bool InstallNetworkBrain(const Vector& position, float rotation, bool hFlipped, std::string& reason);
+		bool PlaceNetworkObject(const SceneObject* preset, const Vector& position, float rotation, bool hFlipped,
+		    float& chargedCost, std::uint64_t& objectId, std::string& reason);
 
 		/// Updates the state of this Menu each frame
 		void Update();

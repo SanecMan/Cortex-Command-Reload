@@ -77,7 +77,7 @@ bool VerifyBrainConstructionStart(RTE::WorldStateClientSession& client) {
 	request.RequestId = 1; request.SceneRevision = client.GetLatestSnapshot().SceneRevision;
 	request.Action = ConstructionAction::PlaceBrain;
 	request.X = 100.0F + 100.0F * client.GetAssignedPlayerSlot(); request.Y = 30;
-	auto send = [&](const ConstructionRequest& command, bool accepted, const std::string& reason) {
+	auto send = [&](const ConstructionRequest& command, bool accepted, const std::string& reason, ConstructionResult* saved = nullptr, bool paid = false) {
 		client.DrainConstructionResults();
 		if (!client.SendConstructionRequest(command)) return false;
 		const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(6);
@@ -89,9 +89,11 @@ bool VerifyBrainConstructionStart(RTE::WorldStateClientSession& client) {
 			}
 			for (const auto& reply : client.DrainConstructionResults()) {
 				if (reply.RequestId != command.RequestId) continue;
-				if (reply.Accepted != accepted || reply.Reason != reason || reply.SceneRevision != request.SceneRevision || reply.ChargedCost != 0) {
+				if (reply.Accepted != accepted || reply.Reason != reason || reply.SceneRevision != request.SceneRevision ||
+				    (paid ? (reply.ChargedCost <= 0 || reply.ObjectId == 0) : reply.ChargedCost != 0)) {
 					std::cerr << "Brain response mismatch id=" << reply.RequestId << " accepted=" << reply.Accepted << " reason=" << reply.Reason << '\n'; return false;
 				}
+				if (saved) *saved = reply;
 				std::this_thread::sleep_for(std::chrono::milliseconds(350)); return true;
 			}
 			if (!client.GetConnectionError().empty()) return false;
@@ -118,7 +120,41 @@ bool VerifyBrainConstructionStart(RTE::WorldStateClientSession& client) {
 	if (!residentObserved) { std::cerr << "Resident brain state not received before readiness\n"; return false; }
 	ConstructionRequest invalid = request; invalid.RequestId = 2; invalid.X = -1;
 	if (!send(invalid, false, "outside_scene")) return false;
-	request = {}; request.RequestId = 3; request.SceneRevision = client.GetLatestSnapshot().SceneRevision;
+	ConstructionRequest object;
+	object.RequestId = 3; object.SceneRevision = request.SceneRevision; object.Action = ConstructionAction::PlaceObject;
+	object.X = 400.0F + 100.0F * client.GetAssignedPlayerSlot(); object.Y = 30;
+	object.Preset = {"HDFirearm", "Ronin.rte", "AK-47"};
+	const int team = client.GetLatestSnapshot().Players[client.GetAssignedPlayerSlot()].Team;
+	const float initialFunds = client.GetLatestSnapshot().TeamFunds[team];
+	const bool affordable = initialFunds >= 160;
+	ConstructionResult placed, replay;
+	if (!send(object, affordable, affordable ? "" : "insufficient_funds", &placed, affordable) ||
+	    !send(object, affordable, affordable ? "" : "insufficient_funds", &replay, affordable) || placed != replay) return false;
+	const float expectedFunds = initialFunds - placed.ChargedCost;
+	const auto fundsDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(6);
+	bool fundsObserved = false;
+	while (std::chrono::steady_clock::now() < fundsDeadline) {
+		client.Update(); client.SendInputCommand({});
+		const auto& world = client.GetLatestSnapshot();
+		const auto matching = std::count_if(world.Objects.begin(), world.Objects.end(), [&](const auto& entry) {
+			return entry.ClassName == object.Preset.ClassName && entry.ModuleName == object.Preset.ModuleName && entry.PresetName == object.Preset.PresetName && entry.Team == team;
+		});
+		if (world.TeamFunds[team] == expectedFunds && matching == (affordable ? 1 : 0)) {
+			for (const auto& entry : world.Objects) if (affordable && entry.ClassName == object.Preset.ClassName && entry.ModuleName == object.Preset.ModuleName && entry.PresetName == object.Preset.PresetName && entry.Team == team)
+				std::cout << "construction_object_position=" << entry.PositionX << ',' << entry.PositionY << " requested=" << object.X << ',' << object.Y << '\n';
+			fundsObserved = true; break;
+		}
+		std::this_thread::sleep_for(std::chrono::milliseconds(20));
+	}
+	if (!fundsObserved) { std::cerr << "Construction charged funds mismatch\n"; return false; }
+	object.RequestId = 4; object.Preset.PresetName = "Missing construction preset";
+	if (!send(object, false, "invalid_preset")) return false;
+	object.RequestId = 5; object.Preset = {"Actor", "Base.rte", "Brain Case"};
+	if (!send(object, false, "prohibited_item")) return false;
+	object.RequestId = 6; object.Preset = {"HDFirearm", "Ronin.rte", "AK-47"}; object.X = -1;
+	if (!send(object, false, "outside_scene")) return false;
+	std::cout << "construction_objects=passed placed=" << affordable << " charged=" << placed.ChargedCost << '\n';
+	request = {}; request.RequestId = 7; request.SceneRevision = client.GetLatestSnapshot().SceneRevision;
 	request.Action = ConstructionAction::SetReady; request.Ready = true;
 	return send(request, true, "");
 }

@@ -278,6 +278,67 @@ bool SceneEditorGUI::InstallNetworkBrain(const Vector& position, float rotation,
 	return true;
 }
 
+bool SceneEditorGUI::PlaceNetworkObject(const SceneObject* preset, const Vector& position, float rotation, bool hFlipped,
+    float& chargedCost, std::uint64_t& objectId, std::string& reason) {
+	chargedCost = 0; objectId = 0; reason.clear();
+	auto reject = [&](const char* error) { reason = error; return false; };
+	auto* activity = g_ActivityMan.GetActivity();
+	const int player = m_pController ? m_pController->GetPlayer() : -1;
+	if (!activity || !g_SceneMan.GetScene() || m_FeatureSet != INGAMEEDIT || player < 0 || player >= Players::MaxPlayerCount ||
+	    !activity->PlayerActive(player) || !activity->PlayerHuman(player) || activity->GetActivityState() != Activity::Editing)
+		return reject("editor_unavailable");
+	if (!std::isfinite(position.GetX()) || !std::isfinite(position.GetY()) || !std::isfinite(rotation) ||
+	    position.GetX() < 0 || position.GetY() < 0 || position.GetX() >= g_SceneMan.GetSceneWidth() || position.GetY() >= g_SceneMan.GetSceneHeight())
+		return reject("outside_scene");
+	if (!preset || g_PresetMan.GetEntityPreset(preset->GetClassName(), preset->GetPresetName(), preset->GetModuleID()) != preset)
+		return reject("invalid_preset");
+	if (!m_pPicker || !m_pPicker->IsObjectAvailable(*preset) || preset->IsInGroup("Brains")) return reject("prohibited_item");
+	const int team = activity->GetTeamOfPlayer(player);
+	if (team < Activity::TeamOne || team >= Activity::MaxTeamCount) return reject("inactive_player");
+	std::unique_ptr<Entity> entity(preset->Clone());
+	auto* object = dynamic_cast<SceneObject*>(entity.get());
+	if (!object) return reject("invalid_preset");
+	object->SetPos(position); object->SetTeam(team); object->SetPlacedByPlayer(player);
+	if (auto* sprite = dynamic_cast<MOSprite*>(object)) { sprite->SetRotAngle(std::remainder(rotation, c_TwoPI)); sprite->SetHFlipped(hFlipped); }
+	float price = object->GetTotalValue(m_NativeTechModule, m_ForeignCostMult);
+	if (auto* deployment = dynamic_cast<Deployment*>(object)) {
+		deployment->SetHFlipped(hFlipped); price = 0;
+		std::unique_ptr<Entity> deployed(deployment->CreateDeployedActor(player, price));
+		if (!deployed) { price = 0; deployed.reset(deployment->CreateDeployedObject(player, price)); }
+		entity = std::move(deployed); object = dynamic_cast<SceneObject*>(entity.get());
+		if (!object) return reject("invalid_deployment");
+		object->SetTeam(team); object->SetPlacedByPlayer(player);
+	}
+	if (object->IsInGroup("Brains")) return reject("prohibited_item");
+	if (!std::isfinite(price) || price < 0) return reject("invalid_price");
+	const float funds = activity->GetTeamFunds(team);
+	if (!std::isfinite(funds) || funds < price) return reject("insufficient_funds");
+	if (auto* terrain = dynamic_cast<TerrainObject*>(object)) {
+		terrain->PlaceOnTerrain(g_SceneMan.GetTerrain()); g_SceneMan.GetTerrain()->CleanAir();
+	} else {
+		auto* movable = dynamic_cast<MovableObject*>(object);
+		if (!movable) return reject("invalid_object_type");
+		if (g_SceneMan.GetTerrMatter(position.GetFloorIntX(), position.GetFloorIntY()) != g_MaterialAir) return reject("terrain_obstructed");
+		if (auto* actor = dynamic_cast<Actor*>(movable)) { actor->GetController()->SetDisabled(true); actor->SetStatus(Actor::INACTIVE); }
+		const auto id = movable->GetUniqueID();
+		AHuman* recipient = nullptr;
+		if (dynamic_cast<HeldDevice*>(movable)) {
+			Vector distance;
+			recipient = dynamic_cast<AHuman*>(g_MovableMan.GetClosestTeamActor(team, player, position, 20, distance));
+			if (!recipient) {
+				auto* brain = dynamic_cast<AHuman*>(g_SceneMan.GetScene()->GetResidentBrain(player));
+				if (brain && g_SceneMan.ShortestDistance(brain->GetPos(), position, true).MagnitudeIsLessThan(20.0F)) recipient = brain;
+			}
+		}
+		if (recipient) recipient->AddInventoryItem(movable);
+		else if (!g_MovableMan.AddMO(movable)) return reject("placement_failed");
+		entity.release(); objectId = static_cast<std::uint64_t>(id);
+	}
+	activity->ChangeTeamFunds(-price, team); chargedCost = price;
+	m_EditMade = true; m_CursorPos = position;
+	return true;
+}
+
 bool SceneEditorGUI::TestBrainResidence(bool noBrainIsOK) {
 	// Do we have a resident at all?
 	SceneObject* pBrain = g_SceneMan.GetScene()->GetResidentBrain(m_pController->GetPlayer());

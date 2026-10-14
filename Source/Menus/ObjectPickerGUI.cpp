@@ -1,4 +1,5 @@
 #include "ObjectPickerGUI.h"
+#include <algorithm>
 
 #include "CameraMan.h"
 #include "WindowMan.h"
@@ -417,6 +418,23 @@ void ObjectPickerGUI::UpdateObjectsList(bool selectTop) {
 	if (const GUIListPanel::Item* selectedItem = m_ObjectsList->GetSelected()) {
 		m_PickedObject = dynamic_cast<const SceneObject*>(selectedItem->m_pEntity);
 	}
+}
+
+bool ObjectPickerGUI::IsObjectAvailable(const SceneObject& object) const {
+	if (!object.IsBuyable() || object.IsBuyableInBuyMenuOnly() || object.IsBuyableInScriptOnly()) return false;
+	const int module = object.GetModuleID();
+	if (module < 0 || module >= g_PresetMan.GetTotalModuleCount()) return false;
+	if (m_ModuleSpaceID < 0 && !g_SettingsMan.ShowForeignItems() && m_NativeTechModuleID > 0 &&
+	    module != 0 && module != m_NativeTechModuleID && !g_PresetMan.GetDataModule(module)->IsMerchant()) return false;
+	if (m_ModuleSpaceID >= 0 && module != m_ModuleSpaceID &&
+	    !(module < g_PresetMan.GetOfficialModuleCount() && module < m_ModuleSpaceID)) return false;
+	for (const auto* group : *m_GroupsList->GetItemList()) {
+		if (!group) continue;
+		std::list<Entity*> objects;
+		g_PresetMan.GetAllOfGroup(objects, group->m_Name, m_ShowType, module);
+		if (std::find(objects.begin(), objects.end(), &object) != objects.end()) return true;
+	}
+	return false;
 }
 
 void ObjectPickerGUI::Update() {

@@ -387,7 +387,7 @@ void WorldStateServerSession::ProcessConstruction(const WorldStateTransport::Rec
 		const auto lastTime = m_LastConstructionTimeByClient.find(client);
 		if (lastTime != m_LastConstructionTimeByClient.end() && now - lastTime->second < std::chrono::milliseconds(250)) result.Reason = "rate_limit";
 		else if (!activity || activity->GetActivityState() != Activity::Editing) result.Reason = "not_editing";
-		else if (request.Action != WorldStateProtocol::ConstructionAction::SetReady && request.Action != WorldStateProtocol::ConstructionAction::PlaceBrain) result.Reason = "placement_unavailable";
+		else if (request.Action == WorldStateProtocol::ConstructionAction::RemoveObject) result.Reason = "placement_unavailable";
 		else {
 			g_ThreadMan.GetPriorityThreadPool().wait_for_tasks();
 			g_ThreadMan.GetBackgroundThreadPool().wait_for_tasks();
@@ -396,7 +396,14 @@ void WorldStateServerSession::ProcessConstruction(const WorldStateTransport::Rec
 			} else if (slot->second >= Players::MaxPlayerCount || !activity->PlayerActive(slot->second) || !activity->PlayerHuman(slot->second)) {
 				result.Reason = "inactive_player";
 			} else if (auto* editor = activity->GetEditorGUI(slot->second)) {
-				result.Accepted = editor->InstallNetworkBrain(Vector(request.X, request.Y), request.Rotation, request.HFlipped, result.Reason);
+				if (request.Action == WorldStateProtocol::ConstructionAction::PlaceObject) {
+					const int module = g_PresetMan.GetModuleID(request.Preset.ModuleName);
+					const auto* preset = module < 0 ? nullptr : dynamic_cast<const SceneObject*>(g_PresetMan.GetEntityPreset(request.Preset.ClassName, request.Preset.PresetName, module));
+					if (!preset || preset->GetClassName() != request.Preset.ClassName || preset->GetModuleName() != request.Preset.ModuleName || preset->GetPresetName() != request.Preset.PresetName)
+						result.Reason = "invalid_preset";
+					else result.Accepted = editor->PlaceNetworkObject(preset, Vector(request.X, request.Y), request.Rotation, request.HFlipped,
+					    result.ChargedCost, result.ObjectId, result.Reason);
+				} else result.Accepted = editor->InstallNetworkBrain(Vector(request.X, request.Y), request.Rotation, request.HFlipped, result.Reason);
 				if (result.Accepted) result.Accepted = activity->SetNetworkConstructionReady(slot->second, false, result.Reason);
 			} else result.Reason = "editor_unavailable";
 		}

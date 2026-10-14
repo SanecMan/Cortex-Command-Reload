@@ -17,7 +17,7 @@ Publication follows the snapshot cadence (20 Hz) while peers are connected.
 Outside editing it sends an empty resident baseline. Client sessions retain the
 latest sequence and clear it on disconnect. A consumer must match scene revision
 before using it. The state does not add residents to MovableMan or execute local
-physics/Lua. The client construction menu renders residents and sends brain placement/readiness requests; ordinary object placement/removal remains incomplete.
+physics/Lua. The client construction menu renders residents and sends brain placement/readiness requests; client object-selection controls and removal remain incomplete.
 
 `WorldStateConstructionStateTest.cpp` passed MSVC and MinGW GCC, covering Russian
 identities, atomic decode failure, all truncated prefixes, flags, inactive-slot
@@ -63,20 +63,20 @@ server updates. Both screenshots were inspected: native brain sprites, cursor an
 placement/readiness instructions were visible. `ConstructionMenuHeadlessFinal`
 passed the content/UTF-8/objective/spawn regression in 20.03 seconds with 129
 further ticks and video initialization disabled. These durations are validation
-wall times, not performance comparisons. Ordinary object construction/removal,
+wall times, not performance comparisons. Client ordinary-object construction controls and removal,
 physical-input testing and broader Activity compatibility are still outstanding.
 
 Native Final compiled and linked. The delivered root client/server pair passed
 `ConstructionMenuDelivered` in 55.06 seconds with both preview/start markers,
 strict attachments and audio shutdown, and 63 further server updates after
-disconnect. Linux run `38578726608` is in progress for commit `3bc24daf821`.
+disconnect. Linux run `38578726608` succeeded for commit `3bc24daf821`.
 
 ## Construction command codec foundation
 
 `WorldStateConstructionProtocol.h` reserves envelope message kinds 11
 (`ConstructionRequest`) and 12 (`ConstructionResult`). The v29 snapshot layout
 and existing messages are unchanged. Sessions now route readiness requests and
-their responses and brain placement; ordinary object placement/removal remains incomplete.
+their responses and brain placement; client object-selection controls and removal remain incomplete.
 This does not yet establish playable networked construction. Placement integration
 must validate content, ownership, scene bounds and native brain placement before
 modifying the authoritative scene.
@@ -134,7 +134,7 @@ an identical repeat returns the original response without applying an action
 again. Conflicting/stale IDs do not replace that cached original response.
 Connection teardown clears the cache and cooldown.
 
-SetReady and PlaceBrain are currently applied. Other valid construction actions return
+SetReady, PlaceBrain and PlaceObject are currently applied. RemoveObject returns
 `placement_unavailable` during editing. Outside editing the response is
 `not_editing`; spectators receive `spectator`. A stale scene is rejected before
 replay handling. `GameActivity::SetNetworkConstructionReady` validates the player
@@ -144,6 +144,39 @@ brain denies readiness. A valid intent sets the native DONEEDITING mode;
 `UpdateEditing` performs the normal all-player transition. Cancellation clears
 that player's readiness and restores its appropriate native placement mode.
 No GUI window is needed on the server.
+
+### Authoritative ordinary object placement
+
+`PlaceObject` now resolves an exact class/module/preset on the server and delegates
+to `SceneEditorGUI::PlaceNetworkObject`. Eligibility uses the native object
+picker's buyable mode, visible groups, module space and foreign-item policy.
+Brains are excluded from this command. The server validates finite scene bounds,
+team, total price and available funds. Movable placement requires an air cursor;
+actors/devices/particles transfer ownership to MovableMan. Held devices use the
+native nearby-human/resident-brain inventory behavior. Deployments use native
+loadout creation and cost tally; terrain objects use native PlaceOnTerrain and
+CleanAir. Successful placement clears that player's readiness. Request replay
+uses the existing cached reply and does not clone or charge twice.
+
+Returned movable IDs currently identify the server's native unique object in the
+construction response; they are not snapshot IDs. Terrain placement returns zero.
+Removal, undo/refunds, client object selection and preview controls still need
+integration. Terrain/deployment/inventory-gift branches need dedicated runtime
+fixtures; a firearm fixture does not prove these branches work.
+
+Native Final and both Meson targets built. `ConstructionObjectsDelivered` passed
+in 14.05 seconds: one client placed an AK-47 for 40 units, the other exercised
+insufficient funds. Each checked replay equality, exact funds, a single matching
+object (or none after refusal), unknown preset, prohibited brain and out-of-bounds
+placement. Both started with distinct controlled actors and 128 further server
+ticks after disconnect. The server initialized no video. The firearm moved from
+requested y=30 to y=130.333 before observation: native MovableMan updates during
+Editing, so the fixture checks identity/count rather than fixed post-spawn pose.
+An earlier strict-position fixture failed and is not counted as passed.
+The delivered graphical construction regression also passed in 54.61 seconds
+with two clients, strict attachment/menu/audio checks and 63 further updates.
+Full content/UTF-8/objective/spawn preflight passed in 25.26 seconds with 128
+further ticks (`ConstructionObjectsFullRegression`). These are validation times.
 
 ### Brain placement and native start
 

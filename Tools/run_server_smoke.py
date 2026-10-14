@@ -204,6 +204,7 @@ def main():
                 active_slots = set()
                 editing_probes = True
                 controlled_actors = set()
+                construction_purchase_observed = False
                 for index in range(2):
                     report = (root / f'client-{index}.log').read_text(encoding='utf-8')
                     object_count_pattern = r'\d+' if args.construction_check and 'activity_state=2 ' in report else r'[1-9]\d*'
@@ -218,6 +219,10 @@ def main():
                     editing_probes &= 'activity_state=2 ' in report
                     if args.brain_start and ('brain_start=1' not in report or 'activity_state=4 ' not in report):
                         raise RuntimeError('Native brain placement/start was not verified.')
+                    if args.brain_start:
+                        if 'construction_objects=passed' not in report:
+                            raise RuntimeError('Construction object placement/replay/funds guards were not verified.')
+                        construction_purchase_observed |= 'construction_objects=passed placed=1' in report
                     silence_match = re.search(r'silence_windows=(\d+)', report)
                     if args.input_silence and (not silence_match or int(silence_match.group(1)) < 2):
                         raise RuntimeError('Client did not exercise repeated input silence.')
@@ -249,7 +254,10 @@ def main():
                     raise RuntimeError('Server did not neutralize each active silent player repeatedly.')
                 result['separate_clients'] = 2
                 if args.brain_start:
+                    if not construction_purchase_observed:
+                        raise RuntimeError('No real paid construction object was placed.')
                     result['brain_placement_and_start'] = True
+                    result['construction_purchase_and_replay'] = True
                 if args.construction_check:
                     result['construction_checks_per_client'] = 7
                 result['probe_seconds'] = args.probe_seconds
