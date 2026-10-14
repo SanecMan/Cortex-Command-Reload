@@ -247,6 +247,7 @@ namespace RTE {
 
 		/// Clears all objective points previously added, for both teams.
 		void ClearObjectivePoints() { m_Objectives.clear(); }
+		const auto& GetObjectivePoints() const { return m_Objectives; }
 
 		/// Adds somehting to the purchase list that will override what is set
 		/// in the buy guy next time CreateDelivery is called.

@@ -1,5 +1,45 @@
 # World-state protocol
 
+## v29 native objective points
+
+Full snapshots carry ordered `GameActivity` objective points, before the player
+records: unsigned 16-bit count, followed by UTF-8 description (16-bit byte length),
+X/Y float32, signed 16-bit team (-1..3), and unsigned 8-bit arrow direction
+(0 down, 1 left, 2 right, 3 up). The bounds are 256 points and 4096 UTF-8 bytes
+per description, within the existing 4 MiB packet limit. Nonfinite coordinates,
+invalid UTF-8, invalid team/direction, overflows and truncation are rejected.
+An empty list clears previous goals on the replica. Servers normalize legacy
+Windows-1251 descriptions at capture; local `.rte`/Lua APIs are unchanged.
+
+Capture reads the existing Activity objective list; replica application clears
+and recreates it through `AddObjectivePoint`. Native HUD rendering retains its
+team filtering, arrows and screen/scene wrapping. This carries the native points
+used by Lua Activities, not arbitrary Lua drawing calls. Matched v29 binaries
+are required; older versions are explicitly refused by the existing envelope
+check. All previous snapshot/device/audio semantics are retained.
+
+`Tools/WorldStateObjectivesTest.cpp` passed MSVC and MinGW GCC, covering roundtrip,
+Cyrillic/emoji, clearing, malformed text/count/team/arrow, oversized text/list,
+nonfinite coordinates and truncation. Screen-text and device codecs also passed
+GCC with v29. Full native `Final|x64` and Meson client/server builds passed.
+`ObjectivePersistentHeadless` passed full content/simulation, two separate clients,
+objective/UTF-8 screen-text capture and no video initialization in 47.19 seconds,
+with 129 observed ticks (concurrent native linking, not a benchmark).
+
+`ObjectiveCreateClearVisual` passed two Meson graphical clients in 52.46 seconds
+with 72 post-disconnect updates. Both applied the same UTF-8 descriptions,
+positions, team and direction, then confirmed removal of the diagnostic goal.
+The active client's intermediate screenshot visibly showed the Cyrillic goal;
+the final screenshot showed it removed. `ObjectiveCreateClearDelivered` repeated
+this with the root native Final pair in 34.26 seconds and 63 updates, including
+strict attachment-state checks and clean audio shutdown. Linux v29 is pending.
+
+The explicit server commands `debug-objectives` and `debug-objectives-clear`
+enable/disable a persistent disposable fixture. Its goals are set immediately
+before snapshot capture, so the Tutorial's per-tick objective clearing cannot
+make the test accidentally miss the text. This behavior is enabled only by the
+diagnostic command. Normal goals continue to come from the Activity's own updates.
+
 ## v28 recent-shot presentation under validation
 
 Device records carry a wrapping unsigned 32-bit shot sequence and unsigned

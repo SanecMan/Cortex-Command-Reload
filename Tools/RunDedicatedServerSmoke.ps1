@@ -25,6 +25,7 @@ param(
     [switch]$CheckUnexpectedDisconnect,
     [switch]$CheckMenuConnection,
     [switch]$CheckScreenText,
+    [switch]$CheckObjectives,
     [switch]$CheckSound,
     [switch]$CheckSoundMix,
     [switch]$CheckLateJoinSound,
@@ -149,6 +150,7 @@ try {
         Start-PausedSoundFixture
     }
     if ($CheckScreenText) { $server.StandardInput.WriteLine('debug-screen-text'); $server.StandardInput.Flush() }
+    if ($CheckObjectives) { $server.StandardInput.WriteLine('debug-objectives'); $server.StandardInput.Flush() }
     $audioArguments = @(); if ($EnableAudio) { $audioArguments += '-debug-run-audio' }
     $clients = [Collections.Generic.List[Diagnostics.Process]]::new()
     $displayedStockPriceObserved = $false
@@ -233,6 +235,7 @@ try {
     $inventoryCreated = $false
     $reloadHudCreated = $false; $reloadHudChanged = $false
     $shotCreated = $false; $shotFired = $false
+    $objectiveFixtureCleared = $false
     while (@($clients | Where-Object { !$_.HasExited }).Count -gt 0) {
         if ($CheckScreenText) {
             # Activity updates may clear ordinary messages while clients load.
@@ -244,6 +247,18 @@ try {
             foreach ($index in 1..2) {
                 $screenTextReport = Join-Path $gameDirectory "ScreenShots\$OutputPrefix-Client$index\DebugRun.log"
                 $screenTextApplied = $screenTextApplied -or (Read-Report $screenTextReport) -match '(?m)^world_state_screen_text_received=passed'
+            }
+        }
+        if ($CheckObjectives -and !$objectiveFixtureCleared) {
+            $objectiveStressCaptured = $true
+            foreach ($index in 1..2) {
+                $objectiveDirectory = Join-Path $gameDirectory "ScreenShots\$OutputPrefix-Client$index"
+                $objectiveStressCaptured = $objectiveStressCaptured -and (Test-Path (Join-Path $objectiveDirectory 'debug-run-stress.png')) -and
+                    ((Read-Report (Join-Path $objectiveDirectory 'DebugRun.log')) -match '(?m)^world_state_objectives_received=passed')
+            }
+            if ($objectiveStressCaptured) {
+                $server.StandardInput.WriteLine('debug-objectives-clear'); $server.StandardInput.Flush()
+                $objectiveFixtureCleared = $true
             }
         }
         if ($CheckSound) {
@@ -397,6 +412,8 @@ try {
     foreach ($index in 1..2) {
         $clientDirectory = Join-Path $gameDirectory "ScreenShots\$OutputPrefix-Client$index"
         $clientReport = Read-Report (Join-Path $clientDirectory 'DebugRun.log')
+        if ($CheckObjectives -and (!$objectiveFixtureCleared -or $clientReport -notmatch '(?m)^world_state_objectives_received=passed' -or
+            $clientReport -notmatch '(?m)^world_state_objectives_cleared=passed')) { throw 'Client objective create/clear checks failed.' }
         if ($EnableAudio -and $clientReport -notmatch '(?m)^audio_shutdown_complete\r?$') { throw 'Client audio shutdown was not verified.' }
         $clientNetwork = Read-Report (Join-Path $clientDirectory 'WorldStateClient.log')
         if ($clientNetwork -notmatch ('(?m)^activity=' + [regex]::Escape($ActivityName) + '\r?$') -or

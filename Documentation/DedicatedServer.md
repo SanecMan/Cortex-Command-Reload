@@ -88,6 +88,26 @@ Its total verification time was 167.71 seconds including startup, not a benchmar
 
 ## Connection failure handling
 
+### Native objective-point replication (v29)
+
+Activity goals created through `AddObjectivePoint` are now captured by the host
+and applied to the client's native HUD, including UTF-8 text, position, team and
+arrow direction. Clear/update is authoritative too. This preserves existing Lua
+content APIs but does not replicate arbitrary scripted drawing commands. See
+[the v29 format and limits](WorldStateProtocol.md#v29-native-objective-points).
+Client and server must both use protocol v29.
+
+Use `Tools/RunDedicatedServerSmoke.ps1 -CheckMenuConnection -CheckObjectives
+-RequireAttachmentMatch -EnableAudio` for native creation/rendering/clear checks,
+or `Tools/run_server_smoke.py --exe CortexCommandServer.exe --game-dir .
+--probe-clients --objectives` for device-free host capture and wire checks.
+The graphical runner captures the intermediate goal then sends
+`debug-objectives-clear`; both client reports must confirm native removal.
+`ObjectiveCreateClearDelivered` passed two native clients in 34.26 seconds with
+63 subsequent server ticks, no local client simulation, exact sampled attachment
+state and clean audio shutdown. Its earlier Meson screenshots were visually
+inspected before/after removal. Linux v29 validation is pending.
+
 ### Graphical Activity/scene regression
 
 `Tools/RunDedicatedServerSmoke.ps1` accepts `-ActivityClass`, `-ActivityName`,

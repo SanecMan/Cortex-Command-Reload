@@ -2,6 +2,7 @@
 #include "WorldStateAttachments.h"
 
 #include "Activity.h"
+#include "GameActivity.h"
 #include "ActivityMan.h"
 #include "Actor.h"
 #include "CameraMan.h"
@@ -226,6 +227,15 @@ WorldStateProtocol::Snapshot WorldStateSnapshotBuilder::Capture(std::uint32_t ti
 				player.TextBlinkInterval = static_cast<std::uint32_t>(g_FrameMan.GetScreenTextBlinkInterval(screen));
 				player.TextCentered = g_FrameMan.IsScreenTextCentered(screen);
 			}
+		}
+	}
+	if (const auto* gameActivity = dynamic_cast<const GameActivity*>(activity)) {
+		for (const auto& objective : gameActivity->GetObjectivePoints()) {
+			snapshot.Objectives.push_back({UTF8::PreserveLegacyWindows1251(objective.m_Description), objective.m_ScenePos.GetX(),
+			    objective.m_ScenePos.GetY(), static_cast<std::int16_t>(objective.m_Team), static_cast<std::uint8_t>(objective.m_ArrowDir)});
+			// Preserve an overflow entry so encoding fails explicitly instead of
+			// silently dropping objectives or copying an unbounded content list.
+			if (snapshot.Objectives.size() > WorldStateProtocol::c_MaxObjectives) break;
 		}
 	}
 	for (auto networkIdEntry = m_NetworkIdsByRuntimeId.begin(); networkIdEntry != m_NetworkIdsByRuntimeId.end();) {

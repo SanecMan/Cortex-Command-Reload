@@ -19,6 +19,7 @@ def main():
     parser.add_argument('--self-test', action='store_true', help='Run the server binary device-free diagnostics before startup checks.')
     parser.add_argument('--probe-clients', action='store_true', help='Connect two separate device-free client processes to the live server.')
     parser.add_argument('--screen-text', action='store_true', help='Require server HUD messages in the separate client probes.')
+    parser.add_argument('--objectives', action='store_true', help='Require native UTF-8 objective-point capture in client probes.')
     parser.add_argument('--probe-seconds', type=int, default=3, help='Duration of each client connection (3..3600 seconds).')
     parser.add_argument('--input-silence', action='store_true', help='Pause client input for two seconds every six seconds.')
     parser.add_argument('--activity-class', default='GATutorial')
@@ -26,8 +27,8 @@ def main():
     parser.add_argument('--scene', default='Tutorial Bunker')
     parser.add_argument('--require-players', type=int, default=0, help='Require this many distinct active player slots (0..2).')
     args = parser.parse_args()
-    if args.screen_text and not args.probe_clients:
-        parser.error('--screen-text requires --probe-clients.')
+    if (args.screen_text or args.objectives) and not args.probe_clients:
+        parser.error('--screen-text/--objectives require --probe-clients.')
     if not 3 <= args.probe_seconds <= 3600 or (args.input_silence and (not args.probe_clients or args.probe_seconds < 12)):
         parser.error('Use probe duration 3..3600; input silence requires clients and at least 12 seconds.')
     if not 0 <= args.require_players <= 2 or (args.require_players and not args.probe_clients):
@@ -118,17 +119,21 @@ def main():
             if args.probe_clients:
                 if args.screen_text:
                     process.stdin.write(b'debug-screen-text\n'); process.stdin.flush()
+                if args.objectives:
+                    process.stdin.write(b'debug-objectives\n'); process.stdin.flush()
                 probes = []
                 with contextlib.ExitStack() as streams:
                     try:
                         for index in range(2):
                             output = streams.enter_context((root / f'client-{index}.log').open('wb'))
-                            probes.append(subprocess.Popen([str(binary), '--probe-client', '127.0.0.1', str(port), '--probe-seconds', str(args.probe_seconds)] + (['--screen-text'] if args.screen_text else []) + (['--input-silence'] if args.input_silence else []),
+                            probes.append(subprocess.Popen([str(binary), '--probe-client', '127.0.0.1', str(port), '--probe-seconds', str(args.probe_seconds)] + (['--screen-text'] if args.screen_text else []) + (['--objectives'] if args.objectives else []) + (['--input-silence'] if args.input_silence else []),
                                 cwd=game, env=environment, stdout=output, stderr=subprocess.STDOUT,
                                 creationflags=creation_flags))
                         observed_two = False
                         while any(probe.poll() is None for probe in probes):
                             check()
+                            if args.objectives:
+                                process.stdin.write(b'debug-objectives\n'); process.stdin.flush()
                             process.stdin.write(b'status\n'); process.stdin.flush()
                             time.sleep(0.1)
                             observed_two |= bool(re.search(r'INFO status tick=\d+ clients=2 actors=\d+', read_log()))
@@ -149,6 +154,8 @@ def main():
                         raise RuntimeError('Separate client did not receive an advancing populated world.')
                     if args.screen_text and 'hud_received=1' not in report:
                         raise RuntimeError('Separate client did not receive a server HUD message.')
+                    if args.objectives and 'objectives_received=1' not in report:
+                        raise RuntimeError('Separate client did not receive the native objective fixture.')
                     silence_match = re.search(r'silence_windows=(\d+)', report)
                     if args.input_silence and (not silence_match or int(silence_match.group(1)) < 2):
                         raise RuntimeError('Client did not exercise repeated input silence.')
@@ -167,6 +174,8 @@ def main():
                 result['input_silence'] = args.input_silence
                 result['active_player_slots'] = sorted(active_slots)
                 result['probe_input_applied'] = True
+                if args.objectives:
+                    result['objectives_received'] = True
                 if args.screen_text:
                     result['screen_text_received'] = True
             first_tick = None

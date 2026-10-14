@@ -6,6 +6,7 @@
 #include "Actor.h"
 #include "Activity.h"
 #include "ActivityMan.h"
+#include "GameActivity.h"
 #include "AHuman.h"
 #include "Arm.h"
 #include "Atom.h"
@@ -641,6 +642,13 @@ WorldStateClientReplica::ApplyResult WorldStateClientReplica::Apply(const WorldS
 		if (Activity* activity = g_ActivityMan.GetActivity()) {
 			activity->SetActivityState(static_cast<Activity::ActivityState>(snapshot.ActivityState));
 			for (int team = 0; team < Activity::MaxTeamCount; ++team) activity->SetTeamFunds(snapshot.TeamFunds[team], team);
+			if (auto* gameActivity = dynamic_cast<GameActivity*>(activity)) {
+				gameActivity->ClearObjectivePoints();
+				for (const auto& objective : snapshot.Objectives) {
+					gameActivity->AddObjectivePoint(objective.Description, Vector(objective.X, objective.Y), objective.Team,
+					    static_cast<GameActivity::ObjectiveArrowDir>(objective.Arrow));
+				}
+			}
 		}
 		// Local Activity startup can spawn objects independently. A full server
 		// snapshot is the only world authority for this client, including absence.

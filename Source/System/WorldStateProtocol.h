@@ -20,7 +20,7 @@
 namespace RTE::WorldStateProtocol {
 
 inline constexpr std::uint32_t c_Magic = 0x31524343; // "CCR1" on the wire.
-inline constexpr std::uint16_t c_Version = 28;
+inline constexpr std::uint16_t c_Version = 29;
 inline constexpr std::size_t c_TeamCount = 4;
 inline constexpr std::int8_t c_NoActivity = -1;
 inline constexpr std::int8_t c_MaxActivityState = 6;
@@ -133,6 +133,19 @@ struct InventoryItemState {
 };
 inline constexpr std::size_t c_MaxInventoryItems=8192, c_MaxActorInventory=512, c_MaxInventoryDepth=16;
 
+inline constexpr std::size_t c_MaxObjectives = 256, c_MaxObjectiveTextBytes = 4096;
+struct ObjectiveState {
+	std::string Description;
+	float X = 0, Y = 0;
+	std::int16_t Team = c_NoTeam;
+	std::uint8_t Arrow = 0;
+	bool operator==(const ObjectiveState&) const = default;
+};
+inline bool ValidObjective(const ObjectiveState& objective) {
+	return std::isfinite(objective.X) && std::isfinite(objective.Y) && objective.Team >= c_NoTeam && objective.Team < c_MaxTeamCount &&
+	    objective.Arrow <= 3 && objective.Description.size() <= c_MaxObjectiveTextBytes && UTF8::IsValid(objective.Description);
+}
+
 struct Snapshot {
 	std::uint32_t Tick = 0;
 	std::uint32_t SceneRevision = 0;
@@ -144,6 +157,7 @@ struct Snapshot {
 	std::string SceneModuleName;
 	std::string ScenePreset;
 	std::vector<ObjectState> Objects;
+	std::vector<ObjectiveState> Objectives;
 	std::vector<InventoryItemState> Inventory;
 	bool InventoryComplete=true; // Capture rejects oversized/malformed ownership trees instead of truncating them.
 	std::array<PlayerState, c_PlayerSlotCount> Players{};
@@ -747,6 +761,14 @@ inline bool EncodeSnapshot(const Snapshot& snapshot, std::uint32_t sequence, std
 	if (std::adjacent_find(networkIds.begin(), networkIds.end()) != networkIds.end()) {
 		return false;
 	}
+	if (snapshot.Objectives.size() > c_MaxObjectives) return false;
+	Detail::WriteUnsigned(packet, snapshot.Objectives.size(), 2);
+	for (const auto& objective : snapshot.Objectives) {
+		if (!ValidObjective(objective) || !Detail::WriteString(packet, objective.Description, c_MaxObjectiveTextBytes)) return false;
+		Detail::WriteFloat(packet, objective.X); Detail::WriteFloat(packet, objective.Y);
+		Detail::WriteUnsigned(packet, static_cast<std::uint16_t>(objective.Team), 2);
+		Detail::WriteUnsigned(packet, objective.Arrow, 1);
+	}
 	for (const PlayerState& player : snapshot.Players) {
 		if (!std::isfinite(player.CameraX) || !std::isfinite(player.CameraY) || player.Team < c_NoTeam || player.Team >= c_MaxTeamCount ||
 		    (!player.ActiveHuman && player.ControlledActorId != 0)) return false;
@@ -829,6 +851,20 @@ inline bool DecodeSnapshot(std::span<const std::uint8_t> packet, Snapshot& snaps
 		ObjectState object;
 		if (!Detail::ReadObject(packet,offset,object) || !networkIds.insert(object.NetworkId).second) return false;
 		decoded.Objects.push_back(std::move(object));
+	}
+	if (!Detail::ReadUnsigned(packet, offset, 2, value) || value > c_MaxObjectives) return false;
+	const auto objectiveCount = static_cast<std::size_t>(value);
+	decoded.Objectives.reserve(objectiveCount);
+	for (std::size_t index = 0; index < objectiveCount; ++index) {
+		ObjectiveState objective;
+		if (!Detail::ReadString(packet, offset, objective.Description, c_MaxObjectiveTextBytes) ||
+		    !Detail::ReadFloat(packet, offset, objective.X) || !Detail::ReadFloat(packet, offset, objective.Y) ||
+		    !Detail::ReadUnsigned(packet, offset, 2, value)) return false;
+		objective.Team = std::bit_cast<std::int16_t>(static_cast<std::uint16_t>(value));
+		if (!Detail::ReadUnsigned(packet, offset, 1, value)) return false;
+		objective.Arrow = static_cast<std::uint8_t>(value);
+		if (!ValidObjective(objective)) return false;
+		decoded.Objectives.push_back(std::move(objective));
 	}
 	for (PlayerState& player : decoded.Players) {
 		if (!Detail::ReadUnsigned(packet, offset, sizeof(player.ControlledActorId), value)) return false;

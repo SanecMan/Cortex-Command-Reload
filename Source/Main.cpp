@@ -301,6 +301,8 @@ namespace {
 
 	struct DebugRunState {
 		bool NetworkScreenTextVerified = false;
+		bool NetworkObjectivesVerified = false;
+		bool NetworkObjectivesCleared = false;
 		bool EnableDebugAudio = false;
 		std::uint64_t NetworkSoundFixture = 0, NetworkSoundVoice = 0;
 		bool NetworkSoundPlayVerified = false, NetworkSoundStopVerified = false;
@@ -2267,6 +2269,16 @@ int RunPersistentHeadlessServer(const ServerConfiguration& config) {
 	}
 	std::unique_ptr<SoundContainer> diagnosticSound;
 	AHuman* diagnosticReloadActor = nullptr;
+	bool diagnosticObjectives = false;
+	auto applyDiagnosticObjectives = [&] {
+		if (auto* activity = dynamic_cast<GameActivity*>(g_ActivityMan.GetActivity())) {
+			Vector position = g_CameraMan.GetScrollTarget(0);
+			if (auto* actor = activity->GetControlledActor(0)) position = actor->GetPos();
+			activity->ClearObjectivePoints();
+			activity->AddObjectivePoint("Цель сети: Ёжик!", position + Vector(0, -40), 0, GameActivity::ARROWDOWN);
+			activity->AddObjectivePoint("Enemy objective", position + Vector(60, 0), 1, GameActivity::ARROWLEFT);
+		}
+	};
 	std::uint32_t tick = 0;
 	if (success) log("INFO ready port=" + std::to_string(session.GetBoundPort()) + " video_initialized=" + std::to_string(SDL_WasInit(SDL_INIT_VIDEO) != 0));
 	else log("ERROR startup failed");
@@ -2341,6 +2353,12 @@ int RunPersistentHeadlessServer(const ServerConfiguration& config) {
 			} else if (command == "debug-sound-stop") {
 				if (diagnosticSound) diagnosticSound->Stop();
 				log("INFO debug_sound=stopped");
+			} else if (command == "debug-objectives") {
+				diagnosticObjectives = true; applyDiagnosticObjectives(); log("INFO debug_objectives=created");
+			} else if (command == "debug-objectives-clear") {
+				diagnosticObjectives = false;
+				if (auto* activity = dynamic_cast<GameActivity*>(g_ActivityMan.GetActivity())) activity->ClearObjectivePoints();
+				log("INFO debug_objectives=cleared");
 			} else if (command == "debug-screen-text") {
 				if (Activity* activity = g_ActivityMan.GetActivity()) activity->ResetMessageTimer();
 				g_FrameMan.ClearScreenText(0);
@@ -2399,6 +2417,7 @@ int RunPersistentHeadlessServer(const ServerConfiguration& config) {
 		g_TimerMan.Update();
 		if (!g_TimerMan.TimeForSimUpdate()) { std::this_thread::sleep_for(std::chrono::milliseconds(1)); continue; }
 		g_TimerMan.UpdateSim();
+		if (diagnosticObjectives) applyDiagnosticObjectives();
 		StepHeadlessSimulation(&session, ++tick);
 	}
 	diagnosticSound.reset();
@@ -3011,6 +3030,29 @@ void RunGameLoop() {
 						debugRunState.PreviousMagazineRoundsByNetworkId = std::move(currentMagazineRounds);
 					}
 					const WorldStateClientReplica::ApplyResult applied = worldStateClientReplica.Apply(receivedSnapshot, true);
+					if (System::IsDebugRun() && !debugRunState.NetworkObjectivesVerified && !receivedSnapshot.Objectives.empty() &&
+					    receivedSnapshot.Objectives.front().Description == "Цель сети: Ёжик!") {
+						const auto* activity = dynamic_cast<const GameActivity*>(g_ActivityMan.GetActivity());
+						bool matches = activity && activity->GetObjectivePoints().size() == receivedSnapshot.Objectives.size();
+						if (matches) {
+							auto native = activity->GetObjectivePoints().begin();
+							for (const auto& objective : receivedSnapshot.Objectives) {
+								matches = matches && native->m_Description == objective.Description && native->m_ScenePos == Vector(objective.X, objective.Y) &&
+								    native->m_Team == objective.Team && native->m_ArrowDir == objective.Arrow;
+								++native;
+							}
+						}
+						debugRunState.NetworkObjectivesVerified = matches;
+						debugRunState.Log << "world_state_objectives_received=" << (matches ? "passed" : "failed") << '\n' << std::flush;
+					}
+					if (System::IsDebugRun() && debugRunState.NetworkObjectivesVerified && !debugRunState.NetworkObjectivesCleared &&
+					    std::none_of(receivedSnapshot.Objectives.begin(), receivedSnapshot.Objectives.end(), [](const auto& objective) { return objective.Description == "Цель сети: Ёжик!"; })) {
+						const auto* activity = dynamic_cast<const GameActivity*>(g_ActivityMan.GetActivity());
+						const bool cleared = activity && std::none_of(activity->GetObjectivePoints().begin(), activity->GetObjectivePoints().end(),
+						    [](const auto& objective) { return objective.m_Description == "Цель сети: Ёжик!"; });
+						debugRunState.NetworkObjectivesCleared = cleared;
+						debugRunState.Log << "world_state_objectives_cleared=" << (cleared ? "passed" : "failed") << '\n' << std::flush;
+					}
 					if (debugRunState.RequestInventoryTest && applied.InventoryMatches && applied.MissingPresets==0 && applied.AttachmentStatesChecked>0 && applied.AttachmentMismatches==0) {
 						const int observed=ObserveWorldStateInventoryFixture(receivedSnapshot);
 						if (observed==1 && !debugRunState.InventoryInitialObserved) {
