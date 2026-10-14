@@ -338,6 +338,7 @@ namespace {
 		bool ConstructionExpectedAffordable = false;
 		float ConstructionInitialFunds = 0;
 		float ConstructionObjectCost = 0;
+		float ConstructionTerrainFunds = 0;
 		std::uint64_t ConstructionActionUpdate = 0;
 		bool RequirePurchasePolicyTest = false, PurchasePolicyTestObserved = false, RequirePurchasePricingTest = false;
 		bool RequestInventoryTest=false, InventoryInitialObserved=false, InventoryMutationObserved=false, InventoryReuseObserved=false;
@@ -1541,7 +1542,14 @@ namespace {
 		for (int trial = 0; trial < 2 && reconnected; ++trial) {
 			if (trial != 0) {
 				server.Stop();
-				if (!server.StartServer(0, 1, "127.0.0.1") || !client.Connect("127.0.0.1", server.GetBoundPort()) || !receive()) {
+				const bool started = server.StartServer(0, 1, "127.0.0.1");
+				const unsigned short port = server.GetBoundPort();
+				const bool connected = started && client.Connect("127.0.0.1", port);
+				const bool received = connected && receive();
+				log << "client_failure_version_reconnect trial=" << trial << " started=" << started << " port=" << port
+				    << " connect_started=" << connected << " received=" << received << " connected=" << client.IsConnected()
+				    << " snapshot=" << client.HasSnapshot() << " error=" << client.GetConnectionError() << '\n' << std::flush;
+				if (!received) {
 					compressedVersionRefused = false;
 					break;
 				}
@@ -1563,6 +1571,9 @@ namespace {
 			const bool rejected = encoded && !client.IsConnected() && client.HasSnapshot() &&
 				client.GetReceivedSnapshotCount() == count &&
 				client.GetConnectionError().find("Incompatible world-state protocol: server " + std::to_string(version)) == 0;
+			log << "client_failure_version_trial=" << trial << " encoded=" << encoded << " compressed=" << compressed
+			    << " rejected=" << rejected << " snapshots_before=" << count << " snapshots_after=" << client.GetReceivedSnapshotCount()
+			    << " error=" << client.GetConnectionError() << '\n' << std::flush;
 			(trial == 0 ? versionRefused : compressedVersionRefused) = rejected;
 		}
 		if (versionRefused && compressedVersionRefused) {
@@ -3401,7 +3412,27 @@ void RunGameLoop() {
 						uiTest.Log << "construction_object_removal=passed\n" << std::flush;
 						uiTest.ConstructionTestStage = 14; uiTest.ConstructionActionUpdate = uiTest.SimulationUpdates;
 					} else if (uiTest.ConstructionTestStage == 14 && uiTest.SimulationUpdates >= uiTest.ConstructionActionUpdate + 30) {
-						if (worldStateConstructionMenu->SetReady(*worldStateClient, true)) uiTest.ConstructionTestStage = 2;
+						const auto* block = dynamic_cast<const SceneObject*>(g_PresetMan.GetEntityPreset("TerrainObject", "Concrete Block", "Base.rte"));
+						if (worldStateConstructionMenu->OpenPicker() && worldStateConstructionMenu->GetPicker()->SelectGroupByName("Bunker Bits") && worldStateConstructionMenu->SelectObject(block)) {
+							worldStateConstructionMenu->GetPicker()->SetEnabled(false);
+							uiTest.ConstructionTerrainFunds = snapshot.TeamFunds[snapshot.Players[slot].Team];
+							if (worldStateConstructionMenu->PlaceObject(*worldStateClient, Vector(800 + 100 * slot, 120))) uiTest.ConstructionTestStage = 15;
+						}
+					} else if (uiTest.ConstructionTestStage == 15 && !worldStateConstructionMenu->IsPending() &&
+					           worldStateConstructionMenu->LastAccepted() == uiTest.ConstructionExpectedAffordable &&
+					           (uiTest.ConstructionExpectedAffordable ? worldStateConstructionMenu->LastChargedCost() == 20 : worldStateConstructionMenu->LastRejection() == "insufficient_funds") &&
+					           snapshot.TeamFunds[snapshot.Players[slot].Team] == uiTest.ConstructionTerrainFunds - worldStateConstructionMenu->LastChargedCost() &&
+					           g_SceneMan.GetTerrain()->GetMaterialPixel(804 + 100 * slot, 124) == (uiTest.ConstructionExpectedAffordable ? 177 : 0) &&
+					           g_SceneMan.GetTerrain()->GetMaterialPixel(904, 124) == 177 && g_SceneMan.GetTerrain()->GetFGColorPixel(904, 124) == 89 &&
+					           g_SceneMan.GetTerrain()->GetBGColorPixel(904, 124) == 181) {
+						uiTest.Log << "construction_terrain_ui=passed purchased=" << uiTest.ConstructionExpectedAffordable << '\n' << std::flush;
+						worldStateConstructionMenu->SelectBrain();
+						uiTest.ConstructionTestStage = 16; uiTest.ConstructionActionUpdate = uiTest.SimulationUpdates;
+					} else if (uiTest.ConstructionTestStage == 16 && uiTest.SimulationUpdates >= uiTest.ConstructionActionUpdate + 30) {
+						const std::string image = UTF8::PathToString(uiTest.OutputDirectory.filename()) + "/debug-run-construction-terrain.png";
+						const int saved = g_FrameMan.SaveScreenToPNGBlocking(image);
+						uiTest.Log << "construction_terrain_capture=" << (saved == 0 ? "passed" : "failed") << '\n' << std::flush;
+						if (saved == 0 && worldStateConstructionMenu->SetReady(*worldStateClient, true)) uiTest.ConstructionTestStage = 2;
 					} else if (uiTest.ConstructionTestStage == 2 && snapshot.ActivityState == 4 && slot >= 0 && snapshot.Players[slot].ControlledActorId != 0) {
 						uiTest.ConstructionTestPassed = true; uiTest.ConstructionTestStage = 3;
 						uiTest.Log << "world_state_construction_ui_started=passed\n" << std::flush;

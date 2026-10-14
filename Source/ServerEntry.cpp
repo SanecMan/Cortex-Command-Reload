@@ -76,6 +76,17 @@ bool VerifyConstructionBoundary(RTE::WorldStateClientSession& client) {
 
 bool VerifyBrainConstructionStart(RTE::WorldStateClientSession& client, const std::filesystem::path& exchange) {
 	using namespace RTE::WorldStateProtocol;
+	std::array<std::array<int, 3>, 2> terrainSamples{{{{-1, -1, -1}}, {{-1, -1, -1}}}};
+	auto observeTerrain = [&]() {
+		for (const auto& received : client.DrainTerrainPatches(client.GetLatestSnapshot().SceneRevision)) {
+			const auto& patch = received.Patch;
+			for (int slot = 0; slot < 2; ++slot) {
+				const unsigned int x = 804 + 100 * slot, y = 124;
+				if (x >= patch.X && y >= patch.Y && x - patch.X < patch.Width && y - patch.Y < patch.Height)
+					terrainSamples[slot][static_cast<std::size_t>(patch.Layer)] = patch.Pixels[(y - patch.Y) * patch.Width + x - patch.X];
+			}
+		}
+	};
 	ConstructionRequest request;
 	request.RequestId = 1; request.SceneRevision = client.GetLatestSnapshot().SceneRevision;
 	request.Action = ConstructionAction::PlaceBrain;
@@ -88,12 +99,12 @@ bool VerifyBrainConstructionStart(RTE::WorldStateClientSession& client, const st
 			client.Update(); client.SendInputCommand({});
 			if (client.HasSnapshot()) {
 				const auto revision = client.GetLatestSnapshot().SceneRevision;
-				client.DrainSoundEvents(revision); client.DrainTerrainPatches(revision); client.DrainPurchaseResults();
+				client.DrainSoundEvents(revision); observeTerrain(); client.DrainPurchaseResults();
 			}
 			for (const auto& reply : client.DrainConstructionResults()) {
 				if (reply.RequestId != command.RequestId) continue;
 				if (reply.Accepted != accepted || reply.Reason != reason || reply.SceneRevision != request.SceneRevision ||
-				    (paid ? (reply.ChargedCost <= 0 || reply.ObjectId == 0) : reply.ChargedCost != 0)) {
+				    (paid ? (reply.ChargedCost <= 0 || (command.Preset.ClassName == "TerrainObject" ? reply.ObjectId != 0 : reply.ObjectId == 0)) : reply.ChargedCost != 0)) {
 					std::cerr << "Brain response mismatch id=" << reply.RequestId << " accepted=" << reply.Accepted << " reason=" << reply.Reason << '\n'; return false;
 				}
 				if (saved) *saved = reply;
@@ -123,6 +134,12 @@ bool VerifyBrainConstructionStart(RTE::WorldStateClientSession& client, const st
 	if (!residentObserved) { std::cerr << "Resident brain state not received before readiness\n"; return false; }
 	ConstructionRequest invalid = request; invalid.RequestId = 2; invalid.X = -1;
 	if (!send(invalid, false, "outside_scene")) return false;
+	const auto baselineDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(8);
+	while ((terrainSamples[0][0] != 0 || terrainSamples[1][0] != 0 || terrainSamples[0][2] < 0 || terrainSamples[1][2] < 0) && std::chrono::steady_clock::now() < baselineDeadline) {
+		client.Update(); client.SendInputCommand({}); observeTerrain(); std::this_thread::sleep_for(std::chrono::milliseconds(20));
+	}
+	if (terrainSamples[0][0] != 0 || terrainSamples[1][0] != 0 || terrainSamples[0][2] < 0 || terrainSamples[1][2] < 0) { std::cerr << "Terrain baseline missing/not air\n"; return false; }
+	const auto terrainBaseline = terrainSamples;
 	ConstructionRequest object;
 	object.RequestId = 3; object.SceneRevision = request.SceneRevision; object.Action = ConstructionAction::PlaceObject;
 	object.X = 400.0F + 100.0F * client.GetAssignedPlayerSlot(); object.Y = 30;
@@ -218,7 +235,29 @@ bool VerifyBrainConstructionStart(RTE::WorldStateClientSession& client, const st
 	if (!deletionObserved) { std::cerr << "Construction removal/funds mismatch\n"; return false; }
 	std::cout << "construction_removal=passed removed=" << affordable << '\n';
 	std::cout << "construction_objects=passed placed=" << affordable << " charged=" << placed.ChargedCost << '\n';
-	request = {}; request.RequestId = nextId + 5; request.SceneRevision = client.GetLatestSnapshot().SceneRevision;
+	ConstructionRequest terrainRequest;
+	terrainRequest.RequestId = nextId + 5; terrainRequest.SceneRevision = request.SceneRevision; terrainRequest.Action = ConstructionAction::PlaceObject;
+	terrainRequest.X = 800.0F + 100.0F * client.GetAssignedPlayerSlot(); terrainRequest.Y = 120;
+	terrainRequest.Preset = {"TerrainObject", "Base.rte", "Concrete Block"};
+	ConstructionResult terrainPlaced, terrainReplay;
+	if (!send(terrainRequest, affordable, affordable ? "" : "insufficient_funds", &terrainPlaced, affordable) ||
+	    !send(terrainRequest, affordable, affordable ? "" : "insufficient_funds", &terrainReplay, affordable) || terrainPlaced != terrainReplay ||
+	    terrainPlaced.ObjectId != 0 || (affordable && terrainPlaced.ChargedCost != 20)) return false;
+	const std::array<int, 3> blockPixel{177, 89, 181};
+	const int slot = client.GetAssignedPlayerSlot();
+	const auto terrainDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(8);
+	bool terrainObserved = false;
+	while (std::chrono::steady_clock::now() < terrainDeadline) {
+		client.Update(); client.SendInputCommand({}); observeTerrain();
+		if (terrainSamples[slot] == (affordable ? blockPixel : terrainBaseline[slot]) &&
+		    (terrainSamples[0] == blockPixel || terrainSamples[1] == blockPixel) && client.GetLatestSnapshot().TeamFunds[team] == expectedFunds - terrainPlaced.ChargedCost) {
+			terrainObserved = true; break;
+		}
+		std::this_thread::sleep_for(std::chrono::milliseconds(20));
+	}
+	if (!terrainObserved) { std::cerr << "Construction terrain layers/funds mismatch\n"; return false; }
+	std::cout << "construction_terrain=passed material=177 foreground=89 background=181 charged=" << terrainPlaced.ChargedCost << '\n';
+	request = {}; request.RequestId = nextId + 6; request.SceneRevision = client.GetLatestSnapshot().SceneRevision;
 	request.Action = ConstructionAction::SetReady; request.Ready = true;
 	return send(request, true, "");
 }

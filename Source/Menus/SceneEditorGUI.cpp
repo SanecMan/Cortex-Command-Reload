@@ -314,7 +314,8 @@ bool SceneEditorGUI::PlaceNetworkObject(const SceneObject* preset, const Vector&
 	const float funds = activity->GetTeamFunds(team);
 	if (!std::isfinite(funds) || funds < price) return reject("insufficient_funds");
 	if (auto* terrain = dynamic_cast<TerrainObject*>(object)) {
-		terrain->PlaceOnTerrain(g_SceneMan.GetTerrain()); g_SceneMan.GetTerrain()->CleanAir();
+		if (!terrain->PlaceOnTerrain(g_SceneMan.GetTerrain())) return reject("placement_failed");
+		g_SceneMan.GetTerrain()->CleanAir();
 	} else {
 		auto* movable = dynamic_cast<MovableObject*>(object);
 		if (!movable) return reject("invalid_object_type");

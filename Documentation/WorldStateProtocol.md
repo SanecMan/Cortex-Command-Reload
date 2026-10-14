@@ -286,6 +286,42 @@ run left exactly four published files and no temporary files. Misuse of the new
 option without brain-start was rejected with exit code 2 before connection.
 The native Final client is unchanged from the preceding verified removal build.
 
+### Terrain construction replication
+
+PlaceNetworkObject now checks PlaceOnTerrain's return before charging funds.
+The brain-start fixture observes both construction coordinates from the initial
+terrain baseline, requiring air before placement. It then places Base.rte
+Concrete Block, verifies a charge of 20 (or insufficient funds), replays the
+request without a second charge and requires both clients to receive material,
+foreground and background values matching the source bitmap's pixel (4,4):
+177/89/181. It also requires the refused peer's own location to remain unchanged.
+The native terrain change journal publishes the placement through existing
+reliable terrain patches; no protocol layout changed.
+
+The graphical construction fixture selects the block through the client menu,
+submits placement, checks all three applied local terrain layers and funds,
+clears the selection preview and captures `debug-run-construction-terrain.png`
+before readiness. This confirms the placed terrain is visible without the
+render-only object clone. Physical mouse/key events are not synthesized.
+Terrain undo/removal, child-object assemblies and deployment behavior still need
+separate coverage.
+
+`ConstructionTerrain` passed the device-free pair in 24.14 seconds with both
+terrain-layer markers, replay/cost/ownership/removal checks, distinct controlled
+actors and 128 further ticks. Full content/UTF-8/objective/spawn regression passed
+in 23.71 seconds with 128 ticks (`ConstructionTerrainFullRegression`). The first
+graphical run passed construction/layer/capture/start checks but failed one
+compressed-version reconnect smoke, so it is excluded from overall success.
+`ConstructionTerrainDiagnosticVisual` then passed completely in 51.45 seconds
+with two clients, strict attachments/menu/audio and 63 further updates. The
+placed-block screenshot was inspected after clearing the selected preview.
+
+The intermittent reconnect fixture is not declared fixed: additional logs now
+record restart success, bound port, connect/receive state and error, and each
+version trial's encoding/compression, rejection and snapshot counts. This retains
+all existing assertions and supplies evidence on the next recurrence.
+Linux cross-peer authorization run `38588875168` succeeded for `1ec61b9636d`.
+
 ### Brain placement and native start
 
 `SceneEditorGUI::InstallNetworkBrain` clones the server's selected brain, existing

@@ -227,6 +227,8 @@ def main():
                             raise RuntimeError('Construction object placement/replay/funds guards were not verified.')
                         if 'construction_removal=passed' not in report:
                             raise RuntimeError('Construction removal/replay/funds guards were not verified.')
+                        if 'construction_terrain=passed material=177 foreground=89 background=181' not in report:
+                            raise RuntimeError('Construction terrain layers/replay/funds were not verified on both peers.')
                         construction_purchase_observed |= 'construction_objects=passed placed=1' in report
                         foreign_removal_denied |= 'foreign_object_removal_denied=passed id=' in report
                     silence_match = re.search(r'silence_windows=(\d+)', report)
@@ -268,6 +270,7 @@ def main():
                     result['construction_purchase_and_replay'] = True
                     result['construction_removal_and_replay'] = True
                     result['foreign_construction_removal_denied'] = True
+                    result['construction_terrain_layers_and_replay'] = True
                 if args.construction_check:
                     result['construction_checks_per_client'] = 7
                 result['probe_seconds'] = args.probe_seconds
