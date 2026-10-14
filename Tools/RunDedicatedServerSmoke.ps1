@@ -13,6 +13,7 @@ param(
     [switch]$CheckInventory,
     [switch]$CheckReloadHud,
     [switch]$CheckRecentShot,
+    [switch]$CheckUnexpectedDisconnect,
     [switch]$CheckMenuConnection,
     [switch]$CheckScreenText,
     [switch]$CheckSound,
@@ -46,6 +47,7 @@ if ($CheckBuyMenu -and ($CheckPurchases -or $CheckTeamFunds)) { throw 'Run the b
 if ($CheckInventory -and ($CheckBuyMenu -or $CheckPurchases -or $CheckTeamFunds)) { throw 'Run the inventory fixture separately.' }
 if ($CheckReloadHud -and ($CheckInventory -or $CheckBuyMenu -or $CheckPurchases -or $CheckTeamFunds)) { throw 'Run reload HUD independently from other gameplay fixtures.' }
 if ($CheckRecentShot -and ($CheckReloadHud -or $CheckInventory -or $CheckBuyMenu -or $CheckPurchases -or $CheckTeamFunds)) { throw 'Run recent-shot fixture independently.' }
+if ($CheckUnexpectedDisconnect -and ($CheckRecentShot -or $CheckReloadHud -or $CheckInventory -or $CheckBuyMenu -or $CheckPurchases -or $CheckTeamFunds -or $CheckSound)) { throw 'Run unexpected-disconnect fixture independently.' }
 if (!$ServerExecutablePath) { $ServerExecutablePath = Join-Path $PSScriptRoot '..\CortexCommandServer.exe' }
 if (!$ClientExecutablePath) { $ClientExecutablePath = Join-Path $PSScriptRoot '..\Cortex Command.exe' }
 $serverBinary = (Resolve-Path -LiteralPath $ServerExecutablePath).Path
@@ -185,6 +187,29 @@ try {
                 }
             }
         }
+    }
+    if ($CheckUnexpectedDisconnect) {
+        foreach ($index in 1..2) {
+            $networkReport=Join-Path $gameDirectory "ScreenShots\$OutputPrefix-Client$index\WorldStateClient.log"
+            while ((Read-Report $networkReport) -notmatch '(?m)^snapshot=') {
+                Check-Time
+                if ($clients[$index-1].HasExited -or $server.HasExited) { throw 'Peer exited before disconnect fixture was ready.' }
+                Start-Sleep -Milliseconds 100
+            }
+        }
+        $server.StandardInput.WriteLine('quit'); $server.StandardInput.Flush()
+        while (!$server.HasExited) { Check-Time; Start-Sleep -Milliseconds 100 }
+        if ($server.ExitCode -ne 0) { throw 'Disconnect fixture server shutdown failed.' }
+        foreach ($index in 1..2) {
+            $client=$clients[$index-1]
+            while (!$client.HasExited) { Check-Time; Start-Sleep -Milliseconds 100 }
+            $report=Read-Report (Join-Path $gameDirectory "ScreenShots\$OutputPrefix-Client$index\DebugRun.log")
+            if ($client.ExitCode -ne 1 -or $report -notmatch '(?m)^unexpected_network_disconnect=' -or $report -notmatch '(?m)^result=failed') {
+                throw 'Debug client did not report and exit after unexpected disconnect.'
+            }
+        }
+        [pscustomobject]@{Result='passed'; Clients=2; ExpectedClientExitCode=1; ServerExitCode=0; ElapsedSeconds=[Math]::Round($timer.Elapsed.TotalSeconds,2)}
+        return
     }
     $mixPaused = $false; $mixResumed = $false
     $soundStarted = [bool]($CheckLateJoinSound -or $CheckStaggeredSound)

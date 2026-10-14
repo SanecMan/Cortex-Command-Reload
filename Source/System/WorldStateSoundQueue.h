@@ -16,11 +16,16 @@ public:
 	bool Push(std::uint32_t revision, std::uint32_t sequence, std::vector<WorldStateSoundProtocol::Event> events) {
 		if (!revision || !sequence || events.size() > WorldStateSoundProtocol::MaxEvents) return false;
 		if (m_LastSequence && static_cast<std::int32_t>(sequence - m_LastSequence) <= 0) return true;
-		if (!events.empty() && (m_Batches.size() >= MaxBatches || events.size() > MaxQueuedEvents - m_Count)) return false;
+		const bool merge = !m_Batches.empty() && m_Batches.back().Revision == revision;
+		if (!events.empty() && ((!merge && m_Batches.size() >= MaxBatches) || events.size() > MaxQueuedEvents - m_Count)) return false;
 		m_LastSequence = sequence;
 		if (!events.empty()) {
 			m_Count += events.size();
-			m_Batches.push_back({revision, std::move(events)});
+			if (merge) {
+				// Packet boundaries have no playback semantics. Retain every command
+				// in order without spending a scene batch slot for each small packet.
+				for (auto& event : events) m_Batches.back().Events.push_back(std::move(event));
+			} else m_Batches.push_back({revision, std::move(events)});
 		}
 		return true;
 	}

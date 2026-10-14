@@ -2777,6 +2777,10 @@ void RunGameLoop() {
 			worldStateSoundPlayback.Clear();
 			const std::string reason = worldStateClient->GetConnectionError();
 			if (worldStateClientLog.is_open()) worldStateClientLog << "connection_lost=" << reason << '\n' << std::flush;
+			if (System::IsDebugRun() && !GetDebugRunState().RequireReconnectMenuTest && !MainMenuGUI::DebugDisconnectMenuTest) {
+				GetDebugRunState().Log << "unexpected_network_disconnect=" << reason << '\n' << std::flush;
+				FinishDebugRun(false); return;
+			}
 			g_TimerMan.PauseSim(true);
 			// Pause the clock without running Activity pause callbacks on the replica.
 			g_MenuMan.ShowDisconnectedServer(reason);

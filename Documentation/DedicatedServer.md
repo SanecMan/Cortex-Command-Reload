@@ -964,6 +964,13 @@ disconnect. The fixture uses `debug-shot-create` and `debug-shot-fire` console
 commands in a disposable session. Screenshot directories are cleaned on repeat
 runs using the same output prefix. Protocol 28 binaries must be paired.
 
+`-CheckUnexpectedDisconnect` runs separately from gameplay/sound fixtures. After
+both clients receive a world snapshot, the harness stops the server and requires
+both debug clients to log `unexpected_network_disconnect` and exit 1 with
+`result=failed`; the overall negative test reports passed. It catches diagnostic
+runs that would otherwise remain in the connection/menu screen indefinitely.
+Normal interactive clients retain the disconnected menu and reconnect flow.
+
 ## Remaining limits
 
 This is a working Windows/Linux headless host foundation. A complete gameplay release

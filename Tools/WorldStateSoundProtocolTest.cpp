@@ -82,9 +82,17 @@ int main() {
     queue.Clear();
     if (!check(queue.Push(1, 1, source) && queue.Drain(1) == source, "reconnect resets sequence")) return 1;
     queue.Clear();
+    std::vector<Event> mergedExpected;
+    for (std::uint32_t index = 1; index <= 65; ++index) {
+        auto command = stop; command.Container = index;
+        mergedExpected.push_back(command);
+        if (!check(queue.Push(1, index, {command}), "small same-scene packet aggregation")) return 1;
+    }
+    if (!check(queue.Size() == 65 && queue.Drain(1) == mergedExpected, "aggregation preserves every command and order")) return 1;
+    queue.Clear();
     for (std::uint32_t index = 1; index <= RTE::WorldStateSoundQueue::MaxBatches; ++index)
-        if (!check(queue.Push(1, index, {stop}), "batch capacity")) return 1;
-    if (!check(!queue.Push(1, 33, {stop}) && queue.Size() == 32 && queue.Drain(1).size() == 32, "batch overflow preserves lifecycle events")) return 1;
+        if (!check(queue.Push(1 + index % 2, index, {stop}), "batch capacity")) return 1;
+    if (!check(!queue.Push(2, 33, {stop}) && queue.Size() == 32 && queue.Drain(3).empty() && queue.Size() == 0, "scene batch overflow preserves event budget")) return 1;
     queue.Clear();
     maximum.resize(MaxEvents);
     for (std::uint32_t index = 1; index <= 8; ++index)

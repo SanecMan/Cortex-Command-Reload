@@ -44,7 +44,29 @@ The same-prefix rerun after the identical-image/expired-age guards passed in
 attachment checks. `ShotFlashV28Inventory` passed sequence/age transitions in
 45.34 seconds with two clients and 64 updates after disconnect. Received stale
 ages are preserved verbatim, even with FireFrame set, and do not create a fresh
-render pulse. Native Final and Linux v28 checks are pending.
+render pulse. Linux CI `38509673969` for `285eddbcd3e` passed GCC timeline/codec
+checks, server compilation, device-free self-tests and two-client build-tree/
+packaged checks in 11.58/8.61 seconds. UTF-8 input/config/text, no video device
+and SIGTERM shutdown passed. This is not a Linux visual or cross-OS LAN check.
+
+Native Final compiled and linked, but its first delivered visual run exposed
+sound receive-queue overflow and an unattended debug client returning to the
+menu until the 360-second harness timeout. A minidump showed RunMenuLoop rather
+than a deadlocked simulation. Consecutive same-scene sound packets are now
+combined without dropping/reordering commands, retaining the 2048-event limit
+and 32 distinct pending scene-batch limit. Unexpected disconnect ends a debug
+run immediately unless an explicit disconnect/reconnect menu test is active.
+The sound queue regression checks 65 small packets and exact command order;
+the existing event-budget/scene-order/wrap/lifecycle tests also pass.
+
+After these guards, MSBuild Final|x64 compiled and linked and the matched root
+pair passed `ShotFlashV28Delivered` in 32.92 seconds, with the rendered recent
+shot and expiry, unchanged ammunition and 62 updates after disconnect.
+`ShotFlashV28SoundQueue` passed two Meson clients with real audio/mix controls
+in 33.32 seconds and 63 further server updates. `ShotFlashV28Disconnect` passed
+the deliberate-server-shutdown test in 18.46 seconds: both root debug clients
+logged the disconnect and exited 1; the server exited 0. The queue/debug-guard
+follow-up still requires its own Linux CI run.
 
 This is bounded latest-shot reconstruction rather than a queue of every shot:
 bursts can coalesce, removed weapons have no surviving history, and packet
