@@ -1027,6 +1027,28 @@ void GameActivity::End() {
 	m_GameOverTimer.Reset();
 }
 
+bool GameActivity::SetNetworkConstructionReady(int player, bool ready, std::string& reason) {
+	reason.clear();
+	if (player < Players::PlayerOne || player >= Players::MaxPlayerCount || !PlayerActive(player) || !PlayerHuman(player)) {
+		reason = "inactive_player"; return false;
+	}
+	if (m_ActivityState != ActivityState::Editing) { reason = "not_editing"; return false; }
+	auto* scene = g_SceneMan.GetScene();
+	auto* editor = m_pEditorGUI[player];
+	if (!scene || !editor) { reason = "editor_unavailable"; return false; }
+	if (ready) {
+		const bool hadBrainCandidate = scene->GetResidentBrain(player) || g_MovableMan.GetUnassignedBrain(GetTeamOfPlayer(player));
+		if (!editor->TestBrainResidence()) {
+			reason = hadBrainCandidate ? "invalid_brain_placement" : "brain_not_placed"; return false;
+		}
+		editor->SetEditorGUIMode(SceneEditorGUI::DONEEDITING);
+	} else {
+		m_ReadyToStart[player] = false;
+		editor->SetEditorGUIMode(scene->GetResidentBrain(player) ? SceneEditorGUI::ADDINGOBJECT : SceneEditorGUI::INSTALLINGBRAIN);
+	}
+	return true;
+}
+
 void GameActivity::UpdateEditing() {
 	// Editing the scene, just update the editor guis and see if players are ready to start or not
 	if (m_ActivityState != ActivityState::Editing)

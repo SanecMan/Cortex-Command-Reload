@@ -150,6 +150,18 @@ bool WorldStateTransport::SendPurchaseRequest(const WorldStateProtocol::Purchase
 	return WorldStateProtocol::EncodePurchaseRequest(request, packet) && Send(m_Peer->GetSystemAddressFromIndex(0), packet, false);
 }
 
+bool WorldStateTransport::SendConstructionRequest(const WorldStateProtocol::ConstructionRequest& request) {
+	if (!m_Peer || m_Peer->NumberOfConnections() == 0) return false;
+	std::vector<std::uint8_t> packet;
+	return WorldStateProtocol::EncodeConstructionRequest(request, packet) &&
+	    Send(m_Peer->GetSystemAddressFromIndex(0), packet, false, RELIABLE_ORDERED);
+}
+
+bool WorldStateTransport::SendConstructionResult(const RakNet::AddressOrGUID& target, const WorldStateProtocol::ConstructionResult& result) {
+	std::vector<std::uint8_t> packet;
+	return WorldStateProtocol::EncodeConstructionResult(result, packet) && Send(target, packet, false, RELIABLE_ORDERED);
+}
+
 bool WorldStateTransport::SendPurchaseResult(const RakNet::AddressOrGUID& target, const WorldStateProtocol::PurchaseResult& result) {
 	std::vector<std::uint8_t> packet;
 	return WorldStateProtocol::EncodePurchaseResult(result, packet) && Send(target, packet, false);

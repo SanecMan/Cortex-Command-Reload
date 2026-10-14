@@ -140,6 +140,10 @@ jobs:
           --game-dir . --output-prefix LinuxLatePlayerCI --timeout 300
           --probe-clients --probe-seconds 12 --second-client-delay 3 --require-control --require-players 2
           --activity-class GAScripted --activity "Bunker Breach" --scene "Zekarra Mining Outpost"
+      - name: Verify construction command boundaries
+        run: |
+          python Tools/run_server_smoke.py --exe build-server/CortexCommandServer --game-dir . --output-prefix LinuxConstructionPhaseCI --timeout 300 --probe-clients --construction-check --require-players 2 --activity-class GAScripted --activity "Bunker Breach" --scene "Zekarra Mining Outpost"
+          python Tools/run_server_smoke.py --exe build-server/CortexCommandServer --game-dir . --output-prefix LinuxConstructionEditingCI --timeout 300 --probe-clients --construction-check --require-players 2 --activity-class GAScripted --activity "Skirmish Defense" --scene "Ketanot Hills"
       - name: Verify late Army participants
         run: |
           python Tools/run_server_smoke.py --exe build-server/CortexCommandServer --game-dir . --output-prefix LinuxArmyLateCI --timeout 300 --probe-clients --probe-seconds 12 --second-client-delay 3 --require-control --require-players 2 --activity-class GAScripted --activity "One-Man Army" --scene "Ketanot Hills"
@@ -173,6 +177,8 @@ jobs:
             ScreenShots/LinuxRosterRestartCI/
             ScreenShots/LinuxDisconnectedRosterCI/
             ScreenShots/LinuxLatePlayerCI/
+            ScreenShots/LinuxConstructionPhaseCI/
+            ScreenShots/LinuxConstructionEditingCI/
             ScreenShots/LinuxArmyLateCI/
             ScreenShots/LinuxArmyDiggersLateCI/
             build-server/meson-logs/

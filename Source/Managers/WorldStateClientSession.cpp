@@ -43,6 +43,7 @@ void WorldStateClientSession::Disconnect() {
 	m_TerrainPatches.clear();
 	m_SoundQueue.Clear();
 	m_PurchaseResults.clear();
+	m_ConstructionResults.clear();
 	m_PurchasePolicy={}; m_PolicySequence=0;
 	m_ReceivedSnapshotCount = 0;
 	m_InputCommandSequence = 0;
@@ -61,6 +62,13 @@ std::vector<WorldStateProtocol::PurchaseResult> WorldStateClientSession::DrainPu
 		results.push_back(std::move(m_PurchaseResults.front()));
 		m_PurchaseResults.pop_front();
 	}
+	return results;
+}
+
+std::vector<WorldStateProtocol::ConstructionResult> WorldStateClientSession::DrainConstructionResults() {
+	std::vector<WorldStateProtocol::ConstructionResult> results;
+	results.reserve(m_ConstructionResults.size());
+	while (!m_ConstructionResults.empty()) { results.push_back(std::move(m_ConstructionResults.front())); m_ConstructionResults.pop_front(); }
 	return results;
 }
 
@@ -144,6 +152,12 @@ void WorldStateClientSession::Update() {
 			continue;
 		}
 		WorldStateProtocol::PurchaseResult purchase;
+		WorldStateProtocol::ConstructionResult construction;
+		if (WorldStateProtocol::DecodeConstructionResult(snapshotPayload, construction)) {
+			if (m_ConstructionResults.size() >= 64) m_ConstructionResults.pop_front();
+			m_ConstructionResults.push_back(std::move(construction));
+			continue;
+		}
 		WorldStateProtocol::PurchasePolicy policy;
 		std::uint32_t policySequence=0;
 		if (WorldStateProtocol::DecodePurchasePolicy(snapshotPayload,policy,&policySequence)) {

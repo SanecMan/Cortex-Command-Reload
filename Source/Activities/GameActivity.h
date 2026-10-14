@@ -164,6 +164,8 @@ namespace RTE {
 		/// @param which Which player to get the GUI for. (default: 0)
 		/// @return A pointer to a SceneEditorGUI. Ownership is NOT transferred!
 		SceneEditorGUI* GetEditorGUI(unsigned int which = 0) const { return m_pEditorGUI[which]; }
+		/// Validate a remote player's readiness intent using the native editor.
+		bool SetNetworkConstructionReady(int player, bool ready, std::string& reason);
 
 		/// Locks a player controlled actor to a specific controller mode.
 		/// Locking the actor will disable player input, including switching actors.

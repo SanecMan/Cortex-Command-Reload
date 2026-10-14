@@ -32,6 +32,7 @@ def main():
     parser.add_argument('--disconnect-one-restart', action='store_true', help='Restart again after the first probe disconnects; the remaining probe requires one human.')
     parser.add_argument('--check-deferred-restart', action='store_true', help='Request restart with no peers, then connect a new player and require completion.')
     parser.add_argument('--second-client-delay', type=float, default=0, help='Delay the second peer by 0..30 seconds for late admission checks.')
+    parser.add_argument('--construction-check', action='store_true', help='Check construction response routing and replay/scene/phase guards.')
     args = parser.parse_args()
     if (args.screen_text or args.objectives) and not args.probe_clients:
         parser.error('--screen-text/--objectives require --probe-clients.')
@@ -47,6 +48,8 @@ def main():
         parser.error('Disconnect/restart needs control checks, one initial restart, no silence and at least 12 seconds.')
     if args.check_deferred_restart and not args.probe_clients:
         parser.error('Deferred restart check requires client probes.')
+    if args.construction_check and (not args.probe_clients or args.restart_with_clients or args.input_silence):
+        parser.error('Construction checks need probes and must run separately from restart/silence fixtures.')
     if not 0 <= args.second_client_delay <= 30 or (args.second_client_delay and (not args.probe_clients or args.probe_seconds < args.second_client_delay + 3)):
         parser.error('Second client delay needs probes lasting at least delay + 3 seconds.')
     if args.second_client_delay and args.disconnect_one_restart:
@@ -157,7 +160,7 @@ def main():
                             control_options = ['--require-control', '--minimum-revision', str(minimum_revision)] if args.require_control else []
                             if args.disconnect_one_restart:
                                 control_options += ['--expected-humans', str(2 if index == 0 else 1)]
-                            probes.append(subprocess.Popen([str(binary), '--probe-client', '127.0.0.1', str(port), '--probe-seconds', str(duration)] + (['--screen-text'] if args.screen_text else []) + (['--objectives'] if args.objectives else []) + control_options + (['--input-silence'] if args.input_silence else []),
+                            probes.append(subprocess.Popen([str(binary), '--probe-client', '127.0.0.1', str(port), '--probe-seconds', str(duration)] + (['--screen-text'] if args.screen_text else []) + (['--objectives'] if args.objectives else []) + control_options + (['--input-silence'] if args.input_silence else []) + (['--construction-check'] if args.construction_check else []),
                                 cwd=game, env=environment, stdout=output, stderr=subprocess.STDOUT,
                                 creationflags=creation_flags))
                         observed_two = False
@@ -193,15 +196,20 @@ def main():
                                 except subprocess.TimeoutExpired:
                                     probe.kill(); probe.wait()
                 active_slots = set()
+                editing_probes = True
                 controlled_actors = set()
                 for index in range(2):
                     report = (root / f'client-{index}.log').read_text(encoding='utf-8')
-                    if not re.search(r'result=passed snapshots=\d+ objects=[1-9]\d* tick_delta=\d+ input_queued=[1-9]\d*', report):
+                    object_count_pattern = r'\d+' if args.construction_check and 'activity_state=2 ' in report else r'[1-9]\d*'
+                    if not re.search(r'result=passed snapshots=\d+ objects=' + object_count_pattern + r' tick_delta=\d+ input_queued=[1-9]\d*', report):
                         raise RuntimeError('Separate client did not receive an advancing populated world.')
                     if args.screen_text and 'hud_received=1' not in report:
                         raise RuntimeError('Separate client did not receive a server HUD message.')
                     if args.objectives and 'objectives_received=1' not in report:
                         raise RuntimeError('Separate client did not receive the native objective fixture.')
+                    if args.construction_check and 'construction_checks=7' not in report:
+                        raise RuntimeError('Construction command checks were not verified.')
+                    editing_probes &= 'activity_state=2 ' in report
                     silence_match = re.search(r'silence_windows=(\d+)', report)
                     if args.input_silence and (not silence_match or int(silence_match.group(1)) < 2):
                         raise RuntimeError('Client did not exercise repeated input silence.')
@@ -232,6 +240,8 @@ def main():
                 if args.input_silence and (not active_slots or any(network_log.count(f'neutralized stale network input for player slot {slot}') < 2 for slot in active_slots)):
                     raise RuntimeError('Server did not neutralize each active silent player repeatedly.')
                 result['separate_clients'] = 2
+                if args.construction_check:
+                    result['construction_checks_per_client'] = 7
                 result['probe_seconds'] = args.probe_seconds
                 result['second_client_delay'] = args.second_client_delay
                 result['input_silence'] = args.input_silence
@@ -256,7 +266,7 @@ def main():
                 if not statuses:
                     continue
                 tick, actors = map(int, statuses[-1])
-                if actors == 0:
+                if actors == 0 and not (args.construction_check and editing_probes):
                     raise RuntimeError('Tutorial simulation has no actors.')
                 if first_tick is None:
                     first_tick = tick

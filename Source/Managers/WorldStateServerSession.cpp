@@ -102,6 +102,8 @@ bool WorldStateServerSession::Start(const std::string& bindAddress, unsigned sho
 }
 
 void WorldStateServerSession::Stop() {
+	m_LastConstructionByClient.clear();
+	m_LastConstructionTimeByClient.clear();
 	m_PendingSoundBaselines.clear();
 	GetWorldStateSoundCapture().End();
 	g_SceneMan.SetWorldStateTerrainTrackingEnabled(false);
@@ -299,6 +301,8 @@ void WorldStateServerSession::PollNetwork(std::uint32_t simulationTick) {
 			m_LastInputTimeByClient.erase(clientAddress);
 			m_LastPurchaseByClient.erase(clientAddress);
 			m_LastPolicyByClient.erase(clientAddress);
+			m_LastConstructionByClient.erase(clientAddress);
+			m_LastConstructionTimeByClient.erase(clientAddress);
 			m_LastPurchaseTimeByClient.erase(clientAddress);
 			m_ResetVotesByClient.erase(clientAddress);
 			m_RestartVotesByClient.erase(clientAddress);
@@ -332,6 +336,8 @@ void WorldStateServerSession::PollNetwork(std::uint32_t simulationTick) {
 			m_LastPolicyByClient.erase(clientAddress);
 			m_LastPurchaseByClient.erase(clientAddress);
 			m_LastPurchaseTimeByClient.erase(clientAddress);
+			m_LastConstructionByClient.erase(clientAddress);
+			m_LastConstructionTimeByClient.erase(clientAddress);
 			m_ReportedPlayerSlots.erase(clientAddress);
 			m_LastInputSequenceByClient.erase(clientAddress);
 			m_LastInputTimeByClient.erase(clientAddress);
@@ -356,6 +362,41 @@ void WorldStateServerSession::PollNetwork(std::uint32_t simulationTick) {
 			m_PendingInputPackets.push_back(packet);
 		}
 	}
+}
+
+void WorldStateServerSession::ProcessConstruction(const WorldStateTransport::ReceivedPacket& packet, const WorldStateProtocol::ConstructionRequest& request) {
+	const std::string client(packet.Sender.ToString(true));
+	if (!m_ClientAddresses.contains(client)) return;
+	WorldStateProtocol::ConstructionResult result;
+	result.RequestId = request.RequestId;
+	result.SceneRevision = m_SnapshotBuilder.RefreshSceneRevision();
+	const auto previous = m_LastConstructionByClient.find(client);
+	const auto slot = m_ReportedPlayerSlots.find(client);
+	auto* activity = dynamic_cast<GameActivity*>(g_ActivityMan.GetActivity());
+	const auto now = std::chrono::steady_clock::now();
+	if (slot == m_ReportedPlayerSlots.end() || slot->second < 0) result.Reason = "spectator";
+	else if (request.SceneRevision != result.SceneRevision) result.Reason = "stale_scene";
+	else if (previous != m_LastConstructionByClient.end() && request.RequestId == previous->second.Request.RequestId) {
+		if (request == previous->second.Request) { m_Transport.SendConstructionResult(packet.Sender, previous->second.Result); return; }
+		result.Reason = "conflicting_request";
+	} else if (previous != m_LastConstructionByClient.end() && request.RequestId < previous->second.Request.RequestId) result.Reason = "stale_request";
+	else {
+		const auto lastTime = m_LastConstructionTimeByClient.find(client);
+		if (lastTime != m_LastConstructionTimeByClient.end() && now - lastTime->second < std::chrono::milliseconds(250)) result.Reason = "rate_limit";
+		else if (!activity || activity->GetActivityState() != Activity::Editing) result.Reason = "not_editing";
+		else if (request.Action != WorldStateProtocol::ConstructionAction::SetReady) result.Reason = "placement_unavailable";
+		else {
+			g_ThreadMan.GetPriorityThreadPool().wait_for_tasks();
+			g_ThreadMan.GetBackgroundThreadPool().wait_for_tasks();
+			result.Accepted = activity->SetNetworkConstructionReady(slot->second, request.Ready, result.Reason);
+		}
+		m_LastConstructionTimeByClient[client] = now;
+	}
+	// Do not replace the cached original response on ID reuse or stale requests.
+	if (previous == m_LastConstructionByClient.end() || request.RequestId > previous->second.Request.RequestId)
+		m_LastConstructionByClient[client] = {request, result};
+	if (!m_Transport.SendConstructionResult(packet.Sender, result)) Log("ERROR: construction result send failed client=" + client);
+	Log("INFO: construction id=" + std::to_string(result.RequestId) + " accepted=" + std::to_string(result.Accepted) + " reason=" + result.Reason + " client=" + client);
 }
 
 void WorldStateServerSession::ProcessPurchase(const WorldStateTransport::ReceivedPacket& packet, const WorldStateProtocol::PurchaseRequest& request) {
@@ -523,6 +564,11 @@ void WorldStateServerSession::Update(std::uint32_t simulationTick) {
 		std::uint32_t sequence = 0;
 		const std::string clientAddress(packet.Sender.ToString(true));
 		WorldStateProtocol::PurchaseRequest purchase;
+		WorldStateProtocol::ConstructionRequest construction;
+		if (WorldStateProtocol::DecodeConstructionRequest(packet.Payload, construction)) {
+			ProcessConstruction(packet, construction);
+			continue;
+		}
 		if (WorldStateProtocol::DecodePurchaseRequest(packet.Payload, purchase)) {
 			ProcessPurchase(packet, purchase);
 			continue;

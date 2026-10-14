@@ -20,11 +20,63 @@
 namespace {
 // Separate-process transport diagnostic. It loads no content or devices and
 // does not stand in for a graphical client's replica/gameplay validation.
+bool VerifyConstructionBoundary(RTE::WorldStateClientSession& client) {
+	using namespace RTE::WorldStateProtocol;
+	ConstructionRequest request;
+	request.RequestId = 1; request.SceneRevision = client.GetLatestSnapshot().SceneRevision;
+	request.Action = ConstructionAction::SetReady;
+	const bool editing = client.GetLatestSnapshot().ActivityState == 2;
+	const bool spectator = client.GetAssignedPlayerSlot() < 0;
+	ConstructionResult original;
+	auto checkReply = [&](const ConstructionRequest& command, bool accepted, const std::string& reason, ConstructionResult* saved = nullptr) {
+		client.DrainConstructionResults();
+		if (!client.SendConstructionRequest(command)) return false;
+		const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(4);
+		while (std::chrono::steady_clock::now() < deadline) {
+			client.Update();
+			if (client.HasSnapshot()) {
+				const auto revision = client.GetLatestSnapshot().SceneRevision;
+				client.DrainSoundEvents(revision); client.DrainTerrainPatches(revision); client.DrainPurchaseResults();
+			}
+			client.SendInputCommand({});
+			for (const auto& result : client.DrainConstructionResults()) {
+				if (result.RequestId != command.RequestId) continue;
+				if (result.Accepted != accepted || result.Reason != reason || result.SceneRevision != request.SceneRevision ||
+				    result.ChargedCost != 0 || result.ObjectId != 0) {
+					std::cerr << "Construction response mismatch id=" << result.RequestId << " accepted=" << result.Accepted << " reason=" << result.Reason << '\n';
+					return false;
+				}
+				if (saved) *saved = result;
+				std::this_thread::sleep_for(std::chrono::milliseconds(350));
+				return true;
+			}
+			if (!client.GetConnectionError().empty()) return false;
+			std::this_thread::sleep_for(std::chrono::milliseconds(20));
+		}
+		std::cerr << "Construction response timed out\n";
+		return false;
+	};
+	const std::string denied = spectator ? "spectator" : "not_editing";
+	if (!checkReply(request, editing && !spectator, editing && !spectator ? "" : denied, &original)) return false;
+	if (!checkReply(request, original.Accepted, original.Reason)) return false;
+	request.Ready = true;
+	if (!checkReply(request, false, spectator ? "spectator" : "conflicting_request")) return false;
+	request.Ready = false;
+	if (!checkReply(request, original.Accepted, original.Reason)) return false;
+	ConstructionRequest stale = request; stale.RequestId = 2; ++stale.SceneRevision;
+	if (!checkReply(stale, false, spectator ? "spectator" : "stale_scene")) return false;
+	request.RequestId = 3; request.Ready = true;
+	if (!checkReply(request, false, spectator ? "spectator" : (editing ? "brain_not_placed" : "not_editing"))) return false;
+	request.RequestId = 1; request.Ready = false;
+	return checkReply(request, false, spectator ? "spectator" : "stale_request");
+}
+
 int RunClientProbe(const std::vector<std::string>& arguments) {
 	bool requireText = false, inputSilence = false, requireObjectives = false, requireControl = false;
 	unsigned int probeSeconds = 3;
 	unsigned int minimumRevision = 1;
 	unsigned int expectedHumans = 0;
+	bool constructionCheck = false, constructionPassed = false;
 	if (arguments.size() < 4 || arguments[2].empty()) {
 		std::cerr << "Usage: CortexCommandServer --probe-client ADDRESS PORT [--screen-text] [--probe-seconds 3..3600] [--input-silence]\n"; return 2;
 	}
@@ -32,6 +84,7 @@ int RunClientProbe(const std::vector<std::string>& arguments) {
 		if (arguments[index] == "--screen-text") requireText = true;
 		else if (arguments[index] == "--objectives") requireObjectives = true;
 		else if (arguments[index] == "--require-control") requireControl = true;
+		else if (arguments[index] == "--construction-check") constructionCheck = true;
 		else if (arguments[index] == "--expected-humans" && index + 1 < arguments.size()) {
 			const auto& value = arguments[++index];
 			const auto number = std::from_chars(value.data(), value.data() + value.size(), expectedHumans);
@@ -83,6 +136,12 @@ int RunClientProbe(const std::vector<std::string>& arguments) {
 			std::cerr << client.GetConnectionError() << '\n'; client.Disconnect(); return 1;
 		}
 		if (client.IsConnected() && client.HasPlayerAssignment() && client.HasSnapshot()) {
+			if (constructionCheck && !constructionPassed) {
+				// The initial assignment is a spectator placeholder until Activity activation.
+				if (client.GetAssignedPlayerSlot() < 0) { std::this_thread::sleep_for(std::chrono::milliseconds(20)); continue; }
+				if (!VerifyConstructionBoundary(client)) { client.Disconnect(); return 1; }
+				constructionPassed = true;
+			}
 			const auto& snapshot = client.GetLatestSnapshot();
 			const int slot = client.GetAssignedPlayerSlot();
 			const auto controlledActor = slot >= 0 ? snapshot.Players[slot].ControlledActorId : 0;
@@ -93,7 +152,7 @@ int RunClientProbe(const std::vector<std::string>& arguments) {
 			receivedText = receivedText || std::any_of(snapshot.Players.begin(), snapshot.Players.end(), [](const auto& player) {
 				return player.ActiveHuman && !player.ScreenText.empty();
 			});
-			if (!snapshot.Objects.empty() && !snapshot.ScenePreset.empty() && !snapshot.ActivityPreset.empty()) {
+			if ((!snapshot.Objects.empty() || (constructionCheck && snapshot.ActivityState == 2)) && !snapshot.ScenePreset.empty() && !snapshot.ActivityPreset.empty()) {
 				if (!receivedWorld) { firstTick = snapshot.Tick; receivedWorld = true; }
 				RTE::WorldStateProtocol::InputCommand command;
 				const auto elapsedSeconds = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - started).count();
@@ -113,6 +172,8 @@ int RunClientProbe(const std::vector<std::string>& arguments) {
 					          << " objectives_received=" << receivedObjectives
 					          << " controlled_actor=" << controlledActor << " scene_revision=" << snapshot.SceneRevision
 					          << " humans=" << humans
+					          << " construction_checks=" << (constructionPassed ? 7 : 0)
+					          << " activity_state=" << static_cast<int>(snapshot.ActivityState)
 					          << " assigned_slot=" << client.GetAssignedPlayerSlot() << " hud_received=" << receivedText << '\n';
 					client.Disconnect(); return 0;
 				}

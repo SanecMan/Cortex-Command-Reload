@@ -4,11 +4,11 @@
 
 `WorldStateConstructionProtocol.h` reserves envelope message kinds 11
 (`ConstructionRequest`) and 12 (`ConstructionResult`). The v29 snapshot layout
-and existing messages are unchanged. These codecs are not yet routed by the
-sessions or exposed by a client construction UI; they do not establish playable
-networked construction. Runtime integration must validate permissions, content,
-ownership, scene bounds, native brain placement and readiness before modifying
-the authoritative scene.
+and existing messages are unchanged. Sessions now route readiness requests and
+their responses; placement/removal and a client construction UI remain incomplete.
+This does not yet establish playable networked construction. Placement integration
+must validate content, ownership, scene bounds and native brain placement before
+modifying the authoritative scene.
 
 Both packets use the existing 16-byte envelope and carry a nonzero request ID
 in its sequence field. The maximum total packet size is 4096 bytes. Request
@@ -50,6 +50,59 @@ replica membership gate: 210 live objects versus 211 expected, with one missing
 `AHuman/Browncoats.rte/Exterminator` (`ConstructionCodecVisual`). This is not
 construction gameplay validation or evidence that the missing-object issue is
 resolved. The diagnostic identity details are retained for investigation.
+
+### Readiness routing
+
+Transport sends construction messages through RakNet reliable ordered delivery.
+The client exposes `SendConstructionRequest` and `DrainConstructionResults`,
+with at most 64 queued replies, cleared on disconnect. The server derives the
+player from its reported connection assignment, checks the scene revision,
+rejects stale IDs and conflicting reuse of an ID, and limits new requests to
+one per 250 milliseconds. It retains the latest request and reply per peer;
+an identical repeat returns the original response without applying an action
+again. Conflicting/stale IDs do not replace that cached original response.
+Connection teardown clears the cache and cooldown.
+
+Only SetReady is currently applied. Other valid construction actions return
+`placement_unavailable` during editing. Outside editing the response is
+`not_editing`; spectators receive `spectator`. A stale scene is rejected before
+replay handling. `GameActivity::SetNetworkConstructionReady` validates the player
+before accessing arrays and uses the native `TestBrainResidence`, including its
+fallback to an unassigned brain already in the simulation. A missing/invalid
+brain denies readiness. A valid intent sets the native DONEEDITING mode;
+`UpdateEditing` performs the normal all-player transition. Cancellation clears
+that player's readiness and restores its appropriate native placement mode.
+No GUI window is needed on the server.
+
+`--construction-check` runs seven checks per separate probe: cancellation,
+exact replay, conflicting body under the same ID, unchanged original reply after
+that conflict, stale scene, readiness without a brain/outside editing, and stale
+request ID. Tests wait for active assignment rather than racing the initial
+spectator placeholder. The editing-only fixture permits an empty world while
+still requiring advancing ticks, input commands, two distinct active slots and
+all seven responses. General gameplay probes still require objects.
+
+Windows Meson client/server compiled and linked. `ConstructionPhaseVerified`
+passed two probes against Bunker Breach in 12.80 seconds, with 129 further ticks
+and 24 actors after disconnect. `ConstructionNativeEditing` passed the same
+seven checks against Skirmish Defense in 12.72 seconds, with native readiness
+cancellation accepted, readiness without a brain denied, zero actors and 128
+further ticks. The full content/UTF-8/objective/spawn preflight passed
+(`ConstructionRoutingRegression`, 39.57 seconds, 136 further ticks).
+These are test elapsed times, not performance measurements. They do not prove
+successful brain placement, a ready-all match start, spectator rejection in an
+independent probe, or a player-facing construction interface. Linux CI contains
+the phase and editing fixtures separately.
+
+Native Final compiled and linked. `ConstructionRoutingVisual` passed the Meson
+graphical pair in 64.02 seconds with 65 further updates; the delivered native
+pair passed `ConstructionRoutingDelivered` in 53.09 seconds with 62 further
+updates. Both covered late admission through the menu, strict sampled attachments
+and audio shutdown. The root server also passed `ConstructionRootEditing` in
+15.98 seconds, with all seven command checks per player, zero actors and 123
+further ticks. These graphical runs are existing gameplay regressions, not a
+construction UI test. Linux run `38561184555` passed the preceding codec/spawn
+stage; the new routing fixtures require their own run.
 
 ## v29 native objective points
 
