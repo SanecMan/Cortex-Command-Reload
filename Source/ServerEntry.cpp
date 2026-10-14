@@ -53,6 +53,14 @@ int RunClientProbe(const std::vector<std::string>& arguments) {
 	unsigned int silenceWindows = 0;
 	while (std::chrono::steady_clock::now() - started < std::chrono::seconds(probeSeconds + 30)) {
 		client.Update();
+		if (client.HasSnapshot()) {
+			// A transport-only probe still consumes presentation streams. It has
+			// no renderer/audio device, but must not accumulate unbounded events.
+			const auto revision = client.GetLatestSnapshot().SceneRevision;
+			client.DrainSoundEvents(revision);
+			client.DrainTerrainPatches(revision);
+			client.DrainPurchaseResults();
+		}
 		if (!client.GetConnectionError().empty()) {
 			std::cerr << client.GetConnectionError() << '\n'; client.Disconnect(); return 1;
 		}
