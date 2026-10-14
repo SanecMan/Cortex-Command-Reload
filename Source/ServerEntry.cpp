@@ -21,7 +21,7 @@ namespace {
 // Separate-process transport diagnostic. It loads no content or devices and
 // does not stand in for a graphical client's replica/gameplay validation.
 int RunClientProbe(const std::vector<std::string>& arguments) {
-	bool requireText = false, inputSilence = false, requireObjectives = false;
+	bool requireText = false, inputSilence = false, requireObjectives = false, requireControl = false;
 	unsigned int probeSeconds = 3;
 	if (arguments.size() < 4 || arguments[2].empty()) {
 		std::cerr << "Usage: CortexCommandServer --probe-client ADDRESS PORT [--screen-text] [--probe-seconds 3..3600] [--input-silence]\n"; return 2;
@@ -29,6 +29,7 @@ int RunClientProbe(const std::vector<std::string>& arguments) {
 	for (std::size_t index = 4; index < arguments.size(); ++index) {
 		if (arguments[index] == "--screen-text") requireText = true;
 		else if (arguments[index] == "--objectives") requireObjectives = true;
+		else if (arguments[index] == "--require-control") requireControl = true;
 		else if (arguments[index] == "--input-silence") inputSilence = true;
 		else if (arguments[index] == "--probe-seconds" && index + 1 < arguments.size()) {
 			const auto& value = arguments[++index];
@@ -67,6 +68,8 @@ int RunClientProbe(const std::vector<std::string>& arguments) {
 		}
 		if (client.IsConnected() && client.HasPlayerAssignment() && client.HasSnapshot()) {
 			const auto& snapshot = client.GetLatestSnapshot();
+			const int slot = client.GetAssignedPlayerSlot();
+			const auto controlledActor = slot >= 0 ? snapshot.Players[slot].ControlledActorId : 0;
 			receivedObjectives = receivedObjectives || std::any_of(snapshot.Objectives.begin(), snapshot.Objectives.end(), [](const auto& objective) {
 				return objective.Description == "Цель сети: Ёжик!" && objective.Team == 0 && objective.Arrow == 0;
 			});
@@ -85,11 +88,13 @@ int RunClientProbe(const std::vector<std::string>& arguments) {
 					std::cerr << "Probe failed to queue neutral input.\n"; client.Disconnect(); return 1;
 				}
 				if (client.GetReceivedSnapshotCount() >= 10 && static_cast<std::int32_t>(snapshot.Tick - firstTick) >= 60 &&
-				    std::chrono::steady_clock::now() - started >= std::chrono::seconds(probeSeconds) && (!requireText || receivedText) && (!requireObjectives || receivedObjectives)) {
+				    std::chrono::steady_clock::now() - started >= std::chrono::seconds(probeSeconds) && (!requireText || receivedText) && (!requireObjectives || receivedObjectives) &&
+				    (!requireControl || (controlledActor != 0 && snapshot.SceneRevision > 1))) {
 					std::cout << "result=passed snapshots=" << client.GetReceivedSnapshotCount() << " objects=" << snapshot.Objects.size()
 					          << " tick_delta=" << snapshot.Tick - firstTick << " input_queued=" << commands
 					          << " probe_seconds=" << probeSeconds << " silence_windows=" << silenceWindows
 					          << " objectives_received=" << receivedObjectives
+					          << " controlled_actor=" << controlledActor << " scene_revision=" << snapshot.SceneRevision
 					          << " assigned_slot=" << client.GetAssignedPlayerSlot() << " hud_received=" << receivedText << '\n';
 					client.Disconnect(); return 0;
 				}

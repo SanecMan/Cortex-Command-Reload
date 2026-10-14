@@ -108,6 +108,13 @@ jobs:
           --probe-clients --probe-seconds 15 --input-silence
           --activity-class GAScripted --activity "Brain vs Brain"
           --scene "Fredeleig Bunkers" --require-players 2
+      - name: Verify connected roster restart and distinct controlled actors
+        run: >-
+          python Tools/run_server_smoke.py --exe build-server/CortexCommandServer
+          --game-dir . --output-prefix LinuxRosterRestartCI --timeout 300
+          --probe-clients --probe-seconds 15 --input-silence --restart-with-clients --require-control
+          --activity-class GAScripted --activity "Bunker Breach"
+          --scene "Zekarra Mining Outpost" --require-players 2
       - name: Package server
         run: |
           mkdir -p build-server/package
@@ -134,6 +141,7 @@ jobs:
             ScreenShots/LinuxDedicatedCISelfTest/
             ScreenShots/LinuxPackagedCI/
             ScreenShots/LinuxBrainVsBrainCI/
+            ScreenShots/LinuxRosterRestartCI/
             build-server/meson-logs/
             build-server/runtime-dependencies.txt
             build-server/package-runtime-dependencies.txt

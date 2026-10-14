@@ -88,6 +88,49 @@ Its total verification time was 167.71 seconds including startup, not a benchmar
 
 ## Connection failure handling
 
+### Activity teams and connected-roster restart
+
+Remote players retain `TeamOfPlayerN` from the Activity preset. The previous
+inactive-team heuristic could put a second Bunker Breach player in team 3,
+outside that Lua mode's attacker/defender teams; that player had no brain or
+controlled actor. Presets with the default same-team slots now permit cooperative
+players instead of inventing a new faction. This does not add a client team picker.
+
+The dedicated console accepts `restart`. It waits for queued MOID drawing and
+priority/background tasks before purging the old world, prepares the connected
+slots in the start Activity, then calls the normal `RestartActivity`/resume path.
+Lua startup therefore sees the connected humans when it creates their brains.
+This deliberately starts a new match on an explicit admin command; joining a
+running match does not automatically restart it. Logs record request/completion
+and human count. `help` now lists restart and funds commands too.
+
+Graphical diagnostics support `-RestartWithConnectedPlayers` and
+`-RequireControlledActor`: both clients must apply a new scene revision and
+receive distinct nonzero authoritative actor IDs. Reports include revision,
+objective count, assigned slot and controlled actor ID. The device-free runner
+has equivalent `--restart-with-clients --require-control` options. These inspect
+assignment/replication; the probes send neutral input and do not prove movement
+or shooting for both players.
+
+The original Skirmish Defense check connected successfully but remained in its
+native construction phase (state 2), without player brains. It does not establish
+playable networking of the construction editor. Bunker Breach reached a running
+match but exposed the unassigned second player; a restart without the team fix
+still failed the controlled-actor gate. With the fix, `BunkerBreachRosterRestart`
+passed the Meson graphical pair in 32.55 seconds with actors 836/837, strict
+attachment checks and 62 post-disconnect updates. Native `Final|x64` compiled
+and linked; `BunkerRosterDelivered` passed in 37.65 seconds with two distinct
+actors, new revision, exact sampled attachment state and clean audio shutdown.
+The second client's final screenshot visibly showed its actor in the scene.
+
+`RosterRestartHeadless` passed 15-second, two-peer input-silence checks in 24.20
+seconds with active slots 0/1, actors 84/85, revision 2, 132 further ticks and
+24 actors after disconnect, without video initialization. The complete
+content/UTF-8/objective headless suite also passed (`ConnectedRosterHeadless`,
+20.86 seconds, 125 ticks). Linux v29 run `38541154895` passed the earlier
+objective stage; the new roster-restart CI scenario is pending. Construction
+editor parity and generic mid-match Lua player admission remain incomplete.
+
 ### Native objective-point replication (v29)
 
 Activity goals created through `AddObjectivePoint` are now captured by the host

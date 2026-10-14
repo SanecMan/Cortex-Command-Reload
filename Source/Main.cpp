@@ -2395,7 +2395,8 @@ int RunPersistentHeadlessServer(const ServerConfiguration& config) {
 					log("INFO debug_purchase_policy=applied");
 				} else log("ERROR debug_purchase_policy=unavailable");
 			}
-			else if (command == "help") log("INFO commands: status, help, quit");
+			else if (command == "restart") { g_ActivityMan.SetRestartActivity(); log("INFO activity_restart=requested"); }
+			else if (command == "help") log("INFO commands: status, restart, funds TEAM VALUE, help, quit");
 			else if (command.starts_with("funds ")) {
 				std::istringstream input(command.substr(6));
 				int team = -1;
@@ -2410,8 +2411,12 @@ int RunPersistentHeadlessServer(const ServerConfiguration& config) {
 		}
 		session.PollNetwork(tick);
 		if (g_ActivityMan.ActivitySetToRestart()) {
+			g_MovableMan.CompleteQueuedMOIDDrawings();
+			g_ThreadMan.GetPriorityThreadPool().wait_for_tasks();
+			g_ThreadMan.GetBackgroundThreadPool().wait_for_tasks();
+			if (auto* planned = g_ActivityMan.GetStartActivity()) session.ConfigureActivityPlayers(*planned, true);
 			success = g_ActivityMan.RestartActivity();
-			if (success) g_ActivityMan.ResumeActivity();
+			if (success) { g_ActivityMan.ResumeActivity(); log("INFO activity_restart=completed humans=" + std::to_string(g_ActivityMan.GetActivity()->GetHumanCount())); }
 			else break;
 		}
 		g_TimerMan.Update();
@@ -3093,6 +3098,9 @@ void RunGameLoop() {
 					if (worldStateClientLog.is_open() &&
 					    (worldStateClientLastLoggedSnapshotCount == 0 || snapshotCount - worldStateClientLastLoggedSnapshotCount >= 20)) {
 						worldStateClientLog << "snapshot=" << snapshotCount << " updated=" << applied.Updated << " spawned=" << applied.Spawned << " removed=" << applied.Removed
+						                    << " scene_revision=" << receivedSnapshot.SceneRevision << " objectives=" << receivedSnapshot.Objectives.size()
+						                    << " player_slot=" << worldStateClient->GetAssignedPlayerSlot()
+						                    << " controlled_actor=" << (worldStateClient->GetAssignedPlayerSlot() >= 0 ? receivedSnapshot.Players[worldStateClient->GetAssignedPlayerSlot()].ControlledActorId : 0)
 						                    << " live_objects=" << liveReplicaObjects << " expected_objects=" << receivedSnapshot.Objects.size()
 						                    << " activity_state=" << static_cast<int>(receivedSnapshot.ActivityState)
 						                    << " funds_team0=" << std::to_string(receivedSnapshot.TeamFunds[0])

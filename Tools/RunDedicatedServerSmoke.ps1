@@ -12,6 +12,8 @@ param(
     [ValidateRange(0, 2)]
     [int]$RequireActivePlayers = 0,
     [switch]$RequireAttachmentMatch,
+    [switch]$RestartWithConnectedPlayers,
+    [switch]$RequireControlledActor,
     [ValidatePattern('^[A-Za-z0-9_-]{1,48}$')]
     [string]$OutputPrefix = 'DedicatedServerSmoke',
     [switch]$CheckTeamFunds,
@@ -236,7 +238,16 @@ try {
     $reloadHudCreated = $false; $reloadHudChanged = $false
     $shotCreated = $false; $shotFired = $false
     $objectiveFixtureCleared = $false
+    $activityRestarted = $false
     while (@($clients | Where-Object { !$_.HasExited }).Count -gt 0) {
+        if ($RestartWithConnectedPlayers -and !$activityRestarted) {
+            $rosterReady = $true
+            foreach ($index in 1..2) {
+                $rosterReport = Join-Path $gameDirectory "ScreenShots\$OutputPrefix-Client$index\WorldStateClient.log"
+                $rosterReady = $rosterReady -and ((Read-Report $rosterReport) -match '(?m)^snapshot=')
+            }
+            if ($rosterReady) { $server.StandardInput.WriteLine('restart'); $server.StandardInput.Flush(); $activityRestarted = $true }
+        }
         if ($CheckScreenText) {
             # Activity updates may clear ordinary messages while clients load.
             # Refresh only this disposable fixture until the GUI check completes.
@@ -401,9 +412,11 @@ try {
     [IO.File]::WriteAllText((Join-Path $logDirectory 'StdOut.log'), $outputTask.GetAwaiter().GetResult(), [Text.UTF8Encoding]::new($false))
     [IO.File]::WriteAllText((Join-Path $logDirectory 'StdErr.log'), $errorTask.GetAwaiter().GetResult(), [Text.UTF8Encoding]::new($false))
     $networkLog = Read-Report (Join-Path $logDirectory 'WorldStateServer.log')
+    if ($RestartWithConnectedPlayers -and (!$activityRestarted -or (Read-Report $serverLogPath) -notmatch 'INFO activity_restart=completed humans=2')) { throw 'Connected roster restart did not complete.' }
     $activeSlots = @([regex]::Matches($networkLog, 'client assignment updated for .* to player slot (\d+)') | ForEach-Object { [int]$_.Groups[1].Value } | Sort-Object -Unique)
     if ($activeSlots.Count -lt $RequireActivePlayers) { throw 'Not enough distinct active server player assignments.' }
     $expectedPolicyCost = if ($CheckPurchasePricing) { 798 } else { 324 }
+    $controlledActorIDs = [Collections.Generic.List[string]]::new()
     if ($CheckPurchasePolicy -and (!$policyChanged -or $networkLog -notmatch "purchase id=1 accepted=1 charged=$expectedPolicyCost\.000000")) { throw 'Server stock-price policy checks failed.' }
     if ($CheckBuyMenu -and ([regex]::Matches($networkLog, 'purchase id=\d+ accepted=1').Count -ne 1)) { throw 'Expected exactly one accepted menu purchase.' }
     if ($CheckPurchases -and ($networkLog -notmatch 'purchase id=3 accepted=1 charged=500\.000000' -or
@@ -416,6 +429,14 @@ try {
             $clientReport -notmatch '(?m)^world_state_objectives_cleared=passed')) { throw 'Client objective create/clear checks failed.' }
         if ($EnableAudio -and $clientReport -notmatch '(?m)^audio_shutdown_complete\r?$') { throw 'Client audio shutdown was not verified.' }
         $clientNetwork = Read-Report (Join-Path $clientDirectory 'WorldStateClient.log')
+        if ($RequireControlledActor -and $clientNetwork -notmatch 'controlled_actor=[1-9]') { throw 'Client never received a controlled actor.' }
+        if ($RequireControlledActor -and $RestartWithConnectedPlayers -and $clientNetwork -notmatch 'scene_revision=[2-9].*controlled_actor=[1-9]') { throw 'Client has no controlled actor after roster restart.' }
+        if ($RequireControlledActor) {
+            $controlPattern = if ($RestartWithConnectedPlayers) { 'scene_revision=[2-9].*?controlled_actor=([1-9][0-9]*)' } else { 'controlled_actor=([1-9][0-9]*)' }
+            $controlMatches = [regex]::Matches($clientNetwork, $controlPattern)
+            $controlledActorIDs.Add($controlMatches[$controlMatches.Count - 1].Groups[1].Value)
+        }
+        if ($RestartWithConnectedPlayers -and $clientNetwork -notmatch 'scene_revision=[2-9]') { throw 'Client did not apply the restarted scene.' }
         if ($clientNetwork -notmatch ('(?m)^activity=' + [regex]::Escape($ActivityName) + '\r?$') -or
             $clientNetwork -notmatch ('(?m)^scene=' + [regex]::Escape($SceneName) + '\r?$')) { throw 'Client loaded a different Activity or scene.' }
         if ($CheckMenuConnection -and ($clientReport -notmatch '(?m)^menu_connection=passed' -or
@@ -453,6 +474,7 @@ try {
         if ($CheckTeamFunds -and (!$fundsChanged -or $clientReport -notmatch '(?m)^world_state_team_funds_presentation=passed' -or
             $clientNetwork -notmatch 'funds_team0=12345\.250000 funds_team1=-17\.500000')) { throw 'Client team funds replication failed.' }
     }
+    if ($RequireControlledActor -and @($controlledActorIDs | Sort-Object -Unique).Count -ne 2) { throw 'Clients share the same controlled actor.' }
     if ($CheckPurchasePolicy -and !$displayedStockPriceObserved) { throw 'Client catalog stock discount does not match the server charge.' }
     if ($CheckRecentShot) {
         $shotVerified=$false

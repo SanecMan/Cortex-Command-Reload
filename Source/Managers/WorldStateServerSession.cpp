@@ -203,14 +203,8 @@ std::size_t WorldStateServerSession::ConfigureActivityPlayers(Activity& activity
 		if (playerTeam < Activity::Teams::TeamOne || playerTeam >= Activity::Teams::MaxTeamCount) {
 			playerTeam = Activity::Teams::TeamOne;
 		}
-		if (!activity.PlayerActive(playerSlot) && activity.TeamActive(playerTeam)) {
-			for (int candidateTeam = Activity::Teams::TeamOne; candidateTeam < Activity::Teams::MaxTeamCount; ++candidateTeam) {
-				if (!activity.TeamActive(candidateTeam)) {
-					playerTeam = candidateTeam;
-					break;
-				}
-			}
-		}
+		// Honor TeamOfPlayerN from the Activity. Inventing an inactive team can
+		// put clients outside the teams understood by a scripted game mode.
 
 		if (gameActivity && gameActivity->TeamIsCPU(playerTeam)) {
 			gameActivity->SetTeamIsCPU(playerTeam, false);

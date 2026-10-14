@@ -26,6 +26,8 @@ def main():
     parser.add_argument('--activity', default='Tutorial Mission')
     parser.add_argument('--scene', default='Tutorial Bunker')
     parser.add_argument('--require-players', type=int, default=0, help='Require this many distinct active player slots (0..2).')
+    parser.add_argument('--restart-with-clients', action='store_true', help='Restart the Activity after both peers connect.')
+    parser.add_argument('--require-control', action='store_true', help='Require distinct controlled actors after restart.')
     args = parser.parse_args()
     if (args.screen_text or args.objectives) and not args.probe_clients:
         parser.error('--screen-text/--objectives require --probe-clients.')
@@ -33,6 +35,8 @@ def main():
         parser.error('Use probe duration 3..3600; input silence requires clients and at least 12 seconds.')
     if not 0 <= args.require_players <= 2 or (args.require_players and not args.probe_clients):
         parser.error('Require players must be 0..2 and needs client probes.')
+    if (args.restart_with_clients and not args.probe_clients) or (args.require_control and not args.restart_with_clients):
+        parser.error('Restart requires clients; control checks require restart.')
     if any(not value or '\n' in value or '\r' in value for value in (args.activity_class, args.activity, args.scene)):
         parser.error('Activity and scene must be nonempty single-line preset names.')
     if not re.fullmatch(r'[A-Za-z0-9_-]{1,48}', args.output_prefix) or args.timeout <= 0:
@@ -126,10 +130,11 @@ def main():
                     try:
                         for index in range(2):
                             output = streams.enter_context((root / f'client-{index}.log').open('wb'))
-                            probes.append(subprocess.Popen([str(binary), '--probe-client', '127.0.0.1', str(port), '--probe-seconds', str(args.probe_seconds)] + (['--screen-text'] if args.screen_text else []) + (['--objectives'] if args.objectives else []) + (['--input-silence'] if args.input_silence else []),
+                            probes.append(subprocess.Popen([str(binary), '--probe-client', '127.0.0.1', str(port), '--probe-seconds', str(args.probe_seconds)] + (['--screen-text'] if args.screen_text else []) + (['--objectives'] if args.objectives else []) + (['--require-control'] if args.require_control else []) + (['--input-silence'] if args.input_silence else []),
                                 cwd=game, env=environment, stdout=output, stderr=subprocess.STDOUT,
                                 creationflags=creation_flags))
                         observed_two = False
+                        restart_sent = False
                         while any(probe.poll() is None for probe in probes):
                             check()
                             if args.objectives:
@@ -137,6 +142,9 @@ def main():
                             process.stdin.write(b'status\n'); process.stdin.flush()
                             time.sleep(0.1)
                             observed_two |= bool(re.search(r'INFO status tick=\d+ clients=2 actors=\d+', read_log()))
+                            if args.restart_with_clients and observed_two and not restart_sent:
+                                process.stdin.write(b'restart\n'); process.stdin.flush()
+                                restart_sent = True
                         if not observed_two or any(probe.returncode != 0 for probe in probes):
                             raise RuntimeError('Separate client connection check failed; inspect client logs.')
                     finally:
@@ -148,6 +156,7 @@ def main():
                                 except subprocess.TimeoutExpired:
                                     probe.kill(); probe.wait()
                 active_slots = set()
+                controlled_actors = set()
                 for index in range(2):
                     report = (root / f'client-{index}.log').read_text(encoding='utf-8')
                     if not re.search(r'result=passed snapshots=\d+ objects=[1-9]\d* tick_delta=\d+ input_queued=[1-9]\d*', report):
@@ -162,8 +171,17 @@ def main():
                     assignment = re.search(r'assigned_slot=(-?\d+)', report)
                     if assignment and int(assignment.group(1)) >= 0:
                         active_slots.add(int(assignment.group(1)))
+                    control = re.search(r'controlled_actor=(\d+) scene_revision=(\d+)', report)
+                    if args.require_control:
+                        if not control or int(control.group(1)) == 0 or int(control.group(2)) < 2:
+                            raise RuntimeError('Client did not receive a controlled actor after restart.')
+                        controlled_actors.add(int(control.group(1)))
                 if len(active_slots) < args.require_players:
                     raise RuntimeError('Not enough distinct active player assignments.')
+                if args.require_control and len(controlled_actors) != 2:
+                    raise RuntimeError('Clients do not have distinct controlled actors.')
+                if args.restart_with_clients and (not restart_sent or 'INFO activity_restart=completed humans=2' not in read_log()):
+                    raise RuntimeError('Activity restart with the connected roster was not verified.')
                 network_log = (logs / 'WorldStateServer.log').read_text(encoding='utf-8')
                 if not re.search(r'INFO: applied [1-9]\d* client input commands to player slot', network_log):
                     raise RuntimeError('Server did not apply neutral input from a probe client.')
@@ -173,6 +191,8 @@ def main():
                 result['probe_seconds'] = args.probe_seconds
                 result['input_silence'] = args.input_silence
                 result['active_player_slots'] = sorted(active_slots)
+                if args.require_control:
+                    result['controlled_actors'] = sorted(controlled_actors)
                 result['probe_input_applied'] = True
                 if args.objectives:
                     result['objectives_received'] = True
