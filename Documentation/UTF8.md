@@ -10,6 +10,15 @@ diagnostic checks actual icon pixels and width/height against their UTF-8 encode
 atlas indices, in addition to the Cyrillic raster check. The portable decoder
 regression is `Tools/FontGlyphDecodeTest.cpp`.
 
+2026-10-14 validation: `HudIconUTF8` passed the device-free content/simulation
+diagnostics and separate two-client probe (128 observed ticks, 18.27 seconds).
+`legacy_hud_icon_raster=passed` compares slots 200, 207, 217, 219 and 229 pixel
+for pixel; slot 207 intentionally has no visible pixels. Cyrillic retained its
+expected palette color. `HudIconUTF8Visual` passed two native clients connecting
+through the menu and rendering authoritative reload progress at 35% and 75%
+(46.26 seconds, 66 updates after disconnect). Its client-one 35% screenshot was
+visually inspected for the restored reload/ammo icons and Cyrillic screen text.
+
 Absolute resource paths remain absolute when resolved by PresetMan. They are
 normalized to generic separators and passed through the same UTF-8/legacy-path
 conversion as relative module paths, without adding `Mods/`. Relative `.rte`
