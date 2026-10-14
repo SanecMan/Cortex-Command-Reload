@@ -25,6 +25,7 @@ HDFirearm::~HDFirearm() {
 }
 
 void HDFirearm::Clear() {
+	m_ReplicaReloadProgress = -1;
 	m_pMagazineReference = 0;
 	m_pMagazine = 0;
 

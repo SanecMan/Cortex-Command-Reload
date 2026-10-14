@@ -365,7 +365,9 @@ namespace RTE {
 
 		/// Gets this HDFirearm's reload progress as a scalar from 0 to 1.
 		/// @return The reload progress as a scalar from 0 to 1.
-		float GetReloadProgress() const { return IsReloading() && m_BaseReloadTime > 0 ? static_cast<float>(m_ReloadTmr.GetSimTimeLimitProgress()) : 1.0F; }
+		float GetReloadProgress() const { return IsReloading() ? (m_ReplicaReloadProgress >= 0 ? m_ReplicaReloadProgress : (m_BaseReloadTime > 0 ? static_cast<float>(m_ReloadTmr.GetSimTimeLimitProgress()) : 1.0F)) : 1.0F; }
+		/// Presentation only: bypasses Reload(), magazine changes and Lua callbacks.
+		void SetReplicaReloadVisual(bool reloading, float progress) { m_Reloading = reloading; m_DoneReloading = false; m_ReplicaReloadProgress = progress; }
 
 		/// Sets this HDFirearm's reload progress as a scalar from 0 to 1.
 		/// @param progress The reload progress as a scalar from 0 to 1.
@@ -527,6 +529,7 @@ namespace RTE {
 		int m_DeactivationDelay;
 		// Reloading or not
 		bool m_Reloading;
+		float m_ReplicaReloadProgress = -1;
 		// Just done reloading this frame
 		bool m_DoneReloading;
 		// Base reload time in millisecs.

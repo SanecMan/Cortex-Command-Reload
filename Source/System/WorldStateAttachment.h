@@ -26,6 +26,18 @@ enum class AttachmentRole : std::uint8_t {
 inline constexpr std::uint16_t c_AttachmentRoot = std::numeric_limits<std::uint16_t>::max();
 inline constexpr std::size_t c_MaxAttachments = 256, c_MaxAttachmentDepth = 16;
 
+struct DeviceVisualState {
+    bool Present = false, Activated = false, Reloading = false;
+    float ReloadProgress = 1;
+    bool operator==(const DeviceVisualState&) const = default;
+};
+inline bool ValidDeviceVisual(const DeviceVisualState& state, const std::string& className) {
+    if (!std::isfinite(state.ReloadProgress) || state.ReloadProgress < 0 || state.ReloadProgress > 1) return false;
+    if (!state.Present) return !state.Activated && !state.Reloading && state.ReloadProgress == 1;
+    if (state.Reloading) return className == "HDFirearm";
+    return state.ReloadProgress == 1;
+}
+
 struct AttachmentState {
     std::uint16_t Parent = c_AttachmentRoot, Slot = 0;
     AttachmentRole Role = AttachmentRole::Generic;
@@ -39,6 +51,7 @@ struct AttachmentState {
     std::uint16_t SpriteFrame = 0;
     bool HFlipped = false, DrawAfterParent = false;
     std::int32_t MagazineRounds = 0;
+    DeviceVisualState DeviceVisual;
     bool operator==(const AttachmentState&) const = default;
 };
 
@@ -50,6 +63,7 @@ inline bool ValidAttachmentTree(const std::vector<AttachmentState>& nodes, std::
     std::unordered_set<std::uint64_t> slots;
     for (std::size_t index = 0; index < nodes.size(); ++index) {
         const auto& node = nodes[index];
+        if (!ValidDeviceVisual(node.DeviceVisual, node.ClassName)) return false;
         if (node.Parent != c_AttachmentRoot && node.Parent >= index) return false;
         const std::size_t depth = node.Parent == c_AttachmentRoot ? 1 : depths[node.Parent] + 1;
         if (depth > c_MaxAttachmentDepth) return false;

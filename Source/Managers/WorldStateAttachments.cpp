@@ -12,6 +12,7 @@
 #include "Magazine.h"
 #include "PresetMan.h"
 #include "ObjectScriptExecution.h"
+#include "WorldStateDeviceVisual.h"
 #include <memory>
 #include <algorithm>
 #include <unordered_map>
@@ -130,6 +131,7 @@ bool Adopt(MOSRotating& parent, Attachable* child, AttachmentRole role) {
 bool Capture(const MOSRotating& object, WorldStateProtocol::ObjectState& state) {
 	using namespace WorldStateProtocol;
 	state.HasAttachmentState = true;
+	state.DeviceVisual = WorldStateDeviceVisual::Capture(object);
 	state.HasEmitterState = state.EmissionEnabled = state.FlashVisible = false;
 	if (const auto* emitter = dynamic_cast<const AEmitter*>(&object)) {
 		state.HasEmitterState = true; state.EmissionEnabled = emitter->IsEmitting(); state.FlashVisible = emitter->IsEmissionFlashVisible();
@@ -145,6 +147,7 @@ bool Capture(const MOSRotating& object, WorldStateProtocol::ObjectState& state) 
 			AttachmentState node;
 			node.Parent = parent.Index; node.Role = slot.Role; node.Slot = slot.Index;
 			node.ClassName = child->GetClassName(); node.ModuleName = child->GetModuleName(); node.PresetName = child->GetPresetName();
+			node.DeviceVisual = WorldStateDeviceVisual::Capture(*child);
 			node.ParentOffsetX = child->GetParentOffset().GetX(); node.ParentOffsetY = child->GetParentOffset().GetY();
 			node.JointOffsetX = child->GetJointOffset().GetX(); node.JointOffsetY = child->GetJointOffset().GetY();
 			node.RotationFromRoot = child->GetRotAngle() - object.GetRotAngle();
@@ -187,6 +190,7 @@ bool ApplyPose(MOSRotating& object, const std::vector<WorldStateProtocol::Attach
 				if (slot.Role == node.Role && slot.Index == node.Slot && SameIdentity(*slot.Object, node)) { child = slot.Object; break; }
 			children[index] = child;
 			if (!child) return false;
+			if (!WorldStateDeviceVisual::Apply(*child, node.DeviceVisual)) return false;
 			child->SetParentOffset(Vector(node.ParentOffsetX, node.ParentOffsetY));
 			child->SetJointOffset(Vector(node.JointOffsetX, node.JointOffsetY));
 			child->SetScale(node.Scale);
@@ -261,7 +265,7 @@ bool Matches(const MOSRotating& object, const std::vector<WorldStateProtocol::At
 		const auto& a = nodes[index]; const auto& b = observed.Attachments[index];
 		if (a.Parent != b.Parent || a.Slot != b.Slot || a.Role != b.Role || a.ClassName != b.ClassName ||
 		    a.ModuleName != b.ModuleName || a.PresetName != b.PresetName || a.SpriteFrame != b.SpriteFrame ||
-		    a.HFlipped != b.HFlipped || a.DrawAfterParent != b.DrawAfterParent || a.MagazineRounds != b.MagazineRounds || a.HasEmitterState != b.HasEmitterState || a.EmissionEnabled != b.EmissionEnabled || a.FlashVisible != b.FlashVisible || !near(a.Scale, b.Scale) ||
+		    a.HFlipped != b.HFlipped || a.DrawAfterParent != b.DrawAfterParent || a.MagazineRounds != b.MagazineRounds || a.DeviceVisual != b.DeviceVisual || a.HasEmitterState != b.HasEmitterState || a.EmissionEnabled != b.EmissionEnabled || a.FlashVisible != b.FlashVisible || !near(a.Scale, b.Scale) ||
 		    !near(a.ParentOffsetX, b.ParentOffsetX) || !near(a.ParentOffsetY, b.ParentOffsetY) ||
 		    !near(a.JointOffsetX, b.JointOffsetX) || !near(a.JointOffsetY, b.JointOffsetY) ||
 		    !near(a.RotationFromRoot, b.RotationFromRoot) || !near(a.HandOffsetX, b.HandOffsetX) || !near(a.HandOffsetY, b.HandOffsetY)) return false;
@@ -321,6 +325,7 @@ bool TestNative() {
 	source->GetFGArm()->SetHandCurrentOffset(Vector(8, -3));
 	auto* sourceGun = dynamic_cast<HDFirearm*>(source->GetFGArm()->GetHeldDevice());
 	sourceGun->SetInheritsRotAngle(false); sourceGun->SetRotAngle(1.1F); sourceGun->GetMagazine()->SetRoundCount(7);
+	sourceGun->SetReplicaActivationVisual(true); sourceGun->SetReplicaReloadVisual(true, 0.35F);
 	const auto near = [](float left, float right) { return std::abs(left - right) < 0.0001F; };
 	auto matches = [&]() {
 		source->CorrectAttachableAndWoundPositionsAndRotations();
@@ -332,7 +337,7 @@ bool TestNative() {
 			const auto& a = expected.Attachments[index]; const auto& b = observed.Attachments[index];
 			if (a.Parent != b.Parent || a.Slot != b.Slot || a.Role != b.Role || a.ClassName != b.ClassName ||
 			    a.ModuleName != b.ModuleName || a.PresetName != b.PresetName || a.SpriteFrame != b.SpriteFrame ||
-			    a.HFlipped != b.HFlipped || a.DrawAfterParent != b.DrawAfterParent || a.MagazineRounds != b.MagazineRounds || a.HasEmitterState != b.HasEmitterState || a.EmissionEnabled != b.EmissionEnabled || a.FlashVisible != b.FlashVisible || !near(a.Scale, b.Scale) ||
+			    a.HFlipped != b.HFlipped || a.DrawAfterParent != b.DrawAfterParent || a.MagazineRounds != b.MagazineRounds || a.DeviceVisual != b.DeviceVisual || a.HasEmitterState != b.HasEmitterState || a.EmissionEnabled != b.EmissionEnabled || a.FlashVisible != b.FlashVisible || !near(a.Scale, b.Scale) ||
 			    !near(a.ParentOffsetX, b.ParentOffsetX) || !near(a.ParentOffsetY, b.ParentOffsetY) ||
 			    !near(a.JointOffsetX, b.JointOffsetX) || !near(a.JointOffsetY, b.JointOffsetY) ||
 			    !near(a.RotationFromRoot, b.RotationFromRoot) || !near(a.HandOffsetX, b.HandOffsetX) || !near(a.HandOffsetY, b.HandOffsetY)) return false;
@@ -340,12 +345,18 @@ bool TestNative() {
 		return true;
 	};
 	if (!matches()) return false;
+	auto* targetGun = dynamic_cast<HDFirearm*>(target->GetFGArm()->GetHeldDevice());
+	if (!targetGun || !targetGun->IsActivated() || !targetGun->IsReloading() || !near(targetGun->GetReloadProgress(), 0.35F)) return false;
 	Arm* retainedArm = target->GetFGArm();
 	HeldDevice* retainedGun = retainedArm->GetHeldDevice();
 	Magazine* retainedMagazine = dynamic_cast<HDFirearm*>(retainedGun)->GetMagazine();
 	source->SetRotAngle(-0.5F); source->GetFGArm()->SetRotAngle(1.2F); sourceGun->GetMagazine()->SetRoundCount(-1);
+	sourceGun->SetReplicaActivationVisual(false); sourceGun->SetReplicaReloadVisual(true, 0.75F);
 	if (!matches() || target->GetFGArm() != retainedArm || retainedArm->GetHeldDevice() != retainedGun ||
 	    dynamic_cast<HDFirearm*>(retainedGun)->GetMagazine() != retainedMagazine) return false;
+	if (targetGun->IsActivated() || !targetGun->IsReloading() || !near(targetGun->GetReloadProgress(), 0.75F)) return false;
+	sourceGun->SetReplicaReloadVisual(false, 1);
+	if (!matches() || targetGun->IsReloading() || targetGun->GetReloadProgress() != 1) return false;
 	Retire(*source, source->GetFGArm());
 	if (!matches() || target->GetFGArm()) return false;
 	std::unique_ptr<Arm> replacement(dynamic_cast<Arm*>(body->GetFGArm()->Clone()));

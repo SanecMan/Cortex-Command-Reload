@@ -285,6 +285,8 @@ namespace RTE {
 		/// Tells whether the device is currently being activated.
 		/// @return Whether being activated.
 		virtual bool IsActivated() const { return m_Activated; }
+		/// Presentation only: does not activate, fire, play sounds or invoke scripts.
+		void SetReplicaActivationVisual(bool activated) { m_Activated = activated; }
 
 		/// Activates one of this HDFirearm's hotkey features.
 		/// @param hotkeyType Which hotkey type to activate.

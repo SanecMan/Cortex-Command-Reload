@@ -13,6 +13,7 @@
 #include "HeldDevice.h"
 #include "HDFirearm.h"
 #include "Magazine.h"
+#include "WorldStateDeviceVisual.h"
 #include "MOPixel.h"
 #include "MovableMan.h"
 #include "MovableObject.h"
@@ -210,6 +211,7 @@ namespace {
 			actor->SetAimAngle(state.AimAngle);
 			actor->SetStatus(static_cast<Actor::Status>(state.ActorStatus));
 		}
+		if (!WorldStateDeviceVisual::Apply(target, state.DeviceVisual)) return false;
 		if (state.HasAttachmentState) {
 			auto* rotating = dynamic_cast<MOSRotating*>(&target);
 			return rotating && WorldStateAttachments::Apply(*rotating, state);
@@ -437,6 +439,7 @@ void WorldStateClientReplica::ApplyInventory(const WorldStateProtocol::Snapshot&
 		if (parent==parents.end() || item==m_InventoryObjects.end() || state.Slot>=parent->second->GetInventory()->size() ||
 		    parent->second->GetInventory()->at(state.Slot)!=item->second) mismatch("slot id="+std::to_string(state.Object.NetworkId)+" parent="+std::to_string(state.ParentNetworkId)+" slot="+std::to_string(state.Slot));
 		if (item!=m_InventoryObjects.end()) {
+			if (state.Object.DeviceVisual.Present && WorldStateDeviceVisual::Capture(*item->second) != state.Object.DeviceVisual) mismatch("device visual id="+std::to_string(state.Object.NetworkId));
 			if (MakeIdentityKey(*item->second)!=MakeIdentityKey(state.Object) || item->second->GetTeam()!=state.Object.Team) mismatch("identity id="+std::to_string(state.Object.NetworkId)+" actual="+MakeIdentityKey(*item->second)+" expected="+MakeIdentityKey(state.Object)+" team="+std::to_string(item->second->GetTeam())+" expected_team="+std::to_string(state.Object.Team));
 			if (auto* actor=dynamic_cast<Actor*>(item->second); actor && actor->GetHealth()!=state.Object.Health) mismatch("health id="+std::to_string(state.Object.NetworkId)+" actual="+std::to_string(actor->GetHealth())+" expected="+std::to_string(state.Object.Health));
 			if (auto* firearm=dynamic_cast<HDFirearm*>(item->second)) {
@@ -656,6 +659,7 @@ WorldStateClientReplica::ApplyResult WorldStateClientReplica::Apply(const WorldS
 			++result.AttachmentStatesChecked;
 			auto* rotating = dynamic_cast<MOSRotating*>(target);
 			bool matches = rotating && WorldStateAttachments::Matches(*rotating, state.Attachments);
+			if (state.DeviceVisual.Present) matches = matches && target && WorldStateDeviceVisual::Capture(*target) == state.DeviceVisual;
 			if (const auto* actor = dynamic_cast<const Actor*>(target))
 				matches = matches && std::abs(actor->GetAimAngle(false) - state.AimAngle) < 0.0001F && actor->GetStatus() == state.ActorStatus;
 			if (!matches) ++result.AttachmentMismatches;

@@ -20,7 +20,7 @@
 namespace RTE::WorldStateProtocol {
 
 inline constexpr std::uint32_t c_Magic = 0x31524343; // "CCR1" on the wire.
-inline constexpr std::uint16_t c_Version = 25;
+inline constexpr std::uint16_t c_Version = 26;
 inline constexpr std::size_t c_TeamCount = 4;
 inline constexpr std::int8_t c_NoActivity = -1;
 inline constexpr std::int8_t c_MaxActivityState = 6;
@@ -107,6 +107,7 @@ struct ObjectState {
 	bool HasAttachmentState = false;
 	std::vector<AttachmentState> Attachments;
 	bool HasEmitterState = false, EmissionEnabled = false, FlashVisible = false;
+	DeviceVisualState DeviceVisual;
 	float AimAngle = 0;
 	std::uint8_t ActorStatus = 0;
 	bool operator==(const ObjectState&) const = default;
@@ -241,6 +242,7 @@ namespace Detail {
 	}
 
 	inline bool ValidObject(const ObjectState& object) {
+		if (!ValidDeviceVisual(object.DeviceVisual, object.ClassName)) return false;
 		const bool equipmentIdentityValid = object.EquippedDeviceClassName.size() <= c_MaxStringBytes &&
 		                                   object.EquippedDeviceModuleName.size() <= c_MaxStringBytes &&
 		                                   object.EquippedDevicePresetName.size() <= c_MaxStringBytes &&
@@ -466,6 +468,16 @@ inline bool DecodeInputCommand(std::span<const std::uint8_t> packet, InputComman
 }
 
 namespace Detail {
+inline void WriteDeviceVisual(std::vector<std::uint8_t>& packet, const DeviceVisualState& state) {
+	WriteUnsigned(packet, (state.Present ? 1 : 0) | (state.Activated ? 2 : 0) | (state.Reloading ? 4 : 0), 1);
+	if (state.Present) WriteFloat(packet, state.ReloadProgress);
+}
+inline bool ReadDeviceVisual(std::span<const std::uint8_t> packet, std::size_t& offset, DeviceVisualState& state) {
+	std::uint64_t flags = 0;
+	if (!ReadUnsigned(packet, offset, 1, flags) || flags > 7 || (!(flags & 1) && flags)) return false;
+	state.Present = (flags & 1) != 0; state.Activated = (flags & 2) != 0; state.Reloading = (flags & 4) != 0;
+	return !state.Present || ReadFloat(packet, offset, state.ReloadProgress);
+}
 inline bool WriteAttachments(std::vector<std::uint8_t>& packet, const ObjectState& object) {
 	WriteUnsigned(packet, object.HasAttachmentState, 1);
 	if (!object.HasAttachmentState) return true;
@@ -479,6 +491,7 @@ inline bool WriteAttachments(std::vector<std::uint8_t>& packet, const ObjectStat
 		                    node.RotationFromRoot, node.HandOffsetX, node.HandOffsetY, node.Scale}) WriteFloat(packet, number);
 		WriteUnsigned(packet, node.SpriteFrame, 2);
 		WriteUnsigned(packet, (node.HFlipped ? 1 : 0) | (node.DrawAfterParent ? 2 : 0) | (node.HasEmitterState ? 4 : 0) | (node.EmissionEnabled ? 8 : 0) | (node.FlashVisible ? 16 : 0), 1);
+		WriteDeviceVisual(packet, node.DeviceVisual);
 		WriteUnsigned(packet, std::bit_cast<std::uint32_t>(node.MagazineRounds), 4);
 		if (packet.size() > c_MaxPacketSize) return false;
 	}
@@ -510,6 +523,7 @@ inline bool ReadAttachments(std::span<const std::uint8_t> packet, std::size_t& o
 		if (!ReadUnsigned(packet, offset, 1, value) || value > 31) return false;
 		node.HasEmitterState = (value & 4) != 0; node.EmissionEnabled = (value & 8) != 0; node.FlashVisible = (value & 16) != 0;
 		node.HFlipped = (value & 1) != 0; node.DrawAfterParent = (value & 2) != 0;
+		if (!ReadDeviceVisual(packet, offset, node.DeviceVisual)) return false;
 		if (!ReadUnsigned(packet, offset, 4, value)) return false;
 		node.MagazineRounds = std::bit_cast<std::int32_t>(static_cast<std::uint32_t>(value));
 		object.Attachments.push_back(std::move(node));
@@ -584,6 +598,7 @@ inline bool WriteObject(std::vector<std::uint8_t>& packet, const ObjectState& ob
 		}
 	}
 	WriteUnsigned(packet, (object.HasEmitterState ? 1 : 0) | (object.EmissionEnabled ? 2 : 0) | (object.FlashVisible ? 4 : 0), 1);
+	WriteDeviceVisual(packet, object.DeviceVisual);
 	if (!WriteAttachments(packet, object) || packet.size() > c_MaxPacketSize) {
 		return false;
 	}
@@ -662,6 +677,7 @@ inline bool ReadObject(std::span<const std::uint8_t> packet, std::size_t& offset
 	}
 	if (!ReadUnsigned(packet, offset, 1, value) || value > 7) return false;
 	object.HasEmitterState = (value & 1) != 0; object.EmissionEnabled = (value & 2) != 0; object.FlashVisible = (value & 4) != 0;
+	if (!ReadDeviceVisual(packet, offset, object.DeviceVisual)) return false;
 	return ReadAttachments(packet, offset, object) && ValidObject(object);
 }
 inline bool ValidInventory(const Snapshot& snapshot) {
