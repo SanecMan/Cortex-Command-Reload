@@ -662,7 +662,27 @@ WorldStateClientReplica::ApplyResult WorldStateClientReplica::Apply(const WorldS
 			if (state.DeviceVisual.Present) matches = matches && target && WorldStateDeviceVisual::Capture(*target) == state.DeviceVisual;
 			if (const auto* actor = dynamic_cast<const Actor*>(target))
 				matches = matches && std::abs(actor->GetAimAngle(false) - state.AimAngle) < 0.0001F && actor->GetStatus() == state.ActorStatus;
-			if (!matches) ++result.AttachmentMismatches;
+			if (!matches) {
+				++result.AttachmentMismatches;
+				if (rotating && result.InventoryMismatchDetails.size() < 8) {
+					WorldStateProtocol::ObjectState observed;
+					WorldStateAttachments::Capture(*rotating, observed);
+					std::string detail = "attachment=" + state.PresetName + " root_device=" + std::to_string(observed.DeviceVisual == state.DeviceVisual) +
+					    " nodes=" + std::to_string(observed.Attachments.size()) + "/" + std::to_string(state.Attachments.size());
+					for (std::size_t i = 0; i < std::min(observed.Attachments.size(), state.Attachments.size()); ++i) {
+						const auto& a = state.Attachments[i]; const auto& b = observed.Attachments[i];
+						if (a.DeviceVisual != b.DeviceVisual || std::abs(a.RotationFromRoot - b.RotationFromRoot) >= 0.0001F ||
+						    std::abs(a.HandOffsetX-b.HandOffsetX) >= 0.0001F || std::abs(a.HandOffsetY-b.HandOffsetY) >= 0.0001F || a.HFlipped != b.HFlipped || a.SpriteFrame != b.SpriteFrame) {
+							detail += " node=" + a.PresetName + " device=" + std::to_string(a.DeviceVisual == b.DeviceVisual) +
+							    " rotation=" + std::to_string(a.RotationFromRoot) + "/" + std::to_string(b.RotationFromRoot) +
+							    " hand=" + std::to_string(a.HandOffsetX) + "/" + std::to_string(b.HandOffsetX) + "," + std::to_string(a.HandOffsetY) + "/" + std::to_string(b.HandOffsetY) +
+							    " flip=" + std::to_string(a.HFlipped) + "/" + std::to_string(b.HFlipped) + " frame=" + std::to_string(a.SpriteFrame) + "/" + std::to_string(b.SpriteFrame);
+							break;
+						}
+					}
+					result.InventoryMismatchDetails.push_back(std::move(detail));
+				}
+			}
 		};
 		for (const auto& state : snapshot.Objects) {
 			const auto target = m_Objects.find(state.NetworkId);

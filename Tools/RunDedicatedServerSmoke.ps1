@@ -3,6 +3,15 @@ param(
     [string]$ServerExecutablePath,
     [string]$ClientExecutablePath,
     [string]$GameDirectory,
+    [ValidatePattern('^[^"\r\n]+$')]
+    [string]$ActivityClass = 'GATutorial',
+    [ValidatePattern('^[^"\r\n]+$')]
+    [string]$ActivityName = 'Tutorial Mission',
+    [ValidatePattern('^[^"\r\n]+$')]
+    [string]$SceneName = 'Tutorial Bunker',
+    [ValidateRange(0, 2)]
+    [int]$RequireActivePlayers = 0,
+    [switch]$RequireAttachmentMatch,
     [ValidatePattern('^[A-Za-z0-9_-]{1,48}$')]
     [string]$OutputPrefix = 'DedicatedServerSmoke',
     [switch]$CheckTeamFunds,
@@ -105,6 +114,7 @@ try {
     $server.StartInfo.FileName = $serverBinary
     $server.StartInfo.WorkingDirectory = $gameDirectory
     $server.StartInfo.Arguments = '--listen 127.0.0.1 --port 0 --players 4 --log-directory "' + $logDirectory + '"'
+    $server.StartInfo.Arguments += ' --activity-class "' + $ActivityClass + '" --activity "' + $ActivityName + '" --scene "' + $SceneName + '"'
     $server.StartInfo.UseShellExecute = $false
     $server.StartInfo.CreateNoWindow = $true
     $server.StartInfo.RedirectStandardInput = $true
@@ -376,6 +386,8 @@ try {
     [IO.File]::WriteAllText((Join-Path $logDirectory 'StdOut.log'), $outputTask.GetAwaiter().GetResult(), [Text.UTF8Encoding]::new($false))
     [IO.File]::WriteAllText((Join-Path $logDirectory 'StdErr.log'), $errorTask.GetAwaiter().GetResult(), [Text.UTF8Encoding]::new($false))
     $networkLog = Read-Report (Join-Path $logDirectory 'WorldStateServer.log')
+    $activeSlots = @([regex]::Matches($networkLog, 'client assignment updated for .* to player slot (\d+)') | ForEach-Object { [int]$_.Groups[1].Value } | Sort-Object -Unique)
+    if ($activeSlots.Count -lt $RequireActivePlayers) { throw 'Not enough distinct active server player assignments.' }
     $expectedPolicyCost = if ($CheckPurchasePricing) { 798 } else { 324 }
     if ($CheckPurchasePolicy -and (!$policyChanged -or $networkLog -notmatch "purchase id=1 accepted=1 charged=$expectedPolicyCost\.000000")) { throw 'Server stock-price policy checks failed.' }
     if ($CheckBuyMenu -and ([regex]::Matches($networkLog, 'purchase id=\d+ accepted=1').Count -ne 1)) { throw 'Expected exactly one accepted menu purchase.' }
@@ -387,6 +399,8 @@ try {
         $clientReport = Read-Report (Join-Path $clientDirectory 'DebugRun.log')
         if ($EnableAudio -and $clientReport -notmatch '(?m)^audio_shutdown_complete\r?$') { throw 'Client audio shutdown was not verified.' }
         $clientNetwork = Read-Report (Join-Path $clientDirectory 'WorldStateClient.log')
+        if ($clientNetwork -notmatch ('(?m)^activity=' + [regex]::Escape($ActivityName) + '\r?$') -or
+            $clientNetwork -notmatch ('(?m)^scene=' + [regex]::Escape($SceneName) + '\r?$')) { throw 'Client loaded a different Activity or scene.' }
         if ($CheckMenuConnection -and ($clientReport -notmatch '(?m)^menu_connection=passed' -or
             $clientReport -notmatch '(?m)^menu_validation_and_cancel=passed' -or
             $clientNetwork -notmatch '(?m)^connection_source=main_menu' -or
@@ -400,6 +414,7 @@ try {
         if ($clientReport -match "(?m)^buy_menu_displayed_cost=$expectedPolicyCost\r?`$") { $displayedStockPriceObserved = $true }
         if ($clientReport -notmatch '(?m)^result=passed' -or $clientNetwork -notmatch '(?m)^client_local_simulation_ticks=0' -or
             $clientNetwork -notmatch '(?m)^snapshot=\d+.*missing_presets=0' -or $clientNetwork -match 'missing_presets=[1-9]') { throw 'Client replica checks failed.' }
+        if ($RequireAttachmentMatch -and ($clientNetwork -notmatch 'attachment_states_checked=[1-9]' -or $clientNetwork -match 'attachment_mismatches=[1-9]')) { throw 'Native attachment pose mismatch observed.' }
         if ($CheckSoundMix -and ($clientReport -notmatch '(?m)^world_state_sound_bus_pause=1' -or
             $clientReport -notmatch '(?s)world_state_sound_bus_pause=1.*world_state_sound_bus_pause=0')) { throw 'Network sound group pause/resume failed.' }
         if ($CheckSound -and (!$soundStarted -or !$soundStopped -or $clientReport -notmatch '(?m)^world_state_sound_play=passed' -or

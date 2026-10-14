@@ -3,6 +3,7 @@
 #include "ACrab.h"
 #include "ACRocket.h"
 #include "ACDropShip.h"
+#include "ADoor.h"
 #include "Arm.h"
 #include "Leg.h"
 #include "Turret.h"
@@ -206,7 +207,9 @@ bool ApplyPose(MOSRotating& object, const std::vector<WorldStateProtocol::Attach
 			if (auto* magazine = dynamic_cast<Magazine*>(child)) magazine->SetRoundCount(node.MagazineRounds);
 		}
 	}
-	object.CorrectAttachableAndWoundPositionsAndRotations();
+	// Received offsets/angles are authoritative. ADoor's override resets its
+	// moving panel to the preset's default open/closed pose.
+	object.MOSRotating::CorrectAttachableAndWoundPositionsAndRotations();
 	return true;
 }
 
@@ -307,12 +310,29 @@ bool TestEmitterVisual() {
 	return disabled && equal && changed;
 }
 
+bool TestDoorPose() {
+	const auto* preset = dynamic_cast<const ADoor*>(g_PresetMan.GetEntityPreset("ADoor", "Door Slide Long", "Base.rte"));
+	if (!preset || !preset->GetDoor()) return false;
+	std::unique_ptr<ADoor> source(dynamic_cast<ADoor*>(preset->Clone()));
+	std::unique_ptr<ADoor> target(dynamic_cast<ADoor*>(preset->Clone()));
+	if (!source || !target) return false;
+	source->SetRotAngle(0.35F); target->SetRotAngle(source->GetRotAngle());
+	source->GetDoor()->SetParentOffset(source->GetDoor()->GetParentOffset() + Vector(0, 17));
+	source->GetDoor()->SetInheritsRotAngle(false);
+	source->GetDoor()->SetRotAngle(0.75F);
+	source->MOSRotating::CorrectAttachableAndWoundPositionsAndRotations();
+	WorldStateProtocol::ObjectState state;
+	if (!Capture(*source, state) || !Apply(*target, state) || !Matches(*target, state.Attachments)) return false;
+	// The interpolation path also reapplies the received attachment pose.
+	return ApplyPose(*target, state.Attachments) && Matches(*target, state.Attachments);
+}
+
 bool TestNative() {
 	using namespace WorldStateProtocol;
 	ObjectScriptExecution::SuppressionScope suppress;
 	const auto* body = dynamic_cast<const AHuman*>(g_PresetMan.GetEntityPreset("AHuman", "Fat Culled Clone", "Base.rte"));
 	const Entity* weapon = g_PresetMan.GetEntityPreset("HDFirearm", "Auto Pistol", "Coalition.rte");
-	if (!body || !body->GetFGArm() || !weapon || !TestEmitterVisual()) return false;
+	if (!body || !body->GetFGArm() || !weapon || !TestEmitterVisual() || !TestDoorPose()) return false;
 	std::unique_ptr<AHuman> source(dynamic_cast<AHuman*>(body->Clone()));
 	std::unique_ptr<AHuman> target(dynamic_cast<AHuman*>(body->Clone()));
 	std::unique_ptr<HDFirearm> gun(dynamic_cast<HDFirearm*>(weapon->Clone()));

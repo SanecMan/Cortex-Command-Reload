@@ -88,6 +88,43 @@ Its total verification time was 167.71 seconds including startup, not a benchmar
 
 ## Connection failure handling
 
+### Graphical Activity/scene regression
+
+`Tools/RunDedicatedServerSmoke.ps1` accepts `-ActivityClass`, `-ActivityName`,
+`-SceneName`, `-RequireActivePlayers 0..2` and `-RequireAttachmentMatch`.
+It checks the loaded Activity/scene in both client reports and distinct active
+assignments in the host report. The attachment option rejects any sampled
+nonzero pose mismatch, rather than treating a successful connection as visual
+state correctness.
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File Tools/RunDedicatedServerSmoke.ps1 -OutputPrefix BrainVsBrainGraphical -ActivityClass GAScripted -ActivityName "Brain vs Brain" -SceneName "Fredeleig Bunkers" -RequireActivePlayers 2 -RequireAttachmentMatch -CheckMenuConnection -EnableAudio
+```
+
+The first delivered graphical Brain vs Brain pair passed startup/connection in
+34.17 seconds, but its pose diagnostics found two `Door Slide Long` mismatches.
+`ADoor::CorrectAttachableAndWoundPositionsAndRotations` restores the preset's
+default open/closed pose. Calling it after applying a server snapshot overwrote
+the authoritative moving-panel offset. Replica `ApplyPose` now calls the base
+MOSRotating positioning method, preserving received offsets/angles. Native local
+door behavior is unchanged. The explicit native regression captures a door with
+nondefault offset/angle and verifies both initial application and interpolation
+pose application. Debug replica reports also identify the mismatching object and
+available node pose/device differences (bounded to eight details per snapshot).
+
+`DoorReplicaHeadless` passed the full content/simulation self-test and two-client
+input/UTF-8 checks in 40.12 seconds with 123 observed ticks and no video.
+The Meson `BrainVsBrainDoorPose` graphical pair passed the strict attachment
+gate in 60.90 seconds with 67 post-disconnect updates, menu connection and clean
+audio shutdown. These durations include concurrent native linking and are not
+performance comparisons. The earlier Brain vs Brain final screenshot was
+visually inspected for scene/actor presentation; the strict gate checks sampled
+native state, not every visual effect or arbitrary Lua HUD behavior.
+Native MSBuild `Final|x64` compiled and linked. The delivered root pair passed
+the same strict two-active-player gate in 41.93 seconds with 62 updates after
+disconnect (`BrainVsBrainDoorDelivered`). Linux run `38535912217` for the prior
+late-player initialization passed; Linux verification of this door fix is pending.
+
 ### Extended device-free client probes
 
 `--probe-client ADDRESS PORT --probe-seconds 60 --input-silence` keeps a probe
