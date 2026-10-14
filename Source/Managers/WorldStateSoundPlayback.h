@@ -31,6 +31,10 @@ public:
 				for (auto& [id, voice] : m_Voices) if (voice.Bus == event.Bus) { voice.Sound->SetPaused(voice.Paused || event.Paused); ++applied; }
 				continue;
 			}
+			if (event.Type == WorldStateSoundProtocol::Action::FinishBusLoops) {
+				for (auto& [id, voice] : m_Voices) if (voice.Bus == event.Bus && voice.Sound->FinishNetworkLoops()) ++applied;
+				continue;
+			}
 			if (event.Type == WorldStateSoundProtocol::Action::Play) {
 				if (m_Voices.contains(event.Voice) || m_Voices.size() >= 2048 || g_PresetMan.GetModuleID(event.Module) < 0) continue;
 				const auto module = UTF8::PathFromString(g_PresetMan.GetFullModulePath(event.Module));
@@ -82,6 +86,7 @@ public:
 					case WorldStateSoundProtocol::Action::Pan: voice.Sound->SetCustomPanValue(event.Pan); break;
 					case WorldStateSoundProtocol::Action::Panning: voice.Sound->SetPanningStrengthMultiplier(event.Panning); break;
 					case WorldStateSoundProtocol::Action::GlobalPitch: case WorldStateSoundProtocol::Action::BusPause:
+					case WorldStateSoundProtocol::Action::FinishBusLoops:
 					case WorldStateSoundProtocol::Action::Play: break;
 				}
 				++applied; ++it;
@@ -90,6 +95,16 @@ public:
 		return applied;
 	}
 	bool HasVoice(std::uint64_t id) const { return m_Voices.contains(id); }
+	bool IsVoiceFinishing(std::uint64_t id) const {
+		const auto found = m_Voices.find(id); if (found == m_Voices.end()) return false;
+		if (!g_AudioMan.IsAudioEnabled()) return found->second.Sound->GetLoopSetting() == 0;
+		const auto* channels = found->second.Sound->GetPlayingChannels(); if (channels->empty()) return false;
+		for (int index : *channels) {
+			FMOD::Channel* channel = nullptr; int loops = -1;
+			if (g_AudioMan.GetAudioSystem()->getChannel(index, &channel) != FMOD_OK || !channel || channel->getLoopCount(&loops) != FMOD_OK || loops != 0) return false;
+		}
+		return true;
+	}
 	bool HasContainer(std::uint64_t id) const { for (const auto& [voiceID, voice] : m_Voices) if (voice.Container == id) return true; return false; }
 	float GetVoicePitch(std::uint64_t id) const {
 		const auto found = m_Voices.find(id); if (found == m_Voices.end()) return 0;

@@ -250,6 +250,8 @@ namespace RTE {
 		void SetNetworkPitch(float newPitch);
 		/// Moves playing voices to a sample cursor in milliseconds; no Lua API change.
 		bool SeekNetworkPlayback(unsigned int milliseconds);
+		/// Stops repeating playing voices after their current cycle, preserving its tail.
+		bool FinishNetworkLoops();
 
 		/// Gets the pitch variation the sounds in this SoundContainer are played at.
 		/// @return The pitch variation the sounds in this SoundContainer are played at.

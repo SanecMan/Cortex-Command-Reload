@@ -303,6 +303,7 @@ namespace {
 		bool EnableDebugAudio = false;
 		std::uint64_t NetworkSoundFixture = 0, NetworkSoundVoice = 0;
 		bool NetworkSoundPlayVerified = false, NetworkSoundStopVerified = false;
+		bool NetworkSoundFinishRequested = false, NetworkSoundFinishVerified = false;
 		bool Enabled = false;
 		bool StressStarted = false;
 		bool PerformanceCountersObserved = false;
@@ -1586,7 +1587,7 @@ namespace {
 			for (auto& event : batch) captured.push_back(std::move(event));
 		}
 		GetWorldStateSoundCapture().End();
-		std::array<std::size_t, 11> actionCounts{};
+		std::array<std::size_t, 12> actionCounts{};
 		bool capturePassed = !captureOverflow;
 		for (const auto& event : captured) {
 			++actionCounts[static_cast<std::size_t>(event.Type)];
@@ -1595,7 +1596,7 @@ namespace {
 		}
 		for (auto action : {WorldStateSoundProtocol::Action::Play, WorldStateSoundProtocol::Action::Stop,
 		    WorldStateSoundProtocol::Action::Volume, WorldStateSoundProtocol::Action::Pitch,
-		    WorldStateSoundProtocol::Action::Pause, WorldStateSoundProtocol::Action::Fade})
+		    WorldStateSoundProtocol::Action::Pause, WorldStateSoundProtocol::Action::Fade, WorldStateSoundProtocol::Action::FinishBusLoops})
 			capturePassed = capturePassed && actionCounts[static_cast<std::size_t>(action)] > 0;
 		WorldStateSoundPlayback replicaSound;
 		WorldStateSoundProtocol::Event replicaPlay;
@@ -1616,6 +1617,9 @@ namespace {
 		replicaSound.Apply(1, 0, std::vector{groupPause}); replicaPassed = replicaSound.IsVoicePaused(456) && replicaPassed;
 		explicitPause.Paused = false; replicaSound.Apply(1, 0, std::vector{explicitPause});
 		replicaPassed = !replicaSound.IsVoicePaused(456) && replicaPassed;
+		WorldStateSoundProtocol::Event finishBus; finishBus.Type = WorldStateSoundProtocol::Action::FinishBusLoops; finishBus.Bus = 0;
+		replicaPassed = replicaSound.Apply(1, 0, std::vector{finishBus}) == 1 && replicaSound.HasVoice(456) &&
+		    replicaSound.IsVoiceFinishing(456) && !replicaSound.IsVoiceFinishing(457) && replicaPassed;
 		WorldStateSoundProtocol::Event uiStop; uiStop.Container = 124; replicaSound.Apply(1, 0, std::vector{uiStop});
 		WorldStateSoundProtocol::Event replicaStop; replicaStop.Container = 123;
 		replicaPassed = replicaSound.Apply(1, 0, std::vector{replicaStop}) == 1 && replicaSound.Size() == 0 && replicaPassed;
@@ -2193,6 +2197,9 @@ int RunPersistentHeadlessServer(const ServerConfiguration& config) {
 				g_AudioMan.PauseIngameSounds(false);
 				g_AudioMan.SetGlobalPitch(1, true, false);
 				log("INFO debug_sound_mix=resumed");
+			} else if (command == "debug-sound-finish") {
+				g_AudioMan.FinishIngameLoopingSounds();
+				log("INFO debug_sound=finishing");
 			} else if (command == "debug-sound-stop") {
 				if (diagnosticSound) diagnosticSound->Stop();
 				log("INFO debug_sound=stopped");
@@ -2927,17 +2934,21 @@ void RunGameLoop() {
 					auto& state = GetDebugRunState();
 					for (const auto& event : soundEvents) {
 						if (event.Type == WorldStateSoundProtocol::Action::Play && event.Module == "Base.rte" &&
-						    event.Resource == "Sounds/GUIs/SlicePicked.flac" && event.Loops == -1)
+						    event.Resource == "Sounds/GUIs/SlicePicked.flac" && (event.Loops == -1 || (event.Loops == 0 && event.CursorMilliseconds > 0)))
 							state.Log << "world_state_sound_fixture_event voice=" << event.Voice
 							          << " cursor_ms=" << event.CursorMilliseconds << '\n' << std::flush;
 						if (!state.NetworkSoundPlayVerified && event.Type == WorldStateSoundProtocol::Action::Play &&
-						    event.Module == "Base.rte" && event.Resource == "Sounds/GUIs/SlicePicked.flac" && event.Loops == -1 &&
+						    event.Module == "Base.rte" && event.Resource == "Sounds/GUIs/SlicePicked.flac" && (event.Loops == -1 || (event.Loops == 0 && event.CursorMilliseconds > 0)) &&
 						    worldStateSoundPlayback.HasVoice(event.Voice)) {
 							state.NetworkSoundFixture = event.Container; state.NetworkSoundVoice = event.Voice; state.NetworkSoundPlayVerified = true;
 							state.Log << "world_state_sound_play=passed audio_enabled=" << g_AudioMan.IsAudioEnabled() << '\n' << std::flush;
 							if (event.CursorMilliseconds > 0)
 								state.Log << "world_state_sound_late_join=passed cursor_ms=" << event.CursorMilliseconds
 								          << " paused=" << worldStateSoundPlayback.IsVoicePaused(event.Voice) << '\n' << std::flush;
+							if (event.Loops == 0 && worldStateSoundPlayback.IsVoiceFinishing(event.Voice)) {
+								state.NetworkSoundFinishRequested = true;
+								state.Log << "world_state_sound_finish_received=passed source=baseline\n" << std::flush;
+							}
 							if (g_AudioMan.IsAudioEnabled()) {
 								const bool lifetime = g_AudioMan.VerifySoundContainerLifetime();
 								state.Log << "audio_owner_lifetime=" << (lifetime ? "passed" : "failed") << '\n' << std::flush;
@@ -2947,11 +2958,19 @@ void RunGameLoop() {
 							const bool applied = worldStateSoundPlayback.HasVoice(state.NetworkSoundVoice) && worldStateSoundPlayback.IsVoicePaused(state.NetworkSoundVoice) == event.Paused;
 							state.Log << (applied ? "world_state_sound_bus_pause=" : "world_state_sound_bus_pause_failed=") << event.Paused << '\n' << std::flush;
 						}
+						if (state.NetworkSoundPlayVerified && event.Type == WorldStateSoundProtocol::Action::FinishBusLoops && event.Bus == 0) {
+							state.NetworkSoundFinishRequested = worldStateSoundPlayback.IsVoiceFinishing(state.NetworkSoundVoice);
+							state.Log << "world_state_sound_finish_received=" << (state.NetworkSoundFinishRequested ? "passed" : "failed") << " source=command\n" << std::flush;
+						}
 						if (state.NetworkSoundPlayVerified && !state.NetworkSoundStopVerified && event.Type == WorldStateSoundProtocol::Action::Stop &&
 						    event.Container == state.NetworkSoundFixture && !worldStateSoundPlayback.HasContainer(event.Container)) {
 							state.NetworkSoundStopVerified = true;
 							state.Log << "world_state_sound_stop=passed\n" << std::flush;
 						}
+					}
+					if (state.NetworkSoundFinishRequested && !state.NetworkSoundFinishVerified && !worldStateSoundPlayback.HasVoice(state.NetworkSoundVoice)) {
+						state.NetworkSoundFinishVerified = true;
+						state.Log << "world_state_sound_finish_completed=passed\n" << std::flush;
 					}
 				}
 				if (!soundEvents.empty() && worldStateClientLog.is_open())

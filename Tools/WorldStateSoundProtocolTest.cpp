@@ -14,7 +14,7 @@ int main() {
     play.Immobile = true; play.Paused = true;
     play.CursorMilliseconds = 47; play.FadeMilliseconds = 120;
     std::vector<Event> source{play};
-    for (auto action : {Action::Stop, Action::Position, Action::Volume, Action::Pitch, Action::Pause, Action::Fade, Action::Pan, Action::Panning, Action::GlobalPitch, Action::BusPause}) {
+    for (auto action : {Action::Stop, Action::Position, Action::Volume, Action::Pitch, Action::Pause, Action::Fade, Action::Pan, Action::Panning, Action::GlobalPitch, Action::BusPause, Action::FinishBusLoops}) {
         Event event; event.Type = action; event.Container = 7; event.Player = 3;
         if (action == Action::Position) { event.X = -12; event.Y = 34; }
         if (action == Action::Volume) event.Gain = 0.5F;
@@ -25,6 +25,7 @@ int main() {
         if (action == Action::Panning) event.Panning = 2;
         if (action == Action::GlobalPitch) { event.Container = 0; event.Player = -1; event.Bus = 5; event.Rate = 0.5F; }
         if (action == Action::BusPause) { event.Container = 0; event.Player = -1; event.Bus = 0; event.Paused = true; }
+        if (action == Action::FinishBusLoops) { event.Container = 0; event.Player = -1; event.Bus = 0; }
         source.push_back(event);
     }
     auto check = [](bool passed, const char* name) { if (!passed) std::cerr << "FAILED " << name << '\n'; return passed; };
@@ -71,7 +72,7 @@ int main() {
     maximum.push_back(play);
     if (!check(!Encode(maximum, bytes), "batch limit")) return 1;
     Event stop; stop.Container = 1;
-    const std::vector<std::uint8_t> golden{0x43,0x43,0x41,0x31,4,0,1,0,1,1,0,0,0,0,0,0,0,0xFF};
+    const std::vector<std::uint8_t> golden{0x43,0x43,0x41,0x31,5,0,1,0,1,1,0,0,0,0,0,0,0,0xFF};
     if (!check(Encode(std::vector<Event>{stop}, bytes) && bytes == golden, "fixed little-endian layout")) return 1;
     RTE::WorldStateSoundQueue queue;
     if (!check(queue.Push(2, 10, source) && queue.Drain(1).empty() && queue.Size() == source.size(), "future scene retained")) return 1;
@@ -173,6 +174,27 @@ int main() {
     if (!check(capture.GetActiveLoops(650).empty(), "released loop removed")) return 1;
     capture.End();
     std::cout << "sound_loop_baseline_test=passed\n";
+    int secondSource = 0;
+    capture.Begin(); loop.Bus = 0;
+    capture.Play(&firstSource, loop, 0, 100); loop.Bus = 1;
+    capture.Play(&secondSource, loop, 0, 100);
+    busPause.Bus = 0; busPause.Paused = true; capture.Global(busPause, 25);
+    Event finish; finish.Type = Action::FinishBusLoops; finish.Bus = 0;
+    capture.Global(finish, 25);
+    active = capture.GetActiveLoops(1000);
+    bool finishing = false, otherBus = false;
+    for (const auto& event : active) {
+        finishing = finishing || (event.Bus == 0 && event.Loops == 0 && event.CursorMilliseconds == 25);
+        otherBus = otherBus || (event.Bus == 1 && event.Loops == -1);
+    }
+    if (!check(active.size() == 2 && finishing && otherBus, "paused finishing baseline and bus isolation")) return 1;
+    busPause.Paused = false; capture.Global(busPause, 1000);
+    if (!check(capture.GetActiveLoops(1074).size() == 2 && capture.GetActiveLoops(1075).size() == 1, "finish preserves current cycle tail")) return 1;
+    auto invalidFinish = finish; invalidFinish.Bus = 3;
+    if (!check(!Encode(std::vector{invalidFinish}, bytes), "finish bus validation")) return 1;
+    invalidFinish = finish; invalidFinish.Container = 1;
+    if (!check(!Encode(std::vector{invalidFinish}, bytes), "finish identity validation")) return 1;
+    capture.End(); std::cout << "sound_finish_loops_test=passed\n";
     std::cout << "sound_protocol_test=passed\nsound_queue_test=passed\n";
     return 0;
 }

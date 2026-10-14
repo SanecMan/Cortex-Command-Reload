@@ -280,6 +280,9 @@ void AudioMan::PauseIngameSounds(bool pause) {
 	else SoundContainer::PauseHeadlessIngamePlayback(pause);
 }
 void AudioMan::FinishIngameLoopingSounds() {
+	WorldStateSoundProtocol::Event captured; captured.Type = WorldStateSoundProtocol::Action::FinishBusLoops;
+	captured.Bus = SoundContainer::SFX;
+	GetWorldStateSoundCapture().Global(captured, static_cast<double>(g_TimerMan.GetSimTickCount()) * 1000.0 / g_TimerMan.GetTicksPerSecond());
 	if (!m_AudioEnabled) { SoundContainer::FinishHeadlessIngameLoops(); return; }
 	if (m_AudioEnabled) {
 		int numberOfPlayingChannels;

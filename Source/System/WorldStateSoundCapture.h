@@ -80,12 +80,15 @@ public:
 		} else if (event.Type == WorldStateSoundProtocol::Action::BusPause) {
 			if (m_BusPaused[event.Bus] == event.Paused) return;
 			m_BusPaused[event.Bus] = event.Paused;
-		} else return;
+		} else if (event.Type != WorldStateSoundProtocol::Action::FinishBusLoops) return;
 		for (auto& [source, container] : m_Containers) for (auto& loop : container.Loops) {
 			if (event.Type == WorldStateSoundProtocol::Action::GlobalPitch && (event.Bus & (1U << loop.Event.Bus)))
 				loop.Timeline.Pitch(now, loop.Event.Rate * event.Rate);
 			else if (event.Type == WorldStateSoundProtocol::Action::BusPause && event.Bus == loop.Event.Bus)
 				loop.Timeline.PauseGroup(now, event.Paused);
+			else if (event.Type == WorldStateSoundProtocol::Action::FinishBusLoops && event.Bus == loop.Event.Bus) {
+				loop.Timeline.FinishLoops(now); loop.Event.Loops = 0;
+			}
 		}
 		Append(std::move(event));
 	}

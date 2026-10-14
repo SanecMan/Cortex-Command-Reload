@@ -5,9 +5,9 @@ namespace RTE::WorldStateSoundProtocol {
 // Inner audio payload schema; transport integration uses the common session
 // envelope. Never serialize native FMOD channels, pointers or size_t hashes.
 inline constexpr std::uint32_t Magic = 0x31414343; // CCA1
-inline constexpr std::uint16_t Version = 4;
+inline constexpr std::uint16_t Version = 5;
 inline constexpr std::size_t MaxEvents = 256, MaxBytes = 256 * 1024;
-enum class Action : std::uint8_t { Play, Stop, Position, Volume, Pitch, Pause, Fade, GlobalPitch, BusPause, Pan, Panning };
+enum class Action : std::uint8_t { Play, Stop, Position, Volume, Pitch, Pause, Fade, GlobalPitch, BusPause, Pan, Panning, FinishBusLoops };
 struct Event {
     Action Type = Action::Stop;
     std::uint64_t Container = 0, Voice = 0;
@@ -41,7 +41,7 @@ inline bool RelativeResource(const std::string& value) {
 inline bool Valid(const Event& event) {
     if (event.Type == Action::GlobalPitch)
         return !event.Container && event.Player == -1 && event.Bus > 0 && event.Bus <= 7 && std::isfinite(event.Rate) && event.Rate >= 0.125F && event.Rate <= 8;
-    if (event.Type == Action::BusPause) return !event.Container && event.Player == -1 && event.Bus <= 2;
+    if (event.Type == Action::BusPause || event.Type == Action::FinishBusLoops) return !event.Container && event.Player == -1 && event.Bus <= 2;
     if (!event.Container || event.Player < -1 || event.Player >= RTE::WorldStateProtocol::c_PlayerSlotCount) return false;
     switch (event.Type) {
         case Action::Play:
@@ -57,7 +57,7 @@ inline bool Valid(const Event& event) {
         case Action::Pitch: return std::isfinite(event.Rate) && event.Rate > 0 && event.Rate <= 64;
         case Action::Pan: return std::isfinite(event.Pan) && event.Pan >= -1 && event.Pan <= 1;
         case Action::Panning: return std::isfinite(event.Panning) && event.Panning >= 0 && event.Panning <= 10;
-        case Action::GlobalPitch: case Action::BusPause: return false;
+        case Action::GlobalPitch: case Action::BusPause: case Action::FinishBusLoops: return false;
         case Action::Fade: return event.FadeMilliseconds <= static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max());
     }
     return false;
@@ -90,6 +90,7 @@ inline bool Encode(std::span<const Event> events, std::vector<std::uint8_t>& byt
             case Action::Fade: WriteUnsigned(output, event.FadeMilliseconds, 4); break;
             case Action::GlobalPitch: WriteUnsigned(output, event.Bus, 1); WriteFloat(output, event.Rate); break;
             case Action::BusPause: WriteUnsigned(output, event.Bus, 1); WriteUnsigned(output, event.Paused, 1); break;
+            case Action::FinishBusLoops: WriteUnsigned(output, event.Bus, 1); break;
             case Action::Pan: WriteFloat(output, event.Pan); break;
             case Action::Panning: WriteFloat(output, event.Panning); break;
             case Action::Stop: break;
@@ -112,7 +113,7 @@ inline bool Decode(std::span<const std::uint8_t> bytes, std::vector<Event>& even
     };
     for (std::size_t index = 0; index < count; ++index) {
         Event event;
-        if (!ReadUnsigned(bytes, offset, 1, value) || value > static_cast<std::uint8_t>(Action::Panning)) return false;
+        if (!ReadUnsigned(bytes, offset, 1, value) || value > static_cast<std::uint8_t>(Action::FinishBusLoops)) return false;
         event.Type = static_cast<Action>(value);
         if (!ReadUnsigned(bytes, offset, 8, event.Container) || !ReadUnsigned(bytes, offset, 1, value)) return false;
         event.Player = std::bit_cast<std::int8_t>(static_cast<std::uint8_t>(value));
@@ -150,6 +151,9 @@ inline bool Decode(std::span<const std::uint8_t> bytes, std::vector<Event>& even
                 break;
             case Action::Pan: if (!ReadFloat(bytes, offset, event.Pan)) return false; break;
             case Action::Panning: if (!ReadFloat(bytes, offset, event.Panning)) return false; break;
+            case Action::FinishBusLoops:
+                if (!ReadUnsigned(bytes, offset, 1, value)) return false;
+                event.Bus = static_cast<std::uint8_t>(value); break;
             case Action::Stop: break;
         }
         if (!Valid(event)) return false;
