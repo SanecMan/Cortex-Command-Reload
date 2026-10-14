@@ -66,6 +66,11 @@ further ticks and video initialization disabled. These durations are validation
 wall times, not performance comparisons. Ordinary object construction/removal,
 physical-input testing and broader Activity compatibility are still outstanding.
 
+Native Final compiled and linked. The delivered root client/server pair passed
+`ConstructionMenuDelivered` in 55.06 seconds with both preview/start markers,
+strict attachments and audio shutdown, and 63 further server updates after
+disconnect. Linux run `38578726608` is in progress for commit `3bc24daf821`.
+
 ## Construction command codec foundation
 
 `WorldStateConstructionProtocol.h` reserves envelope message kinds 11
