@@ -126,8 +126,14 @@ explanation of this intermittent membership difference. Diagnostic failures now
 log per-class/module/preset count differences. Two subsequent runs with that
 instrumentation passed (31.89 and 32.68 seconds, each with 62 post-disconnect
 updates), but the intermittent failure remains unresolved and is not waived.
-The current native binary compiled/linked with the deletion fix; the additional
-identity logging is validated in Meson and has not yet been rebuilt natively.
+Native Final was subsequently rebuilt with identity logging too. Three more
+consecutive Meson pairs passed in 36.48, 61.47 and 76.36 seconds (64/66/65
+post-disconnect ticks; concurrent linking). The root native pair then passed
+`ReplicaIdentityDelivered` in 36.01 seconds with 63 further ticks, exact
+membership, strict attachment state, distinct controlled actors, revision 2 and
+clean audio shutdown. These repeats do not erase the earlier intermittent
+failures or establish their complete cause. Linux run `38549019434` for the
+scene-generation/deletion changes is pending.
 
 ### Activity teams and connected-roster restart
 
