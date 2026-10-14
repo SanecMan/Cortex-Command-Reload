@@ -64,6 +64,10 @@ jobs:
         run: |
           g++-13 -std=c++20 -Wall -Wextra -I Source/System Tools/SoundFadeMathTest.cpp -o build-server/sound-fade-math-test
           build-server/sound-fade-math-test
+      - name: Verify sound fade envelopes
+        run: |
+          g++-13 -std=c++20 -Wall -Wextra -I Source/System Tools/SoundFadeEnvelopeTest.cpp -o build-server/sound-fade-envelope-test
+          build-server/sound-fade-envelope-test
       - name: Check dependencies
         run: |
           ldd build-server/CortexCommandServer | tee build-server/runtime-dependencies.txt

@@ -19,11 +19,16 @@ param(
     [switch]$CheckStaggeredSound,
     [switch]$CheckFinishLoops,
     [switch]$CheckFinishingLateJoin,
+    [switch]$CheckFadingLateJoin,
     [switch]$EnableAudio,
     [ValidateRange(60, 600)]
     [int]$TimeoutSeconds = 360
 )
 $ErrorActionPreference = 'Stop'
+if ($CheckFadingLateJoin) {
+    if ($CheckFinishLoops -or $CheckFinishingLateJoin) { throw 'Run fading and finishing fixtures separately.' }
+    $CheckStaggeredSound=$true; $CheckSound=$true
+}
 if ($CheckFinishingLateJoin) { $CheckStaggeredSound=$true; $CheckFinishLoops=$true }
 if ($CheckFinishLoops) { $CheckSound=$true }
 if ($CheckFinishLoops -and $CheckSoundMix) { throw 'Run loop completion separately from mix changes.' }
@@ -163,11 +168,24 @@ try {
                     Start-Sleep -Milliseconds 100
                 }
             }
+            if ($CheckFadingLateJoin) {
+                $server.StandardInput.WriteLine('debug-sound-mix-resume'); $server.StandardInput.WriteLine('debug-sound-fade'); $server.StandardInput.Flush()
+                while ((Read-Report $firstReport) -notmatch '(?m)^world_state_sound_fade_midpoint=passed') {
+                    Check-Time; if ($client.HasExited -or $server.HasExited) { throw 'First peer exited before fading midpoint.' }
+                    Start-Sleep -Milliseconds 100
+                }
+                $server.StandardInput.WriteLine('debug-sound-mix-pause'); $server.StandardInput.Flush()
+                while ((Read-Report $firstReport) -notmatch '(?m)^world_state_sound_fade_frozen=passed') {
+                    Check-Time; if ($client.HasExited -or $server.HasExited) { throw 'First peer exited before fade freeze.' }
+                    Start-Sleep -Milliseconds 100
+                }
+            }
         }
     }
     $mixPaused = $false; $mixResumed = $false
     $soundStarted = [bool]($CheckLateJoinSound -or $CheckStaggeredSound)
     $soundStopped = $false
+    $fadeVolumeChanged = $false
     $screenTextApplied = $false
     $screenTextFixtureTimer = [Diagnostics.Stopwatch]::StartNew()
     $fundsChanged = $false
@@ -211,11 +229,22 @@ try {
             }
             if ($soundStarted -and !$soundStopped -and $soundPlayed -and $mixReadyToStop) {
                 if ($CheckStaggeredSound -and $clients[0].HasExited) { throw 'Existing peer exited before the later peer was ready.' }
-                if ($CheckFinishLoops) {
+                $completionIssued = $true
+                if ($CheckFadingLateJoin) {
+                    $frozenSeen=$true; $volumeSeen=$true
+                    foreach ($index in 1..2) {
+                        $fadeReport = Read-Report (Join-Path $gameDirectory "ScreenShots\$OutputPrefix-Client$index\DebugRun.log")
+                        $frozenSeen=$frozenSeen -and ($fadeReport -match '(?m)^world_state_sound_fade_frozen=passed')
+                        $volumeSeen=$volumeSeen -and ($fadeReport -match '(?m)^world_state_sound_fade_volume=passed')
+                    }
+                    if (!$fadeVolumeChanged -and $frozenSeen) { $server.StandardInput.WriteLine('debug-sound-volume-half'); $server.StandardInput.Flush(); $fadeVolumeChanged=$true }
+                    if ($fadeVolumeChanged -and $volumeSeen) { $server.StandardInput.WriteLine('debug-sound-mix-resume') }
+                    else { $completionIssued=$false }
+                } elseif ($CheckFinishLoops) {
                     $server.StandardInput.WriteLine('debug-sound-mix-resume')
                     if (!$CheckFinishingLateJoin) { $server.StandardInput.WriteLine('debug-sound-finish') }
                 } else { $server.StandardInput.WriteLine('debug-sound-stop') }
-                $server.StandardInput.Flush(); $soundStopped=$true
+                if ($completionIssued) { $server.StandardInput.Flush(); $soundStopped=$true }
             }
         }
         Check-Time
@@ -322,7 +351,11 @@ try {
         if ($CheckSoundMix -and ($clientReport -notmatch '(?m)^world_state_sound_bus_pause=1' -or
             $clientReport -notmatch '(?s)world_state_sound_bus_pause=1.*world_state_sound_bus_pause=0')) { throw 'Network sound group pause/resume failed.' }
         if ($CheckSound -and (!$soundStarted -or !$soundStopped -or $clientReport -notmatch '(?m)^world_state_sound_play=passed' -or
-            (!$CheckFinishLoops -and $clientReport -notmatch '(?m)^world_state_sound_stop=passed'))) { throw 'Network sound playback/lifecycle fixture failed.' }
+            (!$CheckFinishLoops -and !$CheckFadingLateJoin -and $clientReport -notmatch '(?m)^world_state_sound_stop=passed'))) { throw 'Network sound playback/lifecycle fixture failed.' }
+        if ($CheckFadingLateJoin -and (!$fadeVolumeChanged -or $clientReport -notmatch '(?m)^world_state_sound_fade_frozen=passed' -or
+            $clientReport -notmatch '(?m)^world_state_sound_fade_volume=passed' -or $clientReport -notmatch '(?m)^world_state_sound_fade_completed=passed' -or
+            $clientReport -match '(?m)^world_state_sound_stop=passed')) { throw 'Fade did not freeze, preserve volume controls or naturally expire.' }
+        if ($CheckFadingLateJoin -and $index -eq 2 -and $clientReport -notmatch '(?m)^world_state_sound_fade_restored=passed') { throw 'Late-join fade gain was not restored.' }
         if ($CheckFinishLoops -and ($clientReport -notmatch '(?m)^world_state_sound_finish_received=passed' -or
             $clientReport -notmatch '(?m)^world_state_sound_finish_completed=passed' -or $clientReport -match '(?m)^world_state_sound_stop=passed')) { throw 'Loop did not finish its cycle without Stop.' }
         if ($CheckFinishingLateJoin -and $index -eq 2 -and $clientReport -notmatch '(?m)^world_state_sound_finish_received=passed source=baseline') { throw 'Finishing state missing from late-join baseline.' }

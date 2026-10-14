@@ -12,7 +12,7 @@ int main() {
     play.Module = "Мод.rte"; play.Resource = "Sounds/Ёжик.flac";
     play.OffsetX = 3; play.OffsetY = -4; play.Loops = -1; play.Priority = 256; play.Bus = 2;
     play.Immobile = true; play.Paused = true;
-    play.CursorMilliseconds = 47; play.FadeMilliseconds = 120;
+    play.CursorMilliseconds = 47; play.FadeMilliseconds = 120; play.FadeGain = 0.4F;
     std::vector<Event> source{play};
     for (auto action : {Action::Stop, Action::Position, Action::Volume, Action::Pitch, Action::Pause, Action::Fade, Action::Pan, Action::Panning, Action::GlobalPitch, Action::BusPause, Action::FinishBusLoops}) {
         Event event; event.Type = action; event.Container = 7; event.Player = 3;
@@ -40,7 +40,7 @@ int main() {
 	if (!check(!DecodePacket(bytes, sceneRevision, sequence, decoded), "foreign session version")) return 1;
 	if (!check(!EncodePacket(0, 42, source, bytes) && !EncodePacket(3, 0, source, bytes), "invalid envelope identity")) return 1;
     if (!check(Encode(std::vector<Event>{play}, bytes), "single play encoding")) return 1;
-    bytes[bytes.size() - 9] = 2; // Paused precedes cursor and fade duration.
+    bytes[bytes.size() - 13] = 2; // Paused precedes cursor, duration and fade gain.
     if (!check(!Decode(bytes, decoded), "invalid boolean rejection")) return 1;
     if (!check(Encode(std::vector<Event>{play}, bytes), "single play reset")) return 1;
     const std::size_t positionOffset = 8 + 10 + 8 + 2 + play.Module.size() + 2 + play.Resource.size();
@@ -72,7 +72,7 @@ int main() {
     maximum.push_back(play);
     if (!check(!Encode(maximum, bytes), "batch limit")) return 1;
     Event stop; stop.Container = 1;
-    const std::vector<std::uint8_t> golden{0x43,0x43,0x41,0x31,5,0,1,0,1,1,0,0,0,0,0,0,0,0xFF};
+    const std::vector<std::uint8_t> golden{0x43,0x43,0x41,0x31,6,0,1,0,1,1,0,0,0,0,0,0,0,0xFF};
     if (!check(Encode(std::vector<Event>{stop}, bytes) && bytes == golden, "fixed little-endian layout")) return 1;
     RTE::WorldStateSoundQueue queue;
     if (!check(queue.Push(2, 10, source) && queue.Drain(1).empty() && queue.Size() == source.size(), "future scene retained")) return 1;
@@ -166,10 +166,15 @@ int main() {
     Event moved; moved.Type = Action::Position; moved.X = 29; moved.Y = 31;
     capture.Command(&firstSource, moved, 510);
     Event fade; fade.Type = Action::Fade; fade.FadeMilliseconds = 50; capture.Command(&firstSource, fade, 510);
-    active = capture.GetActiveLoops(530);
+    active = capture.GetActiveLoops(520);
     if (!check(active.size() == 1 && active[0].X == 29 && active[0].Y == 31 && active[0].FadeMilliseconds == 30,
                "loop controls and remaining fade baseline")) return 1;
-    if (!check(capture.GetActiveLoops(560).empty(), "expired loop removed")) return 1;
+    if (!check(std::abs(active[0].FadeGain - 0.6F) < 0.0001F, "baseline fade gain")) return 1;
+    auto invalidFadeGain = play; invalidFadeGain.FadeGain = std::nanf("");
+    if (!check(!Encode(std::vector{invalidFadeGain}, bytes), "non-finite fade gain rejection")) return 1;
+    invalidFadeGain = play; invalidFadeGain.FadeGain = 1.1F;
+    if (!check(!Encode(std::vector{invalidFadeGain}, bytes), "fade gain upper bound")) return 1;
+    if (!check(capture.GetActiveLoops(535).empty(), "expired loop removed")) return 1;
     capture.Play(&firstSource, loop, 600, 100); capture.Release(&firstSource);
     if (!check(capture.GetActiveLoops(650).empty(), "released loop removed")) return 1;
     capture.End();

@@ -1,5 +1,48 @@
 # World-state protocol
 
+## v25 fade gain and audio clocks under validation
+
+Development sources use session protocol 25 and inner sound schema 6. Play
+includes a finite FadeGain in [0,1] along with the remaining fade duration.
+Baseline gain remains separate from base channel volume, so later Volume
+commands preserve the current envelope rather than restarting it at full gain.
+
+The portable SoundFadeEnvelope follows FMOD parent-clock semantics: individual
+pause does not stop a fade; bus pause freezes it; bus pitch changes its clock
+rate. The silent FMOD subgroup probe measured 10,240 ticks for ten ordinary
+updates and 5,120 with group pitch 0.5. Headless playback and capture now use
+monotonic real time rather than scaled simulation ticks or scene-reset timers.
+The native owner registry additionally collects expired individually paused
+fades because a paused FMOD channel may not process its scheduled stop itself.
+New channel registration resets its deadline; cleanup remains on the audio
+update thread under the existing owner lock.
+
+Replicas apply the same envelope to base volume each presentation update, rather
+than scheduling native fade points whose parent clock would continue while the
+replicated bus is represented by individually paused channels. Expired voices
+are stopped and removed. Packet transit delay and frame/DSP quantization are
+not compensated by this model; sample-accurate waveform alignment is unproven.
+
+MSVC envelope and codec/capture tests passed gain round trips, non-finite/out-of-
+range rejection, pause differences, bus pitch, backwards-time rejection and
+partial baseline gain. `-CheckFadingLateJoin` checks a partially faded voice,
+freezes its bus before connecting client two, changes base volume while paused,
+then resumes and requires natural expiration without Stop.
+
+Both Meson executables compiled and linked. `SoundFadeV25Headless` passed in
+20.52 seconds with two external clients, 122 updates, UTF-8 input/configuration
+and screen messages, without video initialization. Its injected-clock replica
+check verifies partial gain, explicit pause, bus freeze, base-volume changes and
+expiration. `SoundFadeV25LateJoinFMOD` passed in 118.82 seconds: client two restored
+factor/volume 0.715, retained it while paused, changed to volume 0.3575 after
+base volume was halved, resumed and naturally expired without Stop. Client one
+also froze, applied the volume change and expired. Each received one fixture
+Play; both passed the individually paused native fade owner cleanup check and
+exited cleanly, with 62 further server updates. The separate ordinary audio
+regression passed in 29.79 seconds with two FMOD clients and 62 further updates.
+These timings are test elapsed times, not performance benchmarks. Native Final
+delivery and Linux verification remain separate stages.
+
 ## Native fade lifecycle fixes under validation
 
 The silent `Tools/FmodFadeProbe.cpp` checks the installed FMOD build using
@@ -29,13 +72,16 @@ Native MSBuild `Final|x64` also compiled and linked. The root client and matchin
 server passed `SoundFadeLifecycleDelivered` in 32.65 seconds with two menu-connected
 FMOD-enabled clients, normalized fade points, natural termination and zero-duration
 checks, group pause/resume and clean exits. The server continued 62 updates after
-disconnect. Linux CI run `38496468668` validates commit `b76a2d44db3` separately.
+disconnect. Linux CI run `38496468668` for `b76a2d44db3` passed the portable
+fade arithmetic test, server-only build and two-client startup/input/text checks.
+Build-tree and extracted-package checks passed in 11.37/8.40 seconds with no
+video initialization, UTF-8 configuration and clean SIGTERM shutdown. This
+run precedes the v25 clock/envelope changes.
 
-Late-join fade gain is not yet reconstructed. The headless timeline currently
-freezes fades for both explicit and bus pause, whereas FMOD distinguishes these
-clocks and replicas implement bus pause through individual channels. That
-remaining clock/envelope mismatch must be handled before claiming matching
-fade playback across headless simulation, host audio and network replicas.
+At this earlier checkpoint, late-join fade gain was not reconstructed and the
+headless timeline froze fades for both explicit and bus pause. v25 addresses
+these model differences as described above. Recorded waveform alignment remains
+outside the checks established by either checkpoint.
 
 ## v24 sound cycle completion under validation
 

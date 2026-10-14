@@ -304,6 +304,9 @@ namespace {
 		std::uint64_t NetworkSoundFixture = 0, NetworkSoundVoice = 0;
 		bool NetworkSoundPlayVerified = false, NetworkSoundStopVerified = false;
 		bool NetworkSoundFinishRequested = false, NetworkSoundFinishVerified = false;
+		bool NetworkSoundFadeRequested = false, NetworkSoundFadeMidpoint = false, NetworkSoundFadeFrozen = false, NetworkSoundFadeEnded = false;
+		float NetworkSoundFadePausedVolume = -1;
+		double NetworkSoundFadePauseTime = 0;
 		bool Enabled = false;
 		bool StressStarted = false;
 		bool PerformanceCountersObserved = false;
@@ -1632,6 +1635,20 @@ namespace {
 		replicaPassed = replicatedPitch.GetPitch() == 16 && replicaPassed;
 		replicatedPitch.SetPitch(16); replicaPassed = replicatedPitch.GetPitch() == 8 && replicaPassed;
 		replicaSound.Clear();
+		WorldStateSoundPlayback fadingReplica;
+		auto fadedPlay = uiPlay; fadedPlay.Container = 125; fadedPlay.Voice = 458; fadedPlay.Bus = 0;
+		fadedPlay.Paused = true; fadedPlay.FadeMilliseconds = 100; fadedPlay.FadeGain = 0.5F; fadedPlay.Gain = 0.8F;
+		fadingReplica.Apply(1, 0, std::vector{fadedPlay}, 0);
+		replicaPassed = std::abs(fadingReplica.GetVoiceVolume(458) - 0.4F) < 0.001F && replicaPassed;
+		fadingReplica.Apply(1, 0, {}, 50);
+		replicaPassed = std::abs(fadingReplica.GetVoiceVolume(458) - 0.2F) < 0.001F && replicaPassed;
+		groupPause.Paused = true; fadingReplica.Apply(1, 0, std::vector{groupPause}, 50);
+		WorldStateSoundProtocol::Event fadeVolume; fadeVolume.Type = WorldStateSoundProtocol::Action::Volume; fadeVolume.Container = 125; fadeVolume.Gain = 0.4F;
+		fadingReplica.Apply(1, 0, std::vector{fadeVolume}, 500);
+		replicaPassed = std::abs(fadingReplica.GetVoiceVolume(458) - 0.1F) < 0.001F && replicaPassed;
+		groupPause.Paused = false; fadingReplica.Apply(1, 0, std::vector{groupPause}, 500);
+		fadingReplica.Apply(1, 0, {}, 550); replicaPassed = !fadingReplica.HasVoice(458) && replicaPassed;
+		fadingReplica.Clear();
 		capturePassed = replicaPassed && capturePassed;
 		log << "headless_sound_replica=" << (replicaPassed ? "passed" : "failed") << '\n';
 		log << "headless_sound_capture=" << (capturePassed ? "passed" : "failed") << " events=" << captured.size() << '\n';
@@ -2185,7 +2202,7 @@ int RunPersistentHeadlessServer(const ServerConfiguration& config) {
 				if (!diagnosticSound) {
 					const Entity* preset = g_PresetMan.GetEntityPreset("SoundContainer", "Confirm", "Base.rte");
 					diagnosticSound.reset(preset ? dynamic_cast<SoundContainer*>(preset->Clone()) : nullptr);
-					if (diagnosticSound) { diagnosticSound->SetLoopSetting(-1); diagnosticSound->SetBusRouting(SoundContainer::SFX); }
+					if (diagnosticSound) { diagnosticSound->SetLoopSetting(-1); diagnosticSound->SetBusRouting(SoundContainer::SFX); diagnosticSound->SetVolume(1); diagnosticSound->SetImmobile(true); }
 				}
 				const bool played = diagnosticSound && diagnosticSound->Play();
 				log(played ? "INFO debug_sound=playing" : "ERROR debug_sound=unavailable");
@@ -2197,6 +2214,12 @@ int RunPersistentHeadlessServer(const ServerConfiguration& config) {
 				g_AudioMan.PauseIngameSounds(false);
 				g_AudioMan.SetGlobalPitch(1, true, false);
 				log("INFO debug_sound_mix=resumed");
+			} else if (command == "debug-sound-fade") {
+				if (diagnosticSound) diagnosticSound->FadeOut(4000);
+				log("INFO debug_sound=fading");
+			} else if (command == "debug-sound-volume-half") {
+				if (diagnosticSound) diagnosticSound->SetVolume(0.5F);
+				log("INFO debug_sound_volume=half");
 			} else if (command == "debug-sound-finish") {
 				g_AudioMan.FinishIngameLoopingSounds();
 				log("INFO debug_sound=finishing");
@@ -2949,6 +2972,12 @@ void RunGameLoop() {
 								state.NetworkSoundFinishRequested = true;
 								state.Log << "world_state_sound_finish_received=passed source=baseline\n" << std::flush;
 							}
+							if (event.FadeMilliseconds) {
+								state.NetworkSoundFadeRequested = true;
+								const float volume = worldStateSoundPlayback.GetVoiceVolume(event.Voice);
+								const bool restored = std::abs(volume - event.Gain * event.FadeGain) < 0.001F && event.FadeGain > 0 && event.FadeGain < 1;
+								state.Log << "world_state_sound_fade_restored=" << (restored ? "passed" : "failed") << " gain=" << event.FadeGain << " volume=" << volume << '\n' << std::flush;
+							}
 							if (g_AudioMan.IsAudioEnabled()) {
 								const bool lifetime = g_AudioMan.VerifySoundContainerLifetime();
 								state.Log << "audio_owner_lifetime=" << (lifetime ? "passed" : "failed") << '\n' << std::flush;
@@ -2962,6 +2991,16 @@ void RunGameLoop() {
 							state.NetworkSoundFinishRequested = worldStateSoundPlayback.IsVoiceFinishing(state.NetworkSoundVoice);
 							state.Log << "world_state_sound_finish_received=" << (state.NetworkSoundFinishRequested ? "passed" : "failed") << " source=command\n" << std::flush;
 						}
+						if (state.NetworkSoundPlayVerified && event.Type == WorldStateSoundProtocol::Action::Fade && event.Container == state.NetworkSoundFixture) {
+							state.NetworkSoundFadeRequested = true;
+								state.Log << "world_state_sound_fade_received=passed\n" << std::flush;
+						}
+						if (state.NetworkSoundFadeRequested && event.Type == WorldStateSoundProtocol::Action::Volume && event.Container == state.NetworkSoundFixture && event.Gain == 0.5F) {
+							const float volume = worldStateSoundPlayback.GetVoiceVolume(state.NetworkSoundVoice);
+							const bool changed = state.NetworkSoundFadePausedVolume > 0 && std::abs(volume - state.NetworkSoundFadePausedVolume * 0.5F) < 0.002F;
+							state.Log << "world_state_sound_fade_volume=" << (changed ? "passed" : "failed") << " volume=" << volume << '\n' << std::flush;
+							state.NetworkSoundFadePausedVolume = volume;
+						}
 						if (state.NetworkSoundPlayVerified && !state.NetworkSoundStopVerified && event.Type == WorldStateSoundProtocol::Action::Stop &&
 						    event.Container == state.NetworkSoundFixture && !worldStateSoundPlayback.HasContainer(event.Container)) {
 							state.NetworkSoundStopVerified = true;
@@ -2971,6 +3010,22 @@ void RunGameLoop() {
 					if (state.NetworkSoundFinishRequested && !state.NetworkSoundFinishVerified && !worldStateSoundPlayback.HasVoice(state.NetworkSoundVoice)) {
 						state.NetworkSoundFinishVerified = true;
 						state.Log << "world_state_sound_finish_completed=passed\n" << std::flush;
+					}
+					if (state.NetworkSoundFadeRequested) {
+						if (!worldStateSoundPlayback.HasVoice(state.NetworkSoundVoice) && !state.NetworkSoundFadeEnded) {
+							state.NetworkSoundFadeEnded = true; state.Log << "world_state_sound_fade_completed=passed\n" << std::flush;
+						} else if (worldStateSoundPlayback.HasVoice(state.NetworkSoundVoice)) {
+							const float volume = worldStateSoundPlayback.GetVoiceVolume(state.NetworkSoundVoice);
+							const bool paused = worldStateSoundPlayback.IsVoicePaused(state.NetworkSoundVoice);
+							if (!paused && !state.NetworkSoundFadeMidpoint && volume > 0.25F && volume < 0.75F) {
+								state.NetworkSoundFadeMidpoint = true; state.Log << "world_state_sound_fade_midpoint=passed volume=" << volume << '\n' << std::flush;
+							}
+							if (paused && state.NetworkSoundFadePausedVolume < 0) { state.NetworkSoundFadePausedVolume = volume; state.NetworkSoundFadePauseTime = SoundPlaybackClockMilliseconds(); }
+							if (paused && !state.NetworkSoundFadeFrozen && SoundPlaybackClockMilliseconds() - state.NetworkSoundFadePauseTime > 200 &&
+							    std::abs(volume - state.NetworkSoundFadePausedVolume) < 0.001F) {
+								state.NetworkSoundFadeFrozen = true; state.Log << "world_state_sound_fade_frozen=passed volume=" << volume << '\n' << std::flush;
+							}
+						}
 					}
 				}
 				if (!soundEvents.empty() && worldStateClientLog.is_open())

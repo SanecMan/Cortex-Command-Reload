@@ -10,9 +10,10 @@ int main() {
     if (system->setOutput(FMOD_OUTPUTTYPE_NOSOUND_NRT) != FMOD_OK ||
         system->setSoftwareFormat(48000, FMOD_SPEAKERMODE_STEREO, 0) != FMOD_OK ||
         system->init(8, FMOD_INIT_NORMAL, nullptr) != FMOD_OK) return 1;
-    FMOD::Sound* sound = nullptr; FMOD::Channel* channel = nullptr;
+    FMOD::Sound* sound = nullptr; FMOD::Channel* channel = nullptr; FMOD::ChannelGroup* probeGroup = nullptr;
+    if (system->createChannelGroup("fade-probe", &probeGroup) != FMOD_OK) return 1;
     if (system->createSound("Data/Base.rte/Sounds/GUIs/SlicePicked.flac", FMOD_2D | FMOD_LOOP_NORMAL, nullptr, &sound) != FMOD_OK ||
-        system->playSound(sound, nullptr, false, &channel) != FMOD_OK) return 1;
+        system->playSound(sound, probeGroup, false, &channel) != FMOD_OK) return 1;
     channel->setLoopCount(-1); channel->setVolume(0.5F);
     system->update(); system->update();
     float base = 0, faded = 0, volume = 0;
@@ -33,6 +34,13 @@ int main() {
     for (int i = 0; i < 5; ++i) system->update();
     channel->getDSPClock(nullptr, &groupAfter); group->setPaused(false);
     std::printf("group_paused_parent_clock_delta=%llu\n", groupAfter - groupBefore);
+    unsigned long long normalBefore = 0, normalAfter = 0, pitchedAfter = 0;
+    channel->getDSPClock(nullptr, &normalBefore);
+    for (int i = 0; i < 10; ++i) system->update();
+    channel->getDSPClock(nullptr, &normalAfter); group->setPitch(0.5F);
+    for (int i = 0; i < 10; ++i) system->update();
+    channel->getDSPClock(nullptr, &pitchedAfter); group->setPitch(1.0F);
+    std::printf("normal_parent_clock_delta=%llu pitched_parent_clock_delta=%llu\n", normalAfter - normalBefore, pitchedAfter - normalAfter);
     unsigned long long pausedClock = 0; channel->getDSPClock(nullptr, &pausedClock);
     channel->addFadePoint(pausedClock + 4800, 0);
     for (int i = 0; i < 20; ++i) system->update();
@@ -47,6 +55,7 @@ int main() {
     system->close(); system->release();
     const bool passed = std::abs(base - 0.5F) < 0.001F && std::abs(faded - 0.25F) < 0.001F && std::abs(corrected - 0.5F) < 0.001F &&
         std::abs(volume - 0.5F) < 0.001F && after > pausedClock && groupAfter == groupBefore &&
+        pitchedAfter - normalAfter < normalAfter - normalBefore &&
         (result == FMOD_ERR_INVALID_HANDLE || (result == FMOD_OK && !playing));
     std::printf("fmod_fade_semantics=%s\n", passed ? "passed" : "failed");
     return passed ? 0 : 1;
