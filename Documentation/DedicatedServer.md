@@ -1155,6 +1155,20 @@ The runner removes stale client readiness reports before launching new processes
 with a reused output prefix. Client startup clears that prefix's remaining debug
 outputs; other runs' output directories are retained.
 
+v25 adds current fade gain to late-join playback. Fade time follows bus pitch and
+bus pause, independently of an individual channel pause. The replica envelope
+retains base-volume changes during fading and stops expired voices. Matching v25
+client/server binaries are required. The Windows fixture queries actual FMOD
+volume after restoration and after halving base volume while paused:
+
+```powershell
+.\Tools\RunDedicatedServerSmoke.ps1 -CheckMenuConnection -CheckFadingLateJoin -EnableAudio
+```
+
+This verifies state/lifecycle behavior, not sample-accurate audio alignment or
+recorded output quality. See the protocol documentation for Windows and Linux
+validation results.
+
 The automated two-client runner can exercise server-selected looping sound and
 its Stop event:
 

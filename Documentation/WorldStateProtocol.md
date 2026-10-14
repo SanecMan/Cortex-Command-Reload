@@ -43,6 +43,17 @@ regression passed in 29.79 seconds with two FMOD clients and 62 further updates.
 These timings are test elapsed times, not performance benchmarks. Native Final
 delivery and Linux verification remain separate stages.
 
+Native `Final|x64` subsequently compiled and linked. The root pair passed
+`SoundFadeV25Delivered` in 120.94 seconds with both FMOD clients exiting cleanly
+and 63 updates after disconnect. Client two restored gain/volume 0.719376 and
+changed to volume 0.359688 when base volume was halved during bus pause. Both
+clients naturally expired without Stop and passed paused native fade cleanup.
+Linux CI `38499590492` for `e7ff7957299` passed GCC codec/envelope tests and the
+server-only build. Build-tree and extracted-package checks passed in 11.74/8.76
+seconds with two external clients, input and UTF-8 text/configuration, no video
+initialization and clean SIGTERM shutdown. Linux checks exercise the logical
+envelope, while Windows checks query actual FMOD channel volume.
+
 ## Native fade lifecycle fixes under validation
 
 The silent `Tools/FmodFadeProbe.cpp` checks the installed FMOD build using
