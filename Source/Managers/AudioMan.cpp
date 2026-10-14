@@ -9,6 +9,7 @@
 #include "SoundContainer.h"
 #include "WindowMan.h"
 #include "SoundSet.h"
+#include "TimerMan.h"
 
 #include <array>
 #include <cstring>
@@ -213,7 +214,7 @@ void AudioMan::SetGlobalPitch(float pitch, bool includeImmobileSounds, bool incl
 	if (includeImmobileSounds) m_BusPitches[SoundContainer::UI] = captured.Rate;
 	if (includeMusic) m_BusPitches[SoundContainer::MUSIC] = captured.Rate;
 	captured.Bus = 1 | (includeImmobileSounds ? 2 : 0) | (includeMusic ? 4 : 0);
-	GetWorldStateSoundCapture().Global(captured);
+	GetWorldStateSoundCapture().Global(captured, static_cast<double>(g_TimerMan.GetSimTickCount()) * 1000.0 / g_TimerMan.GetTicksPerSecond());
 	if (!m_AudioEnabled) {
 		m_GlobalPitch = std::clamp(pitch, 0.125F, 8.0F);
 		SoundContainer::SetHeadlessGlobalPitch(m_GlobalPitch, includeImmobileSounds, includeMusic);
@@ -244,7 +245,7 @@ bool AudioMan::SetMusicPitch(float pitch) {
 	pitch = Limit(pitch, 8, 0.125); // Limit pitch change to 8 octaves up or down
 	m_BusPitches[SoundContainer::MUSIC] = pitch;
 	WorldStateSoundProtocol::Event captured; captured.Type = WorldStateSoundProtocol::Action::GlobalPitch;
-	captured.Bus = 4; captured.Rate = pitch; GetWorldStateSoundCapture().Global(captured);
+	captured.Bus = 4; captured.Rate = pitch; GetWorldStateSoundCapture().Global(captured, static_cast<double>(g_TimerMan.GetSimTickCount()) * 1000.0 / g_TimerMan.GetTicksPerSecond());
 	FMOD_RESULT result = m_MusicChannelGroup->setPitch(pitch);
 
 	if (result != FMOD_OK) {
@@ -274,7 +275,7 @@ void AudioMan::StopAll() {
 void AudioMan::PauseIngameSounds(bool pause) {
 	m_IngameSoundsPaused = pause;
 	WorldStateSoundProtocol::Event captured; captured.Type = WorldStateSoundProtocol::Action::BusPause;
-	captured.Bus = SoundContainer::SFX; captured.Paused = pause; GetWorldStateSoundCapture().Global(captured);
+	captured.Bus = SoundContainer::SFX; captured.Paused = pause; GetWorldStateSoundCapture().Global(captured, static_cast<double>(g_TimerMan.GetSimTickCount()) * 1000.0 / g_TimerMan.GetTicksPerSecond());
 	if (m_AudioEnabled) m_SFXChannelGroup->setPaused(pause);
 	else SoundContainer::PauseHeadlessIngamePlayback(pause);
 }

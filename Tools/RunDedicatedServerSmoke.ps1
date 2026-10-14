@@ -15,12 +15,15 @@ param(
     [switch]$CheckScreenText,
     [switch]$CheckSound,
     [switch]$CheckSoundMix,
+    [switch]$CheckLateJoinSound,
     [switch]$EnableAudio,
     [ValidateRange(60, 600)]
     [int]$TimeoutSeconds = 360
 )
 $ErrorActionPreference = 'Stop'
 if ($CheckSoundMix) { $CheckSound=$true }
+if ($CheckLateJoinSound) { $CheckSound=$true }
+if ($CheckLateJoinSound -and $CheckSoundMix) { throw 'Run late-join and mix-change fixtures separately.' }
 if ($CheckPurchasePricing) { $CheckPurchasePolicy=$true }
 if ($CheckPurchasePolicy) { $CheckBuyMenu=$true }
 if ($CheckPurchases -and $CheckTeamFunds) { throw 'Run purchase and administrative funds fixtures separately.' }
@@ -86,6 +89,19 @@ try {
         }
     }
     Write-Host "Dedicated server ready on $port; connecting two separate clients."
+    if ($CheckLateJoinSound) {
+        $server.StandardInput.WriteLine('debug-sound'); $server.StandardInput.Flush()
+        while ((Read-Report $serverLogPath) -notmatch 'INFO debug_sound=playing') {
+            Check-Time; if ($server.HasExited) { throw 'Server exited before late-join sound.' }
+            Start-Sleep -Milliseconds 100
+        }
+        Start-Sleep -Milliseconds 100
+        $server.StandardInput.WriteLine('debug-sound-mix-pause'); $server.StandardInput.Flush()
+        while ((Read-Report $serverLogPath) -notmatch 'INFO debug_sound_mix=paused') {
+            Check-Time; if ($server.HasExited) { throw 'Server exited before late-join pause.' }
+            Start-Sleep -Milliseconds 100
+        }
+    }
     if ($CheckScreenText) { $server.StandardInput.WriteLine('debug-screen-text'); $server.StandardInput.Flush() }
     $audioArguments = @(); if ($EnableAudio) { $audioArguments += '-debug-run-audio' }
     $clients = [Collections.Generic.List[Diagnostics.Process]]::new()
@@ -104,7 +120,7 @@ try {
         $clients.Add($client)
     }
     $mixPaused = $false; $mixResumed = $false
-    $soundStarted = $false
+    $soundStarted = [bool]$CheckLateJoinSound
     $soundStopped = $false
     $screenTextApplied = $false
     $screenTextFixtureTimer = [Diagnostics.Stopwatch]::StartNew()
@@ -257,6 +273,7 @@ try {
         if ($CheckSound -and (!$soundStarted -or !$soundStopped -or $clientReport -notmatch '(?m)^world_state_sound_play=passed' -or
             $clientReport -notmatch '(?m)^world_state_sound_stop=passed')) { throw 'Network sound playback/lifecycle fixture failed.' }
         if ($EnableAudio -and $CheckSound -and ($clientReport -notmatch '(?m)^world_state_sound_play=passed audio_enabled=1' -or $clientReport -notmatch '(?m)^audio_owner_lifetime=passed')) { throw 'FMOD playback was not enabled.' }
+        if ($CheckLateJoinSound -and $clientReport -notmatch '(?m)^world_state_sound_late_join=passed cursor_ms=[1-9][0-9]* paused=1') { throw 'Client did not restore the paused pre-existing loop.' }
         if ($CheckTeamFunds -and (!$fundsChanged -or $clientReport -notmatch '(?m)^world_state_team_funds_presentation=passed' -or
             $clientNetwork -notmatch 'funds_team0=12345\.250000 funds_team1=-17\.500000')) { throw 'Client team funds replication failed.' }
     }

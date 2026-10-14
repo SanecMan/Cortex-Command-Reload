@@ -54,6 +54,7 @@ namespace RTE {
 		bool BroadcastSnapshot(const WorldStateProtocol::Snapshot& snapshot, std::uint32_t sequence, SnapshotTransmissionMetrics* metrics = nullptr);
 		bool BroadcastTerrainPatch(const WorldStateProtocol::TerrainPatch& patch, std::uint32_t sequence);
 		bool BroadcastSoundEvents(std::uint32_t sceneRevision, std::uint32_t sequence, std::span<const WorldStateSoundProtocol::Event> events);
+		bool SendSoundEvents(const RakNet::AddressOrGUID& target, std::uint32_t sceneRevision, std::uint32_t sequence, std::span<const WorldStateSoundProtocol::Event> events);
 		bool SendInputCommand(const WorldStateProtocol::InputCommand& command, std::uint32_t sequence);
 		bool SendClientAssignment(const RakNet::AddressOrGUID& target, const WorldStateProtocol::ClientAssignment& assignment, std::uint32_t sequence);
 		void Poll(std::vector<ReceivedPacket>& packets);

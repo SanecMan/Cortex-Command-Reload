@@ -2931,6 +2931,9 @@ void RunGameLoop() {
 						    worldStateSoundPlayback.HasVoice(event.Voice)) {
 							state.NetworkSoundFixture = event.Container; state.NetworkSoundVoice = event.Voice; state.NetworkSoundPlayVerified = true;
 							state.Log << "world_state_sound_play=passed audio_enabled=" << g_AudioMan.IsAudioEnabled() << '\n' << std::flush;
+							if (event.CursorMilliseconds > 0)
+								state.Log << "world_state_sound_late_join=passed cursor_ms=" << event.CursorMilliseconds
+								          << " paused=" << worldStateSoundPlayback.IsVoicePaused(event.Voice) << '\n' << std::flush;
 							if (g_AudioMan.IsAudioEnabled()) {
 								const bool lifetime = g_AudioMan.VerifySoundContainerLifetime();
 								state.Log << "audio_owner_lifetime=" << (lifetime ? "passed" : "failed") << '\n' << std::flush;

@@ -55,6 +55,7 @@ namespace RTE {
 		WorldStateTransport m_Transport;
 	bool m_SoundMixBaselinePending = true;
 	std::uint32_t m_LastSoundSceneRevision = 0;
+	std::vector<std::string> m_PendingSoundBaselines;
 		WorldStateSnapshotBuilder m_SnapshotBuilder;
 		std::ofstream m_Log;
 		std::uint32_t m_LastBroadcastTick = 0;

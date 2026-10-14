@@ -117,6 +117,11 @@ bool WorldStateTransport::BroadcastSoundEvents(std::uint32_t sceneRevision, std:
 	    Send(RakNet::UNASSIGNED_SYSTEM_ADDRESS, packet, true, RELIABLE_ORDERED);
 }
 
+bool WorldStateTransport::SendSoundEvents(const RakNet::AddressOrGUID& target, std::uint32_t sceneRevision, std::uint32_t sequence, std::span<const WorldStateSoundProtocol::Event> events) {
+	std::vector<std::uint8_t> packet;
+	return WorldStateSoundProtocol::EncodePacket(sceneRevision, sequence, events, packet) && Send(target, packet, false, RELIABLE_ORDERED);
+}
+
 bool WorldStateTransport::SendInputCommand(const WorldStateProtocol::InputCommand& command, std::uint32_t sequence) {
 	if (!m_Peer || m_Peer->NumberOfConnections() == 0) {
 		return false;

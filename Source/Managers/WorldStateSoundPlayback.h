@@ -60,8 +60,11 @@ public:
 				sound->SetAttenuationStartDistance(event.Attenuation);
 				sound->SetCustomPanValue(event.Pan); sound->SetPanningStrengthMultiplier(event.Panning);
 				sound->SetPosition(Vector(event.X + event.OffsetX, event.Y + event.OffsetY));
-				sound->SetVolume(event.Gain); sound->SetNetworkPitch(event.Rate * m_Pitch[event.Bus]); sound->SetPaused(event.Paused || m_BusPaused[event.Bus]);
+				sound->SetVolume(event.Gain); sound->SetNetworkPitch(event.Rate * m_Pitch[event.Bus]); sound->SetPaused(true);
 				if (!sound->Play(Players::PlayerOne)) continue;
+				if (event.CursorMilliseconds && !sound->SeekNetworkPlayback(event.CursorMilliseconds)) { sound->Stop(); continue; }
+				if (event.FadeMilliseconds) sound->FadeOut(static_cast<int>(event.FadeMilliseconds));
+				sound->SetPaused(event.Paused || m_BusPaused[event.Bus]);
 				m_Voices.emplace(event.Voice, Voice{event.Container, Vector(event.OffsetX, event.OffsetY), event.Bus, event.Rate, event.Paused, std::move(sound)});
 				++applied;
 				continue;

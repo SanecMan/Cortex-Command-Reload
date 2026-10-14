@@ -20,7 +20,7 @@
 namespace RTE::WorldStateProtocol {
 
 inline constexpr std::uint32_t c_Magic = 0x31524343; // "CCR1" on the wire.
-inline constexpr std::uint16_t c_Version = 22;
+inline constexpr std::uint16_t c_Version = 23;
 inline constexpr std::size_t c_TeamCount = 4;
 inline constexpr std::int8_t c_NoActivity = -1;
 inline constexpr std::int8_t c_MaxActivityState = 6;

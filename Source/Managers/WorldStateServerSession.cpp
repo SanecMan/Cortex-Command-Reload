@@ -18,6 +18,7 @@
 #include "System/UTF8.h"
 #include "System/WorldStateTerrainTest.h"
 #include "WorldStateSoundCapture.h"
+#include "TimerMan.h"
 
 #include <algorithm>
 #include <utility>
@@ -82,6 +83,7 @@ bool WorldStateServerSession::Start(const std::string& bindAddress, unsigned sho
 	WorldStateSoundProtocol::Event pause; pause.Type = WorldStateSoundProtocol::Action::BusPause;
 	pause.Paused = g_AudioMan.AreIngameSoundsPaused(); GetWorldStateSoundCapture().Global(pause);
 	m_SoundMixBaselinePending = true; m_LastSoundSceneRevision = 0;
+	m_PendingSoundBaselines.clear();
 	m_DebugTerrainMutationSmokeEnabled = false;
 	m_DebugTerrainMutationSmokeAttempted = false;
 	m_DebugTerrainMutationProbeLocated = false;
@@ -97,6 +99,7 @@ bool WorldStateServerSession::Start(const std::string& bindAddress, unsigned sho
 }
 
 void WorldStateServerSession::Stop() {
+	m_PendingSoundBaselines.clear();
 	GetWorldStateSoundCapture().End();
 	g_SceneMan.SetWorldStateTerrainTrackingEnabled(false);
 	m_PendingTerrainPatches.clear();
@@ -272,6 +275,7 @@ void WorldStateServerSession::PollNetwork(std::uint32_t simulationTick) {
 			m_PendingTerrainPatches.clear();
 			m_TerrainBaselinePending = true;
 			const std::string clientAddress(packet.Sender.ToString(true));
+			m_PendingSoundBaselines.push_back(clientAddress);
 			m_LastInputSequenceByClient.erase(clientAddress);
 			m_LastPurchaseByClient.erase(clientAddress);
 			m_LastPolicyByClient.erase(clientAddress);
@@ -304,6 +308,7 @@ void WorldStateServerSession::PollNetwork(std::uint32_t simulationTick) {
 			m_ConnectedClients = m_ConnectedClients > 0 ? static_cast<unsigned short>(m_ConnectedClients - 1) : 0;
 			const std::string clientAddress(packet.Sender.ToString(true));
 			m_ClientAddresses.erase(clientAddress);
+			std::erase(m_PendingSoundBaselines, clientAddress);
 			m_LastPolicyByClient.erase(clientAddress);
 			m_LastPurchaseByClient.erase(clientAddress);
 			m_LastPurchaseTimeByClient.erase(clientAddress);
@@ -433,6 +438,10 @@ void WorldStateServerSession::Update(std::uint32_t simulationTick) {
 	PollNetwork(simulationTick);
 	if (m_ConnectedClients && g_SceneMan.GetScene()) {
 		const auto revision = m_SnapshotBuilder.RefreshSceneRevision();
+		if (revision != m_LastSoundSceneRevision) {
+			m_PendingSoundBaselines.clear();
+			for (const auto& [address, peer] : m_ClientAddresses) m_PendingSoundBaselines.push_back(address);
+		}
 		if (m_SoundMixBaselinePending || revision != m_LastSoundSceneRevision) {
 			const auto mix = GetWorldStateSoundCapture().GetMixState();
 			if (!SendSoundEvents(mix)) { Log("ERROR: sound mix baseline send failed"); Stop(); return; }
@@ -451,6 +460,24 @@ void WorldStateServerSession::Update(std::uint32_t simulationTick) {
 			Log("ERROR: captured sound batch send failed; stopping network session");
 			Stop(); return;
 		}
+	}
+	if (!m_PendingSoundBaselines.empty() && g_SceneMan.GetScene()) {
+		auto baseline = GetWorldStateSoundCapture().GetMixState();
+		const double now = static_cast<double>(g_TimerMan.GetSimTickCount()) * 1000.0 / g_TimerMan.GetTicksPerSecond();
+		auto loops = GetWorldStateSoundCapture().GetActiveLoops(now);
+		baseline.insert(baseline.end(), loops.begin(), loops.end());
+		for (const auto& address : m_PendingSoundBaselines) {
+			const auto peer = m_ClientAddresses.find(address); if (peer == m_ClientAddresses.end()) continue;
+			for (std::size_t offset = 0; offset < baseline.size(); offset += 100) {
+				if (++m_Sequence == 0) ++m_Sequence;
+				const auto batch = std::span<const WorldStateSoundProtocol::Event>(baseline).subspan(offset, std::min(std::size_t{100}, baseline.size() - offset));
+				if (!m_Transport.SendSoundEvents(peer->second, m_LastSoundSceneRevision, m_Sequence, batch)) {
+					Log("ERROR: active sound baseline send failed"); Stop(); return;
+				}
+			}
+			Log("INFO: active sound baseline sent to " + address + " loops=" + std::to_string(loops.size()));
+		}
+		m_PendingSoundBaselines.clear();
 	}
 	for (const auto& [clientAddress, player] : m_PlayerSlotByClient) {
 		g_UInputMan.ClearNetworkInputImpulse(player);

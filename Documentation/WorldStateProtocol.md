@@ -1,5 +1,37 @@
 # World-state protocol
 
+## v23 active sound baselines under validation
+
+Development sources add a sample cursor and optional remaining fade duration
+to Play (inner sound schema 4). Both peers must use protocol 23. The capture
+journal retains up to 1,024 infinite voices with resource, position, volume,
+pan, pitch and explicit pause controls. Simulation time advances their sample
+cursor; bus pause and bus pitch also affect this timeline. Stop, source release
+and completed fades remove voices from the baseline. Capacity exhaustion stops
+the network session explicitly rather than forgetting persistent sounds.
+
+After draining ordinary sound events, the server sends mix and active voices to
+each newly connected peer through reliable ordered targeted packets. Scene
+changes request a new baseline for every peer because client scene cleanup
+removes voices. Existing voice IDs suppress duplicate Play events. Playback
+starts paused, seeks to the supplied cursor and then applies explicit/group
+pause. Packet transit time is not compensated, and audio waveform continuity
+and global FinishIngameLoopingSounds replication still require further work.
+
+The standalone MSVC codec/capture/queue regression passed cursor/fade round trips,
+pause and pitch cursor advancement, position changes, remaining fade duration,
+fade completion and source-release cleanup. Both Meson executables compiled and
+linked. `SoundLoopsV23Headless` passed in 22.91 seconds with 122 updates, two
+external clients, input and UTF-8 screen messages, without video initialization.
+`SoundLoopsV23LateJoinFMOD` passed in 31.40 seconds: the server started and paused
+a loop before either client connected; both restored it with cursor 12 ms and
+actual FMOD pause state, verified owner lifetime, received Stop and exited
+cleanly. The server continued 62 updates after disconnect. These are elapsed
+test durations, not performance benchmark results. A connected-client-plus-later
+join test and recorded audio comparison remain separate checks.
+Use `RunDedicatedServerSmoke.ps1 -CheckLateJoinSound -EnableAudio` for the
+new paused-loop-before-connection fixture; run it separately from `-CheckSoundMix`.
+
 ## Playback cursor groundwork
 
 `SoundContainer::SeekNetworkPlayback` can move already-playing voices to a
@@ -24,7 +56,11 @@ Native MSBuild `Final|x64` also compiled and linked. The root client and matchin
 server passed `SoundPlaybackSeekDelivered` in 33.71 seconds: two audio-enabled
 clients connected through the menu, channel seeking/lifetime and group
 pause/resume checks passed, both exited cleanly and the server continued 62
-updates after disconnect. Linux CI for the cursor change is a separate check.
+updates after disconnect.
+Linux CI `38489551838` for `0845a239b02` passed the cursor regression, server-only
+build and two-client checks. Build-tree and extracted-package checks passed in
+12.34/9.11 seconds with no video initialization, UTF-8 configuration/input/text
+checks and clean SIGTERM shutdown. This run precedes the v23 active-loop changes.
 
 ## v22 sound mix controls
 

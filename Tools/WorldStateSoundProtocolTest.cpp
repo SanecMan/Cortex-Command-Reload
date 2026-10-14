@@ -12,6 +12,7 @@ int main() {
     play.Module = "Мод.rte"; play.Resource = "Sounds/Ёжик.flac";
     play.OffsetX = 3; play.OffsetY = -4; play.Loops = -1; play.Priority = 256; play.Bus = 2;
     play.Immobile = true; play.Paused = true;
+    play.CursorMilliseconds = 47; play.FadeMilliseconds = 120;
     std::vector<Event> source{play};
     for (auto action : {Action::Stop, Action::Position, Action::Volume, Action::Pitch, Action::Pause, Action::Fade, Action::Pan, Action::Panning, Action::GlobalPitch, Action::BusPause}) {
         Event event; event.Type = action; event.Container = 7; event.Player = 3;
@@ -38,7 +39,7 @@ int main() {
 	if (!check(!DecodePacket(bytes, sceneRevision, sequence, decoded), "foreign session version")) return 1;
 	if (!check(!EncodePacket(0, 42, source, bytes) && !EncodePacket(3, 0, source, bytes), "invalid envelope identity")) return 1;
     if (!check(Encode(std::vector<Event>{play}, bytes), "single play encoding")) return 1;
-    bytes.back() = 2;
+    bytes[bytes.size() - 9] = 2; // Paused precedes cursor and fade duration.
     if (!check(!Decode(bytes, decoded), "invalid boolean rejection")) return 1;
     if (!check(Encode(std::vector<Event>{play}, bytes), "single play reset")) return 1;
     const std::size_t positionOffset = 8 + 10 + 8 + 2 + play.Module.size() + 2 + play.Resource.size();
@@ -70,7 +71,7 @@ int main() {
     maximum.push_back(play);
     if (!check(!Encode(maximum, bytes), "batch limit")) return 1;
     Event stop; stop.Container = 1;
-    const std::vector<std::uint8_t> golden{0x43,0x43,0x41,0x31,3,0,1,0,1,1,0,0,0,0,0,0,0,0xFF};
+    const std::vector<std::uint8_t> golden{0x43,0x43,0x41,0x31,4,0,1,0,1,1,0,0,0,0,0,0,0,0xFF};
     if (!check(Encode(std::vector<Event>{stop}, bytes) && bytes == golden, "fixed little-endian layout")) return 1;
     RTE::WorldStateSoundQueue queue;
     if (!check(queue.Push(2, 10, source) && queue.Drain(1).empty() && queue.Size() == source.size(), "future scene retained")) return 1;
@@ -149,6 +150,29 @@ int main() {
     invalidGlobal = global; invalidGlobal.Container = 1;
     if (!check(!Encode(std::vector{invalidGlobal}, bytes), "global identity validation")) return 1;
     std::cout << "sound_capture_test=passed\n";
+    capture.Begin();
+    auto loop = play; loop.Loops = -1; loop.Paused = false; loop.Rate = 1; loop.Bus = 0;
+    loop.CursorMilliseconds = 0; loop.FadeMilliseconds = 0;
+    capture.Play(&firstSource, loop, 0, 100);
+    auto active = capture.GetActiveLoops(25);
+    if (!check(active.size() == 1 && active[0].CursorMilliseconds == 25, "active loop cursor")) return 1;
+    busPause.Paused = true; capture.Global(busPause, 25);
+    if (!check(capture.GetActiveLoops(500)[0].CursorMilliseconds == 25, "group-paused loop cursor")) return 1;
+    busPause.Paused = false; capture.Global(busPause, 500);
+    global.Bus = 1; global.Rate = 2; capture.Global(global, 500);
+    active = capture.GetActiveLoops(510);
+    if (!check(active[0].CursorMilliseconds == 45 && active[0].Voice != 0, "pitched loop baseline identity")) return 1;
+    Event moved; moved.Type = Action::Position; moved.X = 29; moved.Y = 31;
+    capture.Command(&firstSource, moved, 510);
+    Event fade; fade.Type = Action::Fade; fade.FadeMilliseconds = 50; capture.Command(&firstSource, fade, 510);
+    active = capture.GetActiveLoops(530);
+    if (!check(active.size() == 1 && active[0].X == 29 && active[0].Y == 31 && active[0].FadeMilliseconds == 30,
+               "loop controls and remaining fade baseline")) return 1;
+    if (!check(capture.GetActiveLoops(560).empty(), "expired loop removed")) return 1;
+    capture.Play(&firstSource, loop, 600, 100); capture.Release(&firstSource);
+    if (!check(capture.GetActiveLoops(650).empty(), "released loop removed")) return 1;
+    capture.End();
+    std::cout << "sound_loop_baseline_test=passed\n";
     std::cout << "sound_protocol_test=passed\nsound_queue_test=passed\n";
     return 0;
 }

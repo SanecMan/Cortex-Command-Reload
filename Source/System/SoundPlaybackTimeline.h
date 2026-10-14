@@ -27,6 +27,7 @@ public:
     bool Playing(double now) { Advance(now); return !m_Voices.empty(); }
     std::size_t Count(double now) { Advance(now); return m_Voices.size(); }
     double Phase(double now) { Advance(now); return m_Voices.empty() ? 0 : m_Voices.front().Phase; }
+    double FadeRemaining(double now) { Advance(now); return m_Voices.empty() ? 0 : m_Voices.front().FadeRemaining; }
     bool Seek(double now, double position) {
         if (!std::isfinite(position) || position < 0) return false;
         Advance(now);

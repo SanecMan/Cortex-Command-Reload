@@ -1,6 +1,7 @@
 #pragma once
 
 #include "WorldStateSoundProtocol.h"
+#include "SoundPlaybackTimeline.h"
 #include <atomic>
 #include <array>
 #include <deque>
@@ -17,7 +18,7 @@ public:
 	void Begin() { std::scoped_lock lock(m_Mutex); Reset(); m_Enabled = true; }
 	void End() { std::scoped_lock lock(m_Mutex); m_Enabled = false; Reset(); }
 	bool IsEnabled() const { return m_Enabled.load(std::memory_order_relaxed); }
-	void Play(const void* source, WorldStateSoundProtocol::Event event) {
+	void Play(const void* source, WorldStateSoundProtocol::Event event, double now = 0, double length = 0) {
 		if (!IsEnabled() || !source) return;
 		std::scoped_lock lock(m_Mutex);
 		if (!m_Enabled) return;
@@ -28,18 +29,44 @@ public:
 		if (!state.ID) state.ID = NextID();
 		state.Looping = state.Looping || event.Loops == -1;
 		event.Container = state.ID; event.Voice = NextID();
+		if (event.Loops == -1 && length > 0) {
+			std::size_t count = 0; for (auto& [key, container] : m_Containers) {
+				std::erase_if(container.Loops, [&](Loop& loop) { return !loop.Timeline.Playing(now); });
+				count += container.Loops.size();
+			}
+			if (count >= 1024) { m_Overflow = true; return; }
+			Loop loop; loop.Event = event;
+			loop.Timeline.Add(now, length, -1, event.Rate * m_Pitch[event.Bus]);
+			loop.Timeline.Pause(now, event.Paused); loop.Timeline.PauseGroup(now, m_BusPaused[event.Bus]);
+			state.Loops.push_back(std::move(loop));
+		}
 		Append(std::move(event));
 	}
-	void Command(const void* source, WorldStateSoundProtocol::Event event) {
+	void Command(const void* source, WorldStateSoundProtocol::Event event, double now = 0) {
 		if (!IsEnabled()) return;
 		std::scoped_lock lock(m_Mutex);
 		if (!m_Enabled) return;
 		const auto found = m_Containers.find(source);
 		if (found == m_Containers.end() || event.Type == WorldStateSoundProtocol::Action::Play) return;
 		event.Container = found->second.ID;
-		if (WorldStateSoundProtocol::Detail::Valid(event)) Append(std::move(event));
+		if (!WorldStateSoundProtocol::Detail::Valid(event)) return;
+		for (auto& loop : found->second.Loops) {
+			using A = WorldStateSoundProtocol::Action;
+			switch (event.Type) {
+				case A::Position: loop.Event.X = event.X; loop.Event.Y = event.Y; break;
+				case A::Volume: loop.Event.Gain = event.Gain; break;
+				case A::Pan: loop.Event.Pan = event.Pan; break;
+				case A::Panning: loop.Event.Panning = event.Panning; break;
+				case A::Pitch: loop.Timeline.Pitch(now, event.Rate * m_Pitch[loop.Event.Bus]); loop.Event.Rate = event.Rate; break;
+				case A::Pause: loop.Timeline.Pause(now, event.Paused); loop.Event.Paused = event.Paused; break;
+				case A::Fade: loop.Timeline.Fade(now, event.FadeMilliseconds); break;
+				default: break;
+			}
+		}
+		if (event.Type == WorldStateSoundProtocol::Action::Stop) found->second.Loops.clear();
+		Append(std::move(event));
 	}
-	void Global(WorldStateSoundProtocol::Event event) {
+	void Global(WorldStateSoundProtocol::Event event, double now = 0) {
 		if (!IsEnabled() || !WorldStateSoundProtocol::Detail::Valid(event)) return;
 		std::scoped_lock lock(m_Mutex);
 		if (!m_Enabled) return;
@@ -54,7 +81,28 @@ public:
 			if (m_BusPaused[event.Bus] == event.Paused) return;
 			m_BusPaused[event.Bus] = event.Paused;
 		} else return;
+		for (auto& [source, container] : m_Containers) for (auto& loop : container.Loops) {
+			if (event.Type == WorldStateSoundProtocol::Action::GlobalPitch && (event.Bus & (1U << loop.Event.Bus)))
+				loop.Timeline.Pitch(now, loop.Event.Rate * event.Rate);
+			else if (event.Type == WorldStateSoundProtocol::Action::BusPause && event.Bus == loop.Event.Bus)
+				loop.Timeline.PauseGroup(now, event.Paused);
+		}
 		Append(std::move(event));
+	}
+	std::vector<WorldStateSoundProtocol::Event> GetActiveLoops(double now) {
+		std::scoped_lock lock(m_Mutex);
+		std::vector<WorldStateSoundProtocol::Event> result;
+		for (auto& [source, container] : m_Containers) {
+			std::erase_if(container.Loops, [&](Loop& loop) { return !loop.Timeline.Playing(now); });
+			for (auto& loop : container.Loops) {
+				auto event = loop.Event;
+				event.CursorMilliseconds = static_cast<std::uint32_t>(loop.Timeline.Phase(now));
+				const auto fade = loop.Timeline.FadeRemaining(now);
+				if (std::isfinite(fade)) event.FadeMilliseconds = static_cast<std::uint32_t>(std::max(1.0, fade));
+				result.push_back(std::move(event));
+			}
+		}
+		return result;
 	}
 	std::vector<WorldStateSoundProtocol::Event> GetMixState() {
 		std::scoped_lock lock(m_Mutex);
@@ -107,7 +155,8 @@ private:
 	std::array<bool, 3> m_BusPaused{};
 	std::atomic<bool> m_Enabled{false};
 	std::mutex m_Mutex;
-	struct ContainerState { std::uint64_t ID = 0; bool Looping = false; };
+	struct Loop { WorldStateSoundProtocol::Event Event; SoundPlaybackTimeline Timeline; };
+	struct ContainerState { std::uint64_t ID = 0; bool Looping = false; std::vector<Loop> Loops; };
 	std::unordered_map<const void*, ContainerState> m_Containers;
 	std::deque<WorldStateSoundProtocol::Event> m_Events;
 	std::uint64_t m_NextID = 0;

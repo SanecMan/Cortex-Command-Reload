@@ -423,14 +423,19 @@ void SoundContainer::CaptureNetworkPlay(const SoundData& data, float variation, 
 	event.Loops = m_Loops; event.Bus = static_cast<std::uint8_t>(m_BusRouting);
 	event.Priority = static_cast<std::uint16_t>(m_Priority); event.Immobile = m_Immobile;
 	event.AffectedByGlobalPitch = m_AffectedByGlobalPitch; event.Paused = m_Paused;
-	GetWorldStateSoundCapture().Play(this, std::move(event));
+	unsigned int length = 0;
+	if (m_Loops == -1) {
+		if (data.SoundObject) data.SoundObject->getLength(&length, FMOD_TIMEUNIT_MS);
+		else length = ReadSoundLengthWithoutPlayback(path);
+	}
+	GetWorldStateSoundCapture().Play(this, std::move(event), SoundSimulationTime(), length);
 }
 
 void SoundContainer::SetPosition(const Vector& newPosition) {
 	if (!m_Immobile && newPosition != m_Pos) {
 		m_Pos = newPosition;
 		WorldStateSoundProtocol::Event event; event.Type = WorldStateSoundProtocol::Action::Position;
-		event.X = m_Pos.m_X; event.Y = m_Pos.m_Y; GetWorldStateSoundCapture().Command(this, event);
+		event.X = m_Pos.m_X; event.Y = m_Pos.m_Y; GetWorldStateSoundCapture().Command(this, event, SoundSimulationTime());
 		if (IsBeingPlayed()) {
 			g_AudioMan.ChangeSoundContainerPlayingChannelsPosition(this);
 		}
@@ -448,7 +453,7 @@ void SoundContainer::SetVolume(float newVolume) {
 	}
 	m_Volume = newVolume;
 	WorldStateSoundProtocol::Event event; event.Type = WorldStateSoundProtocol::Action::Volume;
-	event.Gain = m_Volume; GetWorldStateSoundCapture().Command(this, event);
+	event.Gain = m_Volume; GetWorldStateSoundCapture().Command(this, event, SoundSimulationTime());
 }
 
 void SoundContainer::SetPitch(float newPitch) {
@@ -459,7 +464,7 @@ void SoundContainer::SetNetworkPitch(float newPitch) {
 	if (!std::isfinite(newPitch) || newPitch <= 0 || newPitch > 512) return;
 	m_Pitch = newPitch;
 	WorldStateSoundProtocol::Event event; event.Type = WorldStateSoundProtocol::Action::Pitch;
-	event.Rate = m_Pitch; GetWorldStateSoundCapture().Command(this, event);
+	event.Rate = m_Pitch; GetWorldStateSoundCapture().Command(this, event, SoundSimulationTime());
 	if (!g_AudioMan.IsAudioEnabled()) {
 		auto& registry = HeadlessSounds(); std::scoped_lock lock(registry.Mutex);
 		if (const auto found = registry.Sounds.find(this); found != registry.Sounds.end())
@@ -495,7 +500,7 @@ void SoundContainer::SetPaused(bool paused) {
 	if (paused != m_Paused) {
 		m_Paused = paused;
 		WorldStateSoundProtocol::Event event; event.Type = WorldStateSoundProtocol::Action::Pause;
-		event.Paused = paused; GetWorldStateSoundCapture().Command(this, event);
+		event.Paused = paused; GetWorldStateSoundCapture().Command(this, event, SoundSimulationTime());
 		if (!g_AudioMan.IsAudioEnabled()) {
 			auto& registry = HeadlessSounds(); std::scoped_lock lock(registry.Mutex);
 			if (const auto found = registry.Sounds.find(this); found != registry.Sounds.end())
@@ -550,7 +555,7 @@ bool SoundContainer::Play(int player) {
 
 bool SoundContainer::Stop(int player) {
 	WorldStateSoundProtocol::Event event; event.Player = static_cast<std::int8_t>(player);
-	GetWorldStateSoundCapture().Command(this, event);
+	GetWorldStateSoundCapture().Command(this, event, SoundSimulationTime());
 	if (!g_AudioMan.IsAudioEnabled()) {
 		const bool playing = IsBeingPlayed();
 		auto& registry = HeadlessSounds(); std::scoped_lock lock(registry.Mutex); registry.Sounds.erase(this); return playing;
@@ -567,7 +572,7 @@ void SoundContainer::FadeOut(int fadeOutTime) {
 	if (!m_WasFadedOut && IsBeingPlayed()) {
 		m_WasFadedOut = true;
 		WorldStateSoundProtocol::Event event; event.Type = WorldStateSoundProtocol::Action::Fade;
-		event.FadeMilliseconds = static_cast<std::uint32_t>(std::max(0, fadeOutTime)); GetWorldStateSoundCapture().Command(this, event);
+		event.FadeMilliseconds = static_cast<std::uint32_t>(std::max(0, fadeOutTime)); GetWorldStateSoundCapture().Command(this, event, SoundSimulationTime());
 		if (!g_AudioMan.IsAudioEnabled()) {
 			auto& registry = HeadlessSounds(); std::scoped_lock lock(registry.Mutex);
 			if (const auto found = registry.Sounds.find(this); found != registry.Sounds.end())
