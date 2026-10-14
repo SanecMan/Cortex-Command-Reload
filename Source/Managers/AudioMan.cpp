@@ -11,6 +11,7 @@
 #include "SoundSet.h"
 #include "TimerMan.h"
 #include "SoundFadeMath.h"
+#include "SoundPlaybackClock.h"
 
 #include <array>
 #include <cstring>
@@ -217,7 +218,7 @@ void AudioMan::SetGlobalPitch(float pitch, bool includeImmobileSounds, bool incl
 	if (includeImmobileSounds) m_BusPitches[SoundContainer::UI] = captured.Rate;
 	if (includeMusic) m_BusPitches[SoundContainer::MUSIC] = captured.Rate;
 	captured.Bus = 1 | (includeImmobileSounds ? 2 : 0) | (includeMusic ? 4 : 0);
-	GetWorldStateSoundCapture().Global(captured, static_cast<double>(g_TimerMan.GetSimTickCount()) * 1000.0 / g_TimerMan.GetTicksPerSecond());
+	GetWorldStateSoundCapture().Global(captured, SoundPlaybackClockMilliseconds());
 	if (!m_AudioEnabled) {
 		m_GlobalPitch = std::clamp(pitch, 0.125F, 8.0F);
 		SoundContainer::SetHeadlessGlobalPitch(m_GlobalPitch, includeImmobileSounds, includeMusic);
@@ -248,7 +249,7 @@ bool AudioMan::SetMusicPitch(float pitch) {
 	pitch = Limit(pitch, 8, 0.125); // Limit pitch change to 8 octaves up or down
 	m_BusPitches[SoundContainer::MUSIC] = pitch;
 	WorldStateSoundProtocol::Event captured; captured.Type = WorldStateSoundProtocol::Action::GlobalPitch;
-	captured.Bus = 4; captured.Rate = pitch; GetWorldStateSoundCapture().Global(captured, static_cast<double>(g_TimerMan.GetSimTickCount()) * 1000.0 / g_TimerMan.GetTicksPerSecond());
+	captured.Bus = 4; captured.Rate = pitch; GetWorldStateSoundCapture().Global(captured, SoundPlaybackClockMilliseconds());
 	FMOD_RESULT result = m_MusicChannelGroup->setPitch(pitch);
 
 	if (result != FMOD_OK) {
@@ -278,14 +279,14 @@ void AudioMan::StopAll() {
 void AudioMan::PauseIngameSounds(bool pause) {
 	m_IngameSoundsPaused = pause;
 	WorldStateSoundProtocol::Event captured; captured.Type = WorldStateSoundProtocol::Action::BusPause;
-	captured.Bus = SoundContainer::SFX; captured.Paused = pause; GetWorldStateSoundCapture().Global(captured, static_cast<double>(g_TimerMan.GetSimTickCount()) * 1000.0 / g_TimerMan.GetTicksPerSecond());
+	captured.Bus = SoundContainer::SFX; captured.Paused = pause; GetWorldStateSoundCapture().Global(captured, SoundPlaybackClockMilliseconds());
 	if (m_AudioEnabled) m_SFXChannelGroup->setPaused(pause);
 	else SoundContainer::PauseHeadlessIngamePlayback(pause);
 }
 void AudioMan::FinishIngameLoopingSounds() {
 	WorldStateSoundProtocol::Event captured; captured.Type = WorldStateSoundProtocol::Action::FinishBusLoops;
 	captured.Bus = SoundContainer::SFX;
-	GetWorldStateSoundCapture().Global(captured, static_cast<double>(g_TimerMan.GetSimTickCount()) * 1000.0 / g_TimerMan.GetTicksPerSecond());
+	GetWorldStateSoundCapture().Global(captured, SoundPlaybackClockMilliseconds());
 	if (!m_AudioEnabled) { SoundContainer::FinishHeadlessIngameLoops(); return; }
 	if (m_AudioEnabled) {
 		int numberOfPlayingChannels;
@@ -694,6 +695,10 @@ void AudioMan::FadeOutSoundContainerPlayingChannels(SoundContainer* soundContain
 		result = (result == FMOD_OK) ? soundChannel->addFadePoint(parentClock, 1.0F) : result;
 		result = (result == FMOD_OK) ? soundChannel->addFadePoint(fadeEnd, 0) : result;
 		result = (result == FMOD_OK) ? soundChannel->setDelay(0, fadeEnd, true) : result;
+		if (result == FMOD_OK) {
+			std::scoped_lock ownerLock(m_ChannelOwnersMutex);
+			if (const auto owner = m_ChannelOwners.find(channel); owner != m_ChannelOwners.end()) owner->second.FadeEnd = fadeEnd;
+		}
 
 		if (result != FMOD_OK) {
 			g_ConsoleMan.PrintString("ERROR: Could not fade out sounds in SoundContainer " + soundContainer->GetPresetName() + ": " + std::string(FMOD_ErrorString(result)));
@@ -933,7 +938,7 @@ bool AudioMan::VerifySoundContainerLifetime() {
 	m_AudioSystem->update(); DrainFinishedChannels();
 	auto fadeSound = std::make_unique<SoundContainer>();
 	fadeSound->GetTopLevelSoundSet().AddSound("Base.rte/Sounds/GUIs/SlicePicked.flac", Vector(), 0, -1, false);
-	fadeSound->SetImmobile(true); fadeSound->SetVolume(0.5F); fadeSound->SetLoopSetting(-1);
+	fadeSound->SetImmobile(true); fadeSound->SetVolume(0.5F); fadeSound->SetLoopSetting(-1); fadeSound->SetPaused(true);
 	if (!fadeSound->Play() || fadeSound->GetPlayingChannels()->empty()) return false;
 	const int fadeIndex = *fadeSound->GetPlayingChannels()->begin();
 	fadeSound->FadeOut(100);
@@ -968,6 +973,19 @@ void AudioMan::DrainFinishedChannels() {
 	std::vector<int> finished;
 	{ std::scoped_lock lock(m_FinishedChannelsMutex); finished.swap(m_FinishedChannels); }
 	std::scoped_lock ownerLock(m_ChannelOwnersMutex);
+	// Paused channels do not process their scheduled end until resumed. Their
+	// parent clock still advances for an individual pause, so collect expired
+	// fades here too. A paused group freezes that clock and preserves its tail.
+	for (auto it = m_ChannelOwners.begin(); it != m_ChannelOwners.end();) {
+		if (!it->second.FadeEnd) { ++it; continue; }
+		FMOD::Channel* channel = nullptr; unsigned long long clock = 0;
+		if (m_AudioSystem->getChannel(it->first, &channel) != FMOD_OK || !channel ||
+		    channel->getDSPClock(nullptr, &clock) != FMOD_OK || clock < it->second.FadeEnd) { ++it; continue; }
+		channel->setCallback(nullptr); channel->setUserData(nullptr); channel->stop();
+		if (it->second.Container) it->second.Container->RemovePlayingChannel(it->first);
+		{ std::scoped_lock distanceLock(m_SoundChannelMinimumAudibleDistancesMutex); m_SoundChannelMinimumAudibleDistances.erase(it->first); }
+		it = m_ChannelOwners.erase(it);
+	}
 	for (int index : finished) {
 		const auto found = m_ChannelOwners.find(index);
 		if (found == m_ChannelOwners.end()) continue;

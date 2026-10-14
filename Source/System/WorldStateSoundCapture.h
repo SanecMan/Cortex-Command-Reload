@@ -37,6 +37,7 @@ public:
 			if (count >= 1024) { m_Overflow = true; return; }
 			Loop loop; loop.Event = event;
 			loop.Timeline.Add(now, length, -1, event.Rate * m_Pitch[event.Bus]);
+			loop.Timeline.FadePitch(now, m_Pitch[event.Bus]);
 			loop.Timeline.Pause(now, event.Paused); loop.Timeline.PauseGroup(now, m_BusPaused[event.Bus]);
 			state.Loops.push_back(std::move(loop));
 		}
@@ -82,8 +83,9 @@ public:
 			m_BusPaused[event.Bus] = event.Paused;
 		} else if (event.Type != WorldStateSoundProtocol::Action::FinishBusLoops) return;
 		for (auto& [source, container] : m_Containers) for (auto& loop : container.Loops) {
-			if (event.Type == WorldStateSoundProtocol::Action::GlobalPitch && (event.Bus & (1U << loop.Event.Bus)))
-				loop.Timeline.Pitch(now, loop.Event.Rate * event.Rate);
+			if (event.Type == WorldStateSoundProtocol::Action::GlobalPitch && (event.Bus & (1U << loop.Event.Bus))) {
+				loop.Timeline.Pitch(now, loop.Event.Rate * event.Rate); loop.Timeline.FadePitch(now, event.Rate);
+			}
 			else if (event.Type == WorldStateSoundProtocol::Action::BusPause && event.Bus == loop.Event.Bus)
 				loop.Timeline.PauseGroup(now, event.Paused);
 			else if (event.Type == WorldStateSoundProtocol::Action::FinishBusLoops && event.Bus == loop.Event.Bus) {
@@ -101,7 +103,10 @@ public:
 				auto event = loop.Event;
 				event.CursorMilliseconds = static_cast<std::uint32_t>(loop.Timeline.Phase(now));
 				const auto fade = loop.Timeline.FadeRemaining(now);
-				if (std::isfinite(fade)) event.FadeMilliseconds = static_cast<std::uint32_t>(std::max(1.0, fade));
+				if (std::isfinite(fade)) {
+					event.FadeMilliseconds = static_cast<std::uint32_t>(std::max(1.0, std::ceil(fade)));
+					event.FadeGain = loop.Timeline.FadeGain(now);
+				}
 				result.push_back(std::move(event));
 			}
 		}

@@ -19,6 +19,7 @@
 #include "System/WorldStateTerrainTest.h"
 #include "WorldStateSoundCapture.h"
 #include "TimerMan.h"
+#include "SoundPlaybackClock.h"
 
 #include <algorithm>
 #include <utility>
@@ -463,7 +464,7 @@ void WorldStateServerSession::Update(std::uint32_t simulationTick) {
 	}
 	if (!m_PendingSoundBaselines.empty() && g_SceneMan.GetScene()) {
 		auto baseline = GetWorldStateSoundCapture().GetMixState();
-		const double now = static_cast<double>(g_TimerMan.GetSimTickCount()) * 1000.0 / g_TimerMan.GetTicksPerSecond();
+		const double now = SoundPlaybackClockMilliseconds();
 		auto loops = GetWorldStateSoundCapture().GetActiveLoops(now);
 		baseline.insert(baseline.end(), loops.begin(), loops.end());
 		for (const auto& address : m_PendingSoundBaselines) {

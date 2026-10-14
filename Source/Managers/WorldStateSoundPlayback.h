@@ -4,6 +4,8 @@
 #include "SoundSet.h"
 #include "PresetMan.h"
 #include "WorldStateSoundProtocol.h"
+#include "SoundFadeEnvelope.h"
+#include "SoundPlaybackClock.h"
 #include <memory>
 #include <array>
 #include <unordered_map>
@@ -14,21 +16,26 @@ namespace RTE {
 class WorldStateSoundPlayback {
 public:
 	void Clear() { for (auto& [id, voice] : m_Voices) voice.Sound->Stop(); m_Voices.clear(); m_Revision = 0; m_Pitch.fill(1); m_BusPaused.fill(false); }
-	std::size_t Apply(std::uint32_t revision, int player, std::span<const WorldStateSoundProtocol::Event> events) {
+	std::size_t Apply(std::uint32_t revision, int player, std::span<const WorldStateSoundProtocol::Event> events, double now = SoundPlaybackClockMilliseconds()) {
 		if (m_Revision != revision) { Clear(); m_Revision = revision; }
-		for (auto it = m_Voices.begin(); it != m_Voices.end();)
-			if (!it->second.Sound->IsBeingPlayed()) it = m_Voices.erase(it); else ++it;
+		for (auto it = m_Voices.begin(); it != m_Voices.end();) {
+			if (it->second.Fade.Expired(now)) { it->second.Sound->Stop(); it = m_Voices.erase(it); }
+			else if (!it->second.Sound->IsBeingPlayed()) it = m_Voices.erase(it);
+			else { it->second.Sound->SetVolume(it->second.Gain * it->second.Fade.Gain(now)); ++it; }
+		}
 		std::size_t applied = 0;
 		for (const auto& event : events) {
 			if (event.Player != -1 && event.Player != player) continue;
 			if (event.Type == WorldStateSoundProtocol::Action::GlobalPitch) {
 				for (std::size_t bus = 0; bus < m_Pitch.size(); ++bus) if (event.Bus & (1U << bus)) m_Pitch[bus] = event.Rate;
-				for (auto& [id, voice] : m_Voices) { voice.Sound->SetNetworkPitch(voice.Rate * m_Pitch[voice.Bus]); ++applied; }
+				for (auto& [id, voice] : m_Voices) { voice.Fade.Pitch(now, m_Pitch[voice.Bus]); voice.Sound->SetNetworkPitch(voice.Rate * m_Pitch[voice.Bus]); ++applied; }
 				continue;
 			}
 			if (event.Type == WorldStateSoundProtocol::Action::BusPause) {
 				m_BusPaused[event.Bus] = event.Paused;
-				for (auto& [id, voice] : m_Voices) if (voice.Bus == event.Bus) { voice.Sound->SetPaused(voice.Paused || event.Paused); ++applied; }
+				for (auto& [id, voice] : m_Voices) if (voice.Bus == event.Bus) {
+					voice.Fade.PauseGroup(now, event.Paused); voice.Sound->SetPaused(voice.Paused || event.Paused); ++applied;
+				}
 				continue;
 			}
 			if (event.Type == WorldStateSoundProtocol::Action::FinishBusLoops) {
@@ -64,12 +71,14 @@ public:
 				sound->SetAttenuationStartDistance(event.Attenuation);
 				sound->SetCustomPanValue(event.Pan); sound->SetPanningStrengthMultiplier(event.Panning);
 				sound->SetPosition(Vector(event.X + event.OffsetX, event.Y + event.OffsetY));
-				sound->SetVolume(event.Gain); sound->SetNetworkPitch(event.Rate * m_Pitch[event.Bus]); sound->SetPaused(true);
+				SoundFadeEnvelope fade; fade.PauseGroup(now, m_BusPaused[event.Bus]);
+				fade.Pitch(now, m_Pitch[event.Bus]);
+				if (event.FadeMilliseconds) fade.Start(now, event.FadeMilliseconds, event.FadeGain);
+				sound->SetVolume(event.Gain * fade.Gain(now)); sound->SetNetworkPitch(event.Rate * m_Pitch[event.Bus]); sound->SetPaused(true);
 				if (!sound->Play(Players::PlayerOne)) continue;
 				if (event.CursorMilliseconds && !sound->SeekNetworkPlayback(event.CursorMilliseconds)) { sound->Stop(); continue; }
-				if (event.FadeMilliseconds) sound->FadeOut(static_cast<int>(event.FadeMilliseconds));
 				sound->SetPaused(event.Paused || m_BusPaused[event.Bus]);
-				m_Voices.emplace(event.Voice, Voice{event.Container, Vector(event.OffsetX, event.OffsetY), event.Bus, event.Rate, event.Paused, std::move(sound)});
+				m_Voices.emplace(event.Voice, Voice{event.Container, Vector(event.OffsetX, event.OffsetY), event.Bus, event.Rate, event.Paused, std::move(sound), event.Gain, fade});
 				++applied;
 				continue;
 			}
@@ -79,10 +88,10 @@ public:
 				switch (event.Type) {
 					case WorldStateSoundProtocol::Action::Stop: voice.Sound->Stop(); it = m_Voices.erase(it); ++applied; continue;
 					case WorldStateSoundProtocol::Action::Position: voice.Sound->SetPosition(Vector(event.X, event.Y) + voice.Offset); break;
-					case WorldStateSoundProtocol::Action::Volume: voice.Sound->SetVolume(event.Gain); break;
+					case WorldStateSoundProtocol::Action::Volume: voice.Gain = event.Gain; voice.Sound->SetVolume(event.Gain * voice.Fade.Gain(now)); break;
 					case WorldStateSoundProtocol::Action::Pitch: voice.Rate = event.Rate; voice.Sound->SetNetworkPitch(event.Rate * m_Pitch[voice.Bus]); break;
 					case WorldStateSoundProtocol::Action::Pause: voice.Paused = event.Paused; voice.Sound->SetPaused(event.Paused || m_BusPaused[voice.Bus]); break;
-					case WorldStateSoundProtocol::Action::Fade: voice.Sound->FadeOut(static_cast<int>(event.FadeMilliseconds)); break;
+					case WorldStateSoundProtocol::Action::Fade: voice.Fade.Start(now, event.FadeMilliseconds); break;
 					case WorldStateSoundProtocol::Action::Pan: voice.Sound->SetCustomPanValue(event.Pan); break;
 					case WorldStateSoundProtocol::Action::Panning: voice.Sound->SetPanningStrengthMultiplier(event.Panning); break;
 					case WorldStateSoundProtocol::Action::GlobalPitch: case WorldStateSoundProtocol::Action::BusPause:
@@ -92,9 +101,21 @@ public:
 				++applied; ++it;
 			}
 		}
+		for (auto it = m_Voices.begin(); it != m_Voices.end();) {
+			if (it->second.Fade.Expired(now)) { it->second.Sound->Stop(); it = m_Voices.erase(it); }
+			else { it->second.Sound->SetVolume(it->second.Gain * it->second.Fade.Gain(now)); ++it; }
+		}
 		return applied;
 	}
 	bool HasVoice(std::uint64_t id) const { return m_Voices.contains(id); }
+	float GetVoiceVolume(std::uint64_t id) const {
+		const auto found = m_Voices.find(id); if (found == m_Voices.end()) return -1;
+		if (!g_AudioMan.IsAudioEnabled()) return found->second.Sound->GetVolume();
+		const auto* channels = found->second.Sound->GetPlayingChannels(); if (channels->empty()) return -1;
+		FMOD::Channel* channel = nullptr; float volume = -1;
+		if (g_AudioMan.GetAudioSystem()->getChannel(*channels->begin(), &channel) != FMOD_OK || !channel || channel->getVolume(&volume) != FMOD_OK) return -1;
+		return volume;
+	}
 	bool IsVoiceFinishing(std::uint64_t id) const {
 		const auto found = m_Voices.find(id); if (found == m_Voices.end()) return false;
 		if (!g_AudioMan.IsAudioEnabled()) return found->second.Sound->GetLoopSetting() == 0;
@@ -128,7 +149,7 @@ public:
 	}
 	std::size_t Size() const { return m_Voices.size(); }
 private:
-	struct Voice { std::uint64_t Container; Vector Offset; std::uint8_t Bus; float Rate; bool Paused; std::unique_ptr<SoundContainer> Sound; };
+	struct Voice { std::uint64_t Container; Vector Offset; std::uint8_t Bus; float Rate; bool Paused; std::unique_ptr<SoundContainer> Sound; float Gain = 1; SoundFadeEnvelope Fade; };
 	std::array<float, 3> m_Pitch{1,1,1};
 	std::array<bool, 3> m_BusPaused{};
 	std::unordered_map<std::uint64_t, Voice> m_Voices;

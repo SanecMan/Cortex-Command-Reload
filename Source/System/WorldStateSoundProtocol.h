@@ -5,7 +5,7 @@ namespace RTE::WorldStateSoundProtocol {
 // Inner audio payload schema; transport integration uses the common session
 // envelope. Never serialize native FMOD channels, pointers or size_t hashes.
 inline constexpr std::uint32_t Magic = 0x31414343; // CCA1
-inline constexpr std::uint16_t Version = 5;
+inline constexpr std::uint16_t Version = 6;
 inline constexpr std::size_t MaxEvents = 256, MaxBytes = 256 * 1024;
 enum class Action : std::uint8_t { Play, Stop, Position, Volume, Pitch, Pause, Fade, GlobalPitch, BusPause, Pan, Panning, FinishBusLoops };
 struct Event {
@@ -20,6 +20,7 @@ struct Event {
     std::uint16_t Priority = 128;
     bool Immobile = false, AffectedByGlobalPitch = true, Paused = false;
     std::uint32_t FadeMilliseconds = 0, CursorMilliseconds = 0;
+    float FadeGain = 1;
     bool operator==(const Event&) const = default;
 };
 namespace Detail {
@@ -48,6 +49,7 @@ inline bool Valid(const Event& event) {
             return event.Voice && RelativeResource(event.Module) && event.Module.find('/') == std::string::npos &&
                 event.Module.ends_with(".rte") && RelativeResource(event.Resource) && event.Bus <= 2 && event.Priority <= 256 && event.Loops >= -1 &&
                 event.FadeMilliseconds <= static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max()) &&
+                std::isfinite(event.FadeGain) && event.FadeGain >= 0 && event.FadeGain <= 1 &&
                 std::isfinite(event.OffsetX) && std::isfinite(event.OffsetY) && std::isfinite(event.X) && std::isfinite(event.Y) && std::isfinite(event.Gain) && event.Gain >= 0 && event.Gain <= 10 &&
                 std::isfinite(event.Rate) && event.Rate > 0 && event.Rate <= 64 && std::isfinite(event.Attenuation) && event.Attenuation >= 0 &&
                 std::isfinite(event.Pan) && event.Pan >= -1 && event.Pan <= 1 && std::isfinite(event.Panning) && event.Panning >= 0 && event.Panning <= 10;
@@ -82,7 +84,8 @@ inline bool Encode(std::span<const Event> events, std::vector<std::uint8_t>& byt
                 WriteUnsigned(output, event.Bus, 1); WriteUnsigned(output, event.Priority, 2);
                 WriteUnsigned(output, event.Immobile, 1); WriteUnsigned(output, event.AffectedByGlobalPitch, 1);
                 WriteUnsigned(output, event.Paused, 1);
-                WriteUnsigned(output, event.CursorMilliseconds, 4); WriteUnsigned(output, event.FadeMilliseconds, 4); break;
+                WriteUnsigned(output, event.CursorMilliseconds, 4); WriteUnsigned(output, event.FadeMilliseconds, 4);
+                WriteFloat(output, event.FadeGain); break;
             case Action::Position: WriteFloat(output, event.X); WriteFloat(output, event.Y); break;
             case Action::Volume: WriteFloat(output, event.Gain); break;
             case Action::Pitch: WriteFloat(output, event.Rate); break;
@@ -133,6 +136,7 @@ inline bool Decode(std::span<const std::uint8_t> bytes, std::vector<Event>& even
                 event.CursorMilliseconds = static_cast<std::uint32_t>(value);
                 if (!ReadUnsigned(bytes, offset, 4, value)) return false;
                 event.FadeMilliseconds = static_cast<std::uint32_t>(value);
+                if (!ReadFloat(bytes, offset, event.FadeGain)) return false;
                 break;
             case Action::Position: if (!ReadFloat(bytes, offset, event.X) || !ReadFloat(bytes, offset, event.Y)) return false; break;
             case Action::Volume: if (!ReadFloat(bytes, offset, event.Gain)) return false; break;

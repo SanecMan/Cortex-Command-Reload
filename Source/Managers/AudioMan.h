@@ -356,7 +356,7 @@ namespace RTE {
 		mutable std::mutex m_SoundChannelMinimumAudibleDistancesMutex; //!, As above but for m_SoundChannelMinimumAudibleDistances
 		std::array<float, 3> m_BusPitches{1,1,1};
 		bool m_IngameSoundsPaused = false;
-		struct ChannelOwner { SoundContainer* Container; float Pan, Panning, Volume; bool Infinite; };
+		struct ChannelOwner { SoundContainer* Container; float Pan, Panning, Volume; bool Infinite; unsigned long long FadeEnd = 0; };
 		mutable std::mutex m_ChannelOwnersMutex;
 		std::mutex m_FinishedChannelsMutex;
 		std::unordered_map<int, ChannelOwner> m_ChannelOwners;

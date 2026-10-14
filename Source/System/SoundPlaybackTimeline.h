@@ -3,31 +3,35 @@
 #include <cmath>
 #include <limits>
 #include <vector>
+#include "SoundFadeEnvelope.h"
 
 namespace RTE {
 // Playback lifetime only; no renderer, audio device or wall-clock dependency.
 class SoundPlaybackTimeline {
 public:
     void Advance(double now) {
-        const double elapsed = std::max(0.0, now - m_LastTime);
+        if (now < m_LastTime) return;
+        const double elapsed = now - m_LastTime;
         m_LastTime = now;
         if (!m_Paused && !m_GroupPaused) for (auto& voice : m_Voices) {
             voice.Remaining -= elapsed * voice.Rate;
             voice.Phase = std::fmod(voice.Phase + elapsed * voice.Rate, voice.Length);
-            voice.FadeRemaining -= elapsed;
         }
-        std::erase_if(m_Voices, [](const Voice& voice) { return voice.Remaining <= 0 || voice.FadeRemaining <= 0; });
+        std::erase_if(m_Voices, [now](Voice& voice) { return voice.Remaining <= 0 || voice.Envelope.Expired(now); });
     }
     bool Add(double now, double length, int loops, double rate) {
         Advance(now);
         if (!std::isfinite(length) || length <= 0 || loops < -1 || !std::isfinite(rate) || rate <= 0 || m_Voices.size() >= 128) return false;
         m_Voices.push_back({length, loops == -1 ? std::numeric_limits<double>::infinity() : length * (static_cast<double>(loops) + 1), rate});
+        m_Voices.back().Envelope.PauseGroup(now, m_GroupPaused);
+        m_Voices.back().Envelope.Pitch(now, m_FadeRate);
         return true;
     }
     bool Playing(double now) { Advance(now); return !m_Voices.empty(); }
     std::size_t Count(double now) { Advance(now); return m_Voices.size(); }
     double Phase(double now) { Advance(now); return m_Voices.empty() ? 0 : m_Voices.front().Phase; }
-    double FadeRemaining(double now) { Advance(now); return m_Voices.empty() ? 0 : m_Voices.front().FadeRemaining; }
+    double FadeRemaining(double now) { Advance(now); return m_Voices.empty() ? 0 : m_Voices.front().Envelope.Remaining(now); }
+    float FadeGain(double now) { Advance(now); return m_Voices.empty() ? 0 : m_Voices.front().Envelope.Gain(now); }
     bool Seek(double now, double position) {
         if (!std::isfinite(position) || position < 0) return false;
         Advance(now);
@@ -41,20 +45,22 @@ public:
         return !m_Voices.empty();
     }
     void Pause(double now, bool value) { Advance(now); m_Paused = value; }
-    void PauseGroup(double now, bool value) { Advance(now); m_GroupPaused = value; }
+    void PauseGroup(double now, bool value) { Advance(now); m_GroupPaused = value; for (auto& voice : m_Voices) voice.Envelope.PauseGroup(now, value); }
     void Pitch(double now, double rate) { Advance(now); if (std::isfinite(rate) && rate > 0) for (auto& voice : m_Voices) voice.Rate = rate; }
-    void MultiplyPitch(double now, double multiplier) { Advance(now); if (std::isfinite(multiplier) && multiplier > 0) for (auto& voice : m_Voices) voice.Rate *= multiplier; }
-    void Fade(double now, double duration) { Advance(now); for (auto& voice : m_Voices) voice.FadeRemaining = std::max(0.0, duration); Advance(now); }
+    void FadePitch(double now, double rate) { Advance(now); if (std::isfinite(rate) && rate > 0) { m_FadeRate = rate; for (auto& voice : m_Voices) voice.Envelope.Pitch(now, rate); } }
+    void MultiplyPitch(double now, double multiplier) { Advance(now); if (std::isfinite(multiplier) && multiplier > 0) { for (auto& voice : m_Voices) voice.Rate *= multiplier; FadePitch(now, m_FadeRate * multiplier); } }
+    void Fade(double now, double duration) { Advance(now); for (auto& voice : m_Voices) voice.Envelope.Start(now, std::max(0.0, duration)); Advance(now); }
     void FinishLoops(double now) { Advance(now); for (auto& voice : m_Voices) voice.Remaining = std::min(voice.Remaining, voice.Length - voice.Phase); }
 private:
     struct Voice {
         double Length, Remaining, Rate;
         double Phase = 0;
-        double FadeRemaining = std::numeric_limits<double>::infinity();
+        SoundFadeEnvelope Envelope;
     };
     std::vector<Voice> m_Voices;
     double m_LastTime = 0;
     bool m_Paused = false, m_GroupPaused = false;
+    double m_FadeRate = 1;
 };
 
 inline bool TestSoundPlaybackTimeline() {
