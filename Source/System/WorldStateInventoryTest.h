@@ -89,6 +89,7 @@ inline bool CreateWorldStateInventoryFixture() {
 		auto* passenger=dynamic_cast<AHuman*>(passengerClone.get());
 		std::unique_ptr<HDFirearm> gun(CloneInventoryFixtureGun(7));
 		if (!passenger || !gun) return false;
+		gun->SetReplicaActivationVisual(true); gun->SetReplicaReloadVisual(true, 0.35F);
 		while (passenger->GetInventorySize()) delete passenger->RemoveInventoryItemAtIndex(0);
 		passenger->SetTeam(0); passenger->SetHealth(42.25F+index);
 		if (!passenger->GetBGArm() || !passenger->GetFGArm()) return false;
@@ -128,6 +129,7 @@ inline bool MutateWorldStateInventoryFixture() {
 	std::unique_ptr<HDFirearm> added(CloneInventoryFixtureGun(5));
 	if (!gun || !gun->GetMagazine() || !added || !passenger->AddToInventoryBack(added.get())) return false;
 	added.release(); gun->GetMagazine()->SetRoundCount(3);
+	gun->SetReplicaActivationVisual(false); gun->SetReplicaReloadVisual(true, 0.75F);
 	auto* second = dynamic_cast<AHuman*>(InventoryFixtureCarrier->GetInventory()->at(1));
 	std::unique_ptr<HDFirearm> background(CloneInventoryFixtureGun(4));
 	if (!background || !passenger->GetBGArm() || !second || !second->GetBGArm() || !second->GetFGArm()) return false;
@@ -177,7 +179,10 @@ inline int ObserveWorldStateInventoryFixture(const WorldStateProtocol::Snapshot&
 		}
 		bool seven=false, three=false, five=false; int guns=0;
 		for (const auto& item:snapshot.Inventory) if (item.ParentNetworkId==passenger && item.Object.ClassName=="HDFirearm") {
-			++guns; seven=seven || item.Object.OwnMagazineRounds==7; three=three || item.Object.OwnMagazineRounds==3; five=five || item.Object.OwnMagazineRounds==5;
+			const auto& visual = item.Object.DeviceVisual;
+			++guns; seven=seven || (item.Object.OwnMagazineRounds==7 && visual.Present && visual.Activated && visual.Reloading && std::abs(visual.ReloadProgress-0.35F)<0.001F);
+			three=three || (item.Object.OwnMagazineRounds==3 && visual.Present && !visual.Activated && visual.Reloading && std::abs(visual.ReloadProgress-0.75F)<0.001F);
+			five=five || item.Object.OwnMagazineRounds==5;
 		}
 		if (initialOrder && guns==1 && seven && backgroundInitial && secondInitial && initialPose) return 1;
 		if (swappedOrder && guns==2 && three && five && backgroundChanged && secondRemoved && removedArm && secondPoseChanged) return 2;

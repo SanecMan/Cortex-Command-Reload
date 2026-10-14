@@ -1,5 +1,38 @@
 # World-state protocol
 
+## v26 device activation and reload presentation under validation
+
+Development sources add DeviceVisualState to world/inventory objects and native
+attachment nodes. A compact byte carries presence, activation and reloading;
+present devices carry finite reload progress in [0,1]. Non-reloading state uses
+progress 1, absent state contains no active/reload flags, and reloading requires
+HDFirearm identity. Peers must use matching protocol 26.
+
+Capture reads actual HeldDevice/HDFirearm getters. Reconciliation sets activation
+and cached reload progress through presentation-only methods, without Activate,
+Reload, magazine mutation, sounds or Lua callbacks. Local firearms retain their
+original timer-derived progress; Clear resets the replica-only override. Both
+hands, mounted devices and stored/loose firearms use their existing attachment
+or object records. Existing Lua APIs and .rte properties are unchanged.
+
+MSVC codec checks passed root-device and attachment round trips, progress bounds,
+non-finite values, incompatible reload class, absent-state flags and truncation.
+Native attachment tests check activation, progress 0.35 -> 0.75 -> completed and
+retained weapon/magazine identity. The inventory fixture injects active/reloading
+stored firearms and verifies a later progress/activation change. Both Meson
+executables compiled and linked. `DeviceVisualV26Headless` passed in 23.25
+seconds with two external clients, 125 updates, native attachment/device checks,
+UTF-8 configuration and screen messages, without video initialization.
+`DeviceVisualV26Inventory` passed in 30.45 seconds with two menu-connected
+clients observing progress 0.35/activation true followed by progress 0.75/
+activation false on stored firearms. Native getter checks and attachment
+comparison included the new state; no inventory/attachment mismatches were
+reported. Both exited cleanly and the server continued after disconnect.
+These are elapsed test durations, not performance measurements. Native Final,
+Linux and a visible player HUD reload-bar check are separate gates.
+This does not yet replicate fire/recoil timing,
+arbitrary weapon Lua state or all Activity-specific HUD elements.
+
 ## v25 fade gain and audio clocks under validation
 
 Development sources use session protocol 25 and inner sound schema 6. Play

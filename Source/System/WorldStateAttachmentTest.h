@@ -18,14 +18,17 @@ inline bool TestWorldStateAttachmentCodec() {
 	AttachmentState gun = arm;
 	gun.Parent = 0; gun.Role = AttachmentRole::ArmDevice; gun.ClassName = "HDFirearm";
 	gun.PresetName = "Gun"; gun.HandOffsetX = 0; gun.DrawAfterParent = true;
+	gun.DeviceVisual = {true, true, true, 0.35F};
 	AttachmentState magazine = gun;
 	magazine.Parent = 1; magazine.Role = AttachmentRole::FirearmMagazine;
 	magazine.ClassName = "Magazine"; magazine.PresetName = "Magazine"; magazine.MagazineRounds = -1;
+	magazine.DeviceVisual = {};
 	AttachmentState emitter = arm;
 	emitter.Role = AttachmentRole::HumanJetpack; emitter.ClassName = "AEJetpack"; emitter.PresetName = "Jetpack";
 	emitter.HandOffsetX = 0; emitter.HasEmitterState = emitter.EmissionEnabled = emitter.FlashVisible = true;
 	AttachmentState flash = gun; flash.Parent = 3; flash.Role = AttachmentRole::EmitterFlash;
 	flash.ClassName = "Attachable"; flash.PresetName = "Flash"; flash.Scale = 0.375F;
+	flash.DeviceVisual = {};
 	AttachmentState wound = emitter; wound.ClassName = "AEmitter"; wound.PresetName = "Wound Flesh";
 	wound.Role = AttachmentRole::Wound; wound.FlashVisible = false;
 	body.Attachments = {arm, gun, magazine, emitter, flash, wound}; source.Objects.push_back(body);

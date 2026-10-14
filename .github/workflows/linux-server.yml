@@ -52,6 +52,10 @@ jobs:
           g++-13 -std=c++20 -Wall -Wextra -pthread -I external/sources/RakNet/include Tools/RakNetGuidTest.cpp -o build-server/peer-guid-test
           build-server/peer-guid-test
           python Tools/check_peer_guid_processes.py --exe build-server/peer-guid-test
+      - name: Verify device presentation codec
+        run: |
+          g++-13 -std=c++20 -Wall -Wextra -I Source/System Tools/WorldStateDeviceVisualTest.cpp -o build-server/device-visual-test
+          build-server/device-visual-test
       - name: Verify sound payload codec
         run: |
           g++-13 -std=c++20 -Wall -Wextra -pthread -I Source/System Tools/WorldStateSoundProtocolTest.cpp -o build-server/world-state-sound-test
