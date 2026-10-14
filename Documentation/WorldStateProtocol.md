@@ -257,6 +257,35 @@ the delivered root binaries in 55.46 seconds with two clients, removal/absence
 checks, native start, strict attachments/menu/audio and 64 further updates.
 Linux CI run `38586735265` is in progress for commit `fcce5202a34`.
 
+### Cross-peer removal authorization fixture
+
+The portable runner's `--brain-start` probes now exchange acknowledged placement
+IDs through their own `ScreenShots/<prefix>/Проверка_владения` folder. Each writes
+an ID to a temporary file and atomically publishes it, requests removal of the
+other peer's real ID when nonzero, and must receive `object_not_owned`. A barrier
+keeps the owner from deleting early. After both attempts, two fresh snapshots
+must arrive; the owner verifies a single surviving firearm and unchanged funds
+before performing its legitimate deletion. The runner requires at least one
+real foreign-ID refusal, in addition to paid placement and removal/replay checks.
+These diagnostic files do not change the production network protocol or expose
+IDs to ordinary clients. The test currently uses the fixture's different teams;
+a same-team peer case still needs separate coverage.
+
+`--construction-share-dir` is a probe-only option requiring `--brain-start` and
+an existing folder. UTF-8 paths use the engine's platform path conversion.
+Repeated runs clear only the eight known txt/tmp names in this runner's checked
+output directory. They never remove unrelated files. Without this optional
+argument, standalone brain-start probes retain their previous behavior.
+
+Both Meson targets linked successfully. `ConstructionOwnership` passed first
+against the Meson binary in 15.35 seconds, then against the delivered root server
+in 15.27 seconds using the same output prefix. Each run refused the other peer's
+real object ID, verified preservation followed by owner removal, started both
+players and observed 128 further server ticks with video disabled. The repeated
+run left exactly four published files and no temporary files. Misuse of the new
+option without brain-start was rejected with exit code 2 before connection.
+The native Final client is unchanged from the preceding verified removal build.
+
 ### Brain placement and native start
 
 `SceneEditorGUI::InstallNetworkBrain` clones the server's selected brain, existing

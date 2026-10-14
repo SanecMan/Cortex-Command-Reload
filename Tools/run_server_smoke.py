@@ -69,14 +69,16 @@ def main():
     root = game / 'ScreenShots' / args.output_prefix
     logs = root / 'Сервер_Ёжик'
     service_logs = root / 'ServiceMode'
-    for directory in (game / 'ScreenShots', root, logs, service_logs):
+    construction_exchange = root / 'Проверка_владения'
+    for directory in (game / 'ScreenShots', root, logs, service_logs, construction_exchange):
         if directory.is_symlink() or directory.resolve() != directory:
             raise RuntimeError('Diagnostic paths must not be symlinks.')
         directory.mkdir(exist_ok=True)
     # Clear only this runner's known outputs, never other workspace files.
     for directory, names in ((root, ('сервер.ini', 'stdout.log', 'stderr.log', 'invalid-config.log', 'self-test-stdout.log', 'client-0.log', 'client-1.log', 'deferred-client.log', 'service-stdout.log', 'service-stderr.log', 'result.json')),
                              (logs, ('Server.log', 'ServerFailure.log', 'WorldStateServer.log', 'LogLoading.txt', 'LogConsole.txt')),
-                             (service_logs, ('Server.log', 'ServerFailure.log', 'WorldStateServer.log', 'LogLoading.txt', 'LogConsole.txt'))):
+                             (service_logs, ('Server.log', 'ServerFailure.log', 'WorldStateServer.log', 'LogLoading.txt', 'LogConsole.txt')),
+                             (construction_exchange, tuple(f'{stem}-{slot}.{suffix}' for stem in ('placed', 'checked') for slot in range(2) for suffix in ('txt', 'tmp')))):
         for name in names:
             path = directory / name
             if path.exists() or path.is_symlink():
@@ -166,7 +168,7 @@ def main():
                             control_options = ['--require-control', '--minimum-revision', str(minimum_revision)] if args.require_control else []
                             if args.disconnect_one_restart:
                                 control_options += ['--expected-humans', str(2 if index == 0 else 1)]
-                            probes.append(subprocess.Popen([str(binary), '--probe-client', '127.0.0.1', str(port), '--probe-seconds', str(duration)] + (['--screen-text'] if args.screen_text else []) + (['--objectives'] if args.objectives else []) + control_options + (['--input-silence'] if args.input_silence else []) + (['--construction-check'] if args.construction_check else []) + (['--brain-start'] if args.brain_start else []),
+                            probes.append(subprocess.Popen([str(binary), '--probe-client', '127.0.0.1', str(port), '--probe-seconds', str(duration)] + (['--screen-text'] if args.screen_text else []) + (['--objectives'] if args.objectives else []) + control_options + (['--input-silence'] if args.input_silence else []) + (['--construction-check'] if args.construction_check else []) + (['--brain-start', '--construction-share-dir', str(construction_exchange)] if args.brain_start else []),
                                 cwd=game, env=environment, stdout=output, stderr=subprocess.STDOUT,
                                 creationflags=creation_flags))
                         observed_two = False
@@ -205,6 +207,7 @@ def main():
                 editing_probes = True
                 controlled_actors = set()
                 construction_purchase_observed = False
+                foreign_removal_denied = False
                 for index in range(2):
                     report = (root / f'client-{index}.log').read_text(encoding='utf-8')
                     object_count_pattern = r'\d+' if args.construction_check and 'activity_state=2 ' in report else r'[1-9]\d*'
@@ -225,6 +228,7 @@ def main():
                         if 'construction_removal=passed' not in report:
                             raise RuntimeError('Construction removal/replay/funds guards were not verified.')
                         construction_purchase_observed |= 'construction_objects=passed placed=1' in report
+                        foreign_removal_denied |= 'foreign_object_removal_denied=passed id=' in report
                     silence_match = re.search(r'silence_windows=(\d+)', report)
                     if args.input_silence and (not silence_match or int(silence_match.group(1)) < 2):
                         raise RuntimeError('Client did not exercise repeated input silence.')
@@ -258,9 +262,12 @@ def main():
                 if args.brain_start:
                     if not construction_purchase_observed:
                         raise RuntimeError('No real paid construction object was placed.')
+                    if not foreign_removal_denied:
+                        raise RuntimeError('No client was refused removal of the other peer\'s real placement.')
                     result['brain_placement_and_start'] = True
                     result['construction_purchase_and_replay'] = True
                     result['construction_removal_and_replay'] = True
+                    result['foreign_construction_removal_denied'] = True
                 if args.construction_check:
                     result['construction_checks_per_client'] = 7
                 result['probe_seconds'] = args.probe_seconds

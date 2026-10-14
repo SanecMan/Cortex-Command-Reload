@@ -16,6 +16,9 @@
 #include <charconv>
 #include <chrono>
 #include <thread>
+#include <filesystem>
+#include <fstream>
+#include <limits>
 
 namespace {
 // Separate-process transport diagnostic. It loads no content or devices and
@@ -71,7 +74,7 @@ bool VerifyConstructionBoundary(RTE::WorldStateClientSession& client) {
 	return checkReply(request, false, spectator ? "spectator" : "stale_request");
 }
 
-bool VerifyBrainConstructionStart(RTE::WorldStateClientSession& client) {
+bool VerifyBrainConstructionStart(RTE::WorldStateClientSession& client, const std::filesystem::path& exchange) {
 	using namespace RTE::WorldStateProtocol;
 	ConstructionRequest request;
 	request.RequestId = 1; request.SceneRevision = client.GetLatestSnapshot().SceneRevision;
@@ -147,20 +150,59 @@ bool VerifyBrainConstructionStart(RTE::WorldStateClientSession& client) {
 		std::this_thread::sleep_for(std::chrono::milliseconds(20));
 	}
 	if (!fundsObserved) { std::cerr << "Construction charged funds mismatch\n"; return false; }
-	object.RequestId = 4; object.Preset.PresetName = "Missing construction preset";
+	if (!exchange.empty()) {
+		const int slot = client.GetAssignedPlayerSlot();
+		if (slot < 0 || slot > 1) return false;
+		auto publish = [&](const std::string& stem, std::uint64_t value) {
+			const auto path = exchange / (stem + "-" + std::to_string(slot) + ".txt");
+			const auto temp = exchange / (stem + "-" + std::to_string(slot) + ".tmp");
+			{ std::ofstream output(temp, std::ios::trunc); output << value << '\n'; output.close(); if (!output) return false; }
+			std::error_code error; std::filesystem::rename(temp, path, error); return !error;
+		};
+		auto receive = [&](const std::string& stem, std::uint64_t& value) {
+			const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(8);
+			while (std::chrono::steady_clock::now() < deadline) {
+				client.Update(); client.SendInputCommand({});
+				std::ifstream input(exchange / (stem + "-" + std::to_string(1 - slot) + ".txt"));
+				if (input >> value) return true;
+				if (!client.GetConnectionError().empty()) return false;
+				std::this_thread::sleep_for(std::chrono::milliseconds(20));
+			}
+			std::cerr << "Construction peer exchange timed out\n"; return false;
+		};
+		std::uint64_t foreignId = 0, peerChecked = 0;
+		if (!publish("placed", placed.ObjectId) || !receive("placed", foreignId)) return false;
+		ConstructionRequest foreign;
+		foreign.RequestId = 4; foreign.SceneRevision = request.SceneRevision; foreign.Action = ConstructionAction::RemoveObject;
+		foreign.ObjectId = foreignId ? foreignId : std::numeric_limits<std::uint64_t>::max();
+		if (!send(foreign, false, "object_not_owned") || !publish("checked", 1) || !receive("checked", peerChecked) || peerChecked != 1) return false;
+		if (foreignId) std::cout << "foreign_object_removal_denied=passed id=" << foreignId << '\n';
+		const auto received = client.GetReceivedSnapshotCount();
+		const auto freshDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(6);
+		while (client.GetReceivedSnapshotCount() < received + 2 && std::chrono::steady_clock::now() < freshDeadline) {
+			client.Update(); client.SendInputCommand({}); std::this_thread::sleep_for(std::chrono::milliseconds(20));
+		}
+		if (client.GetReceivedSnapshotCount() < received + 2) return false;
+		const auto& world = client.GetLatestSnapshot();
+		if (affordable && (world.TeamFunds[team] != expectedFunds || std::count_if(world.Objects.begin(), world.Objects.end(), [&](const auto& entry) {
+			return entry.ClassName == "HDFirearm" && entry.ModuleName == "Ronin.rte" && entry.PresetName == "AK-47" && entry.Team == team;
+		}) != 1)) { std::cerr << "Foreign removal changed owner's object/funds\n"; return false; }
+	}
+	const std::uint32_t nextId = exchange.empty() ? 4 : 5;
+	object.RequestId = nextId; object.Preset.PresetName = "Missing construction preset";
 	if (!send(object, false, "invalid_preset")) return false;
-	object.RequestId = 5; object.Preset = {"Actor", "Base.rte", "Brain Case"};
+	object.RequestId = nextId + 1; object.Preset = {"Actor", "Base.rte", "Brain Case"};
 	if (!send(object, false, "prohibited_item")) return false;
-	object.RequestId = 6; object.Preset = {"HDFirearm", "Ronin.rte", "AK-47"}; object.X = -1;
+	object.RequestId = nextId + 2; object.Preset = {"HDFirearm", "Ronin.rte", "AK-47"}; object.X = -1;
 	if (!send(object, false, "outside_scene")) return false;
 	ConstructionRequest removal;
-	removal.RequestId = 7; removal.SceneRevision = request.SceneRevision; removal.Action = ConstructionAction::RemoveObject;
+	removal.RequestId = nextId + 3; removal.SceneRevision = request.SceneRevision; removal.Action = ConstructionAction::RemoveObject;
 	removal.ObjectId = affordable ? placed.ObjectId : std::numeric_limits<std::uint64_t>::max();
 	ConstructionResult removed, removedReplay;
 	if (!send(removal, affordable, affordable ? "" : "object_not_owned", &removed) ||
 	    !send(removal, affordable, affordable ? "" : "object_not_owned", &removedReplay) || removed != removedReplay ||
 	    (affordable && removed.ObjectId != placed.ObjectId)) return false;
-	removal.RequestId = 8;
+	removal.RequestId = nextId + 4;
 	if (!send(removal, false, "object_not_owned")) return false;
 	const auto removeDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(6);
 	bool deletionObserved = false;
@@ -176,7 +218,7 @@ bool VerifyBrainConstructionStart(RTE::WorldStateClientSession& client) {
 	if (!deletionObserved) { std::cerr << "Construction removal/funds mismatch\n"; return false; }
 	std::cout << "construction_removal=passed removed=" << affordable << '\n';
 	std::cout << "construction_objects=passed placed=" << affordable << " charged=" << placed.ChargedCost << '\n';
-	request = {}; request.RequestId = 9; request.SceneRevision = client.GetLatestSnapshot().SceneRevision;
+	request = {}; request.RequestId = nextId + 5; request.SceneRevision = client.GetLatestSnapshot().SceneRevision;
 	request.Action = ConstructionAction::SetReady; request.Ready = true;
 	return send(request, true, "");
 }
@@ -188,6 +230,7 @@ int RunClientProbe(const std::vector<std::string>& arguments) {
 	unsigned int expectedHumans = 0;
 	bool constructionCheck = false, constructionPassed = false;
 	bool brainStart = false, brainPlaced = false;
+	std::filesystem::path constructionExchange;
 	if (arguments.size() < 4 || arguments[2].empty()) {
 		std::cerr << "Usage: CortexCommandServer --probe-client ADDRESS PORT [--screen-text] [--probe-seconds 3..3600] [--input-silence]\n"; return 2;
 	}
@@ -197,6 +240,7 @@ int RunClientProbe(const std::vector<std::string>& arguments) {
 		else if (arguments[index] == "--require-control") requireControl = true;
 		else if (arguments[index] == "--construction-check") constructionCheck = true;
 		else if (arguments[index] == "--brain-start") { brainStart = true; requireControl = true; }
+		else if (arguments[index] == "--construction-share-dir" && index + 1 < arguments.size()) constructionExchange = RTE::UTF8::PathFromString(arguments[++index]);
 		else if (arguments[index] == "--expected-humans" && index + 1 < arguments.size()) {
 			const auto& value = arguments[++index];
 			const auto number = std::from_chars(value.data(), value.data() + value.size(), expectedHumans);
@@ -219,6 +263,12 @@ int RunClientProbe(const std::vector<std::string>& arguments) {
 				std::cerr << "Probe duration must be an integer from 3 to 3600.\n"; return 2;
 			}
 		} else { std::cerr << "Unknown or incomplete probe option.\n"; return 2; }
+	}
+	if (!constructionExchange.empty()) {
+		std::error_code error;
+		if (!brainStart || !std::filesystem::is_directory(constructionExchange, error) || error) {
+			std::cerr << "Construction exchange requires --brain-start and an existing directory.\n"; return 2;
+		}
 	}
 	unsigned int port = 0;
 	const auto& text = arguments[3];
@@ -252,7 +302,7 @@ int RunClientProbe(const std::vector<std::string>& arguments) {
 				const auto& before = client.GetLatestSnapshot();
 				const auto humans = std::count_if(before.Players.begin(), before.Players.end(), [](const auto& player) { return player.ActiveHuman; });
 				if (client.GetAssignedPlayerSlot() < 0 || humans != 2) { client.SendInputCommand({}); std::this_thread::sleep_for(std::chrono::milliseconds(20)); continue; }
-				if (before.ActivityState != 2 || !VerifyBrainConstructionStart(client)) { client.Disconnect(); return 1; }
+				if (before.ActivityState != 2 || !VerifyBrainConstructionStart(client, constructionExchange)) { client.Disconnect(); return 1; }
 				brainPlaced = true;
 			}
 			if (constructionCheck && !constructionPassed) {
