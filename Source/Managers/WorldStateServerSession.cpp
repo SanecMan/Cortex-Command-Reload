@@ -12,6 +12,8 @@
 #include "ThreadMan.h"
 #include "BuyMenuGUI.h"
 #include "SceneEditorGUI.h"
+#include "ObjectPickerGUI.h"
+#include "SettingsMan.h"
 #include "MetaMan.h"
 #include "NetworkMessages.h"
 #include "SceneMan.h"
@@ -109,6 +111,7 @@ bool WorldStateServerSession::Start(const std::string& bindAddress, unsigned sho
 void WorldStateServerSession::Stop() {
 	m_LastConstructionByClient.clear();
 	m_ConstructionOwners.clear(); m_ConstructionOwnerRevision = 0;
+	m_LastConstructionCatalog.clear(); m_ConstructionCatalogSequence = 0;
 	m_LastConstructionTimeByClient.clear();
 	m_PendingSoundBaselines.clear();
 	GetWorldStateSoundCapture().End();
@@ -308,6 +311,7 @@ void WorldStateServerSession::PollNetwork(std::uint32_t simulationTick) {
 			m_LastPurchaseByClient.erase(clientAddress);
 			m_LastPolicyByClient.erase(clientAddress);
 			m_LastConstructionByClient.erase(clientAddress);
+			m_LastConstructionCatalog.erase(clientAddress);
 			std::erase_if(m_ConstructionOwners, [&](const auto& entry) { return entry.second.Client == clientAddress; });
 			m_LastConstructionTimeByClient.erase(clientAddress);
 			m_LastPurchaseTimeByClient.erase(clientAddress);
@@ -344,6 +348,7 @@ void WorldStateServerSession::PollNetwork(std::uint32_t simulationTick) {
 			m_LastPurchaseByClient.erase(clientAddress);
 			m_LastPurchaseTimeByClient.erase(clientAddress);
 			m_LastConstructionByClient.erase(clientAddress);
+			m_LastConstructionCatalog.erase(clientAddress);
 			std::erase_if(m_ConstructionOwners, [&](const auto& entry) { return entry.second.Client == clientAddress; });
 			m_LastConstructionTimeByClient.erase(clientAddress);
 			m_ReportedPlayerSlots.erase(clientAddress);
@@ -441,6 +446,33 @@ void WorldStateServerSession::ProcessConstruction(const WorldStateTransport::Rec
 		m_LastConstructionByClient[client] = {request, result};
 	if (!m_Transport.SendConstructionResult(packet.Sender, result)) Log("ERROR: construction result send failed client=" + client);
 	Log("INFO: construction id=" + std::to_string(result.RequestId) + " accepted=" + std::to_string(result.Accepted) + " reason=" + result.Reason + " client=" + client);
+}
+
+void WorldStateServerSession::PublishConstructionCatalog(std::uint32_t sceneRevision) {
+	const auto* activity = dynamic_cast<const GameActivity*>(g_ActivityMan.GetActivity());
+	if (!activity || activity->GetActivityState() != Activity::Editing || !sceneRevision) return;
+	for (const auto& [client, address] : m_ClientAddresses) {
+		const auto slot = m_ReportedPlayerSlots.find(client);
+		if (slot == m_ReportedPlayerSlots.end() || slot->second < 0 || slot->second >= Players::MaxPlayerCount || !activity->PlayerActive(slot->second) || !activity->PlayerHuman(slot->second)) continue;
+		const auto* editor = activity->GetEditorGUI(slot->second);
+		const auto* picker = editor ? editor->GetNetworkObjectPicker() : nullptr;
+		if (!picker) continue;
+		WorldStateProtocol::ConstructionCatalog catalog;
+		catalog.SceneRevision = sceneRevision; catalog.PlayerSlot = static_cast<std::uint8_t>(slot->second);
+		if (picker->GetNativeTechModule() > 0) catalog.NativeModule = g_PresetMan.GetDataModuleName(picker->GetNativeTechModule());
+		if (picker->GetModuleSpace() >= 0) catalog.ModuleSpace = g_PresetMan.GetDataModuleName(picker->GetModuleSpace());
+		catalog.TypeFilter = picker->GetTypeFilter().empty() ? "All" : picker->GetTypeFilter();
+		catalog.ForeignMultiplier = picker->GetForeignCostMultiplier(); catalog.ShowForeign = g_SettingsMan.ShowForeignItems();
+		const auto& groups = g_SettingsMan.GetVisibleAssemblyGroupsList();
+		catalog.VisibleAssemblyGroups.assign(groups.begin(), groups.end());
+		const auto previous = m_LastConstructionCatalog.find(client);
+		if (previous != m_LastConstructionCatalog.end() && previous->second == catalog) continue;
+		if (++m_ConstructionCatalogSequence == 0) ++m_ConstructionCatalogSequence;
+		if (m_Transport.SendConstructionCatalog(address, catalog, m_ConstructionCatalogSequence)) {
+			m_LastConstructionCatalog[client] = catalog;
+			Log("INFO: construction catalog sequence=" + std::to_string(m_ConstructionCatalogSequence) + " slot=" + std::to_string(slot->second));
+		} else Log("ERROR: construction catalog send failed");
+	}
 }
 
 void WorldStateServerSession::ProcessPurchase(const WorldStateTransport::ReceivedPacket& packet, const WorldStateProtocol::PurchaseRequest& request) {
@@ -741,6 +773,7 @@ void WorldStateServerSession::Update(std::uint32_t simulationTick) {
 	m_LastSnapshotObjectCount = snapshot.Objects.size();
 	g_PerformanceMan.StopPerformanceMeasurement(PerformanceMan::WorldStateSnapshot);
 	if (!m_Transport.BroadcastConstructionState(constructionState, constructionSequence)) Log("ERROR: construction state send failed");
+	PublishConstructionCatalog(snapshot.SceneRevision);
 	WorldStateTransport::SnapshotTransmissionMetrics transmissionMetrics;
 	if (!m_Transport.BroadcastSnapshot(snapshot, ++m_Sequence, &transmissionMetrics)) {
 		Log("ERROR: failed to encode or broadcast world snapshot");

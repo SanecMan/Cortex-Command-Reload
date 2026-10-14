@@ -45,6 +45,7 @@ void ObjectPickerGUI::Clear() {
 	m_ShowType.clear();
 	m_NativeTechModuleID = 0;
 	m_ForeignCostMult = 4.0F;
+	m_HasNetworkCatalog = false; m_NetworkShowForeign = true; m_NetworkAssemblyGroups.clear();
 	m_ShownGroupIndex = 0;
 	m_SelectedGroupIndex = 0;
 	m_SelectedObjectIndex = 0;
@@ -259,11 +260,10 @@ void ObjectPickerGUI::UpdateGroupsList() {
 		}
 		// If this group is in the SettingsMan list of always visible assembly groups, then force the onlyAssembliesInGroup flag off so this group is always shown
 		if (onlyAssembliesInGroup) {
-			for (const std::string& assemblyGroup: g_SettingsMan.GetVisibleAssemblyGroupsList()) {
-				if (groupListEntry == assemblyGroup) {
-					onlyAssembliesInGroup = false;
-					break;
-				}
+			if (m_HasNetworkCatalog) {
+				if (std::find(m_NetworkAssemblyGroups.begin(), m_NetworkAssemblyGroups.end(), groupListEntry) != m_NetworkAssemblyGroups.end()) onlyAssembliesInGroup = false;
+			} else for (const std::string& assemblyGroup: g_SettingsMan.GetVisibleAssemblyGroupsList()) {
+				if (groupListEntry == assemblyGroup) { onlyAssembliesInGroup = false; break; }
 			}
 		}
 		if (!objectList.empty() && hasObjectsToShow && (!onlyAssembliesInGroup || groupListEntry == "Assemblies") && (!onlyAssemblySchemesInGroup || showAssemblySchemes)) {
@@ -366,7 +366,7 @@ void ObjectPickerGUI::UpdateObjectsList(bool selectTop) {
 
 	if (const GUIListPanel::Item* groupListItem = m_GroupsList->GetSelected()) {
 		if (m_ModuleSpaceID < 0) {
-			if (g_SettingsMan.ShowForeignItems() || m_NativeTechModuleID <= 0) {
+			if (ShowForeignItems() || m_NativeTechModuleID <= 0) {
 				for (int moduleID = 0; moduleID < moduleList.size(); ++moduleID) {
 					g_PresetMan.GetAllOfGroup(moduleList.at(moduleID), groupListItem->m_Name, m_ShowType, moduleID);
 				}
@@ -424,7 +424,7 @@ bool ObjectPickerGUI::IsObjectAvailable(const SceneObject& object) const {
 	if (!object.IsBuyable() || object.IsBuyableInBuyMenuOnly() || object.IsBuyableInScriptOnly()) return false;
 	const int module = object.GetModuleID();
 	if (module < 0 || module >= g_PresetMan.GetTotalModuleCount()) return false;
-	if (m_ModuleSpaceID < 0 && !g_SettingsMan.ShowForeignItems() && m_NativeTechModuleID > 0 &&
+	if (m_ModuleSpaceID < 0 && !ShowForeignItems() && m_NativeTechModuleID > 0 &&
 	    module != 0 && module != m_NativeTechModuleID && !g_PresetMan.GetDataModule(module)->IsMerchant()) return false;
 	if (m_ModuleSpaceID >= 0 && module != m_ModuleSpaceID &&
 	    !(module < g_PresetMan.GetOfficialModuleCount() && module < m_ModuleSpaceID)) return false;
@@ -435,6 +435,16 @@ bool ObjectPickerGUI::IsObjectAvailable(const SceneObject& object) const {
 		if (std::find(objects.begin(), objects.end(), &object) != objects.end()) return true;
 	}
 	return false;
+}
+
+bool ObjectPickerGUI::ShowForeignItems() const { return m_HasNetworkCatalog ? m_NetworkShowForeign : g_SettingsMan.ShowForeignItems(); }
+
+void ObjectPickerGUI::ApplyNetworkCatalog(const WorldStateProtocol::ConstructionCatalog& catalog, int nativeModule, int moduleSpace) {
+	m_HasNetworkCatalog = true; m_NetworkShowForeign = catalog.ShowForeign;
+	m_NetworkAssemblyGroups = catalog.VisibleAssemblyGroups;
+	m_ModuleSpaceID = moduleSpace; m_ShowType = catalog.TypeFilter; m_ForeignCostMult = catalog.ForeignMultiplier;
+	SetNativeTechModule(nativeModule);
+	UpdateGroupsList();
 }
 
 void ObjectPickerGUI::Update() {

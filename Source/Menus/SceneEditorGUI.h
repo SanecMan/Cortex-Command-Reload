@@ -137,6 +137,7 @@ namespace RTE {
 		/// Sets the multiplier of the cost of any foreign Tech items.
 		/// @param newMultiplier The scalar multiplier of the costs of foreign Tech items.
 		void SetForeignCostMultiplier(float newMultiplier);
+		const ObjectPickerGUI* GetNetworkObjectPicker() const { return m_pPicker; }
 
 		/// Shows whether an edit on the scene was made in the last Update.
 		/// @return Whether any edit was made.

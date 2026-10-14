@@ -6,6 +6,7 @@
 #include "GUIControlManager.h"
 #include "AllegroScreen.h"
 #include "GUIInputWrapper.h"
+#include "WorldStateConstructionCatalog.h"
 
 namespace RTE {
 
@@ -111,6 +112,11 @@ namespace RTE {
 		const SceneObject* ObjectPicked() const { return m_PickedObject; }
 		/// Check server-side placement eligibility using this picker's module/type/groups.
 		bool IsObjectAvailable(const SceneObject& object) const;
+		int GetNativeTechModule() const { return m_NativeTechModuleID; }
+		int GetModuleSpace() const { return m_ModuleSpaceID; }
+		float GetForeignCostMultiplier() const { return m_ForeignCostMult; }
+		const std::string& GetTypeFilter() const { return m_ShowType; }
+		void ApplyNetworkCatalog(const WorldStateProtocol::ConstructionCatalog& catalog, int nativeModule, int moduleSpace);
 
 		/// Reports whether the player has finished using the picker, and the final picked object is returned.
 		/// @return The object the player picked before they closed the picker, or nullptr if none was picked. Ownership is NOT transferred!
@@ -162,6 +168,9 @@ namespace RTE {
 		std::string m_ShowType; //!< Only show objects of this type. Empty string or "All" will show objects of all types.
 		int m_NativeTechModuleID; //!< The ID of the DataModule that contains the native Tech of the Player using this menu.
 		float m_ForeignCostMult; //!< The multiplier of costs of any foreign tech items.
+		bool m_HasNetworkCatalog = false, m_NetworkShowForeign = true;
+		std::vector<std::string> m_NetworkAssemblyGroups;
+		bool ShowForeignItems() const;
 
 		int m_ShownGroupIndex; //!< Which group in the groups list is currently showing it's objects list.
 		int m_SelectedGroupIndex; //!< Which group in the groups list box we have selected.

@@ -45,6 +45,7 @@ void WorldStateClientSession::Disconnect() {
 	m_PurchaseResults.clear();
 	m_ConstructionResults.clear();
 	m_ConstructionState = {}; m_ConstructionSequence = 0;
+	m_ConstructionCatalog = {}; m_ConstructionCatalogSequence = 0;
 	m_PurchasePolicy={}; m_PolicySequence=0;
 	m_ReceivedSnapshotCount = 0;
 	m_InputCommandSequence = 0;
@@ -155,7 +156,14 @@ void WorldStateClientSession::Update() {
 		WorldStateProtocol::PurchaseResult purchase;
 		WorldStateProtocol::ConstructionResult construction;
 		WorldStateProtocol::ConstructionState constructionState;
+		WorldStateProtocol::ConstructionCatalog constructionCatalog;
 		std::uint32_t constructionSequence = 0;
+		if (WorldStateProtocol::DecodeConstructionCatalog(snapshotPayload, constructionCatalog, constructionSequence)) {
+			if (!m_ConstructionCatalogSequence || static_cast<std::int32_t>(constructionSequence - m_ConstructionCatalogSequence) > 0) {
+				m_ConstructionCatalog = std::move(constructionCatalog); m_ConstructionCatalogSequence = constructionSequence;
+			}
+			continue;
+		}
 		if (WorldStateProtocol::DecodeConstructionState(snapshotPayload, constructionState, constructionSequence)) {
 			if (!m_ConstructionSequence || static_cast<std::int32_t>(constructionSequence - m_ConstructionSequence) > 0) {
 				m_ConstructionState = std::move(constructionState); m_ConstructionSequence = constructionSequence;

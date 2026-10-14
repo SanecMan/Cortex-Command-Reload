@@ -56,6 +56,9 @@ namespace RTE {
 		struct ConstructionOwner { std::string Client; std::uint32_t Revision; int Team; };
 		std::unordered_map<std::uint64_t, ConstructionOwner> m_ConstructionOwners;
 		std::uint32_t m_ConstructionOwnerRevision = 0;
+		std::unordered_map<std::string, WorldStateProtocol::ConstructionCatalog> m_LastConstructionCatalog;
+		std::uint32_t m_ConstructionCatalogSequence = 0;
+		void PublishConstructionCatalog(std::uint32_t sceneRevision);
 		void PublishPurchasePolicies(std::uint32_t tick);
 		std::uint32_t m_LastPolicyTick=0, m_PolicySequence=0;
 		std::unordered_map<std::string, WorldStateProtocol::PurchasePolicy> m_LastPolicyByClient;

@@ -37,9 +37,14 @@ public:
 	const std::string& LastRejection() const { return m_LastReason; }
 	const SceneObject* GetSelectedObject() const { return m_Selected.get(); }
 	ObjectPickerGUI* GetPicker() const { return m_Picker.get(); }
+	bool HasAppliedCatalog() const { return m_CatalogSequence != 0 && m_CatalogReady; }
+	float GetSelectedCost() const { return m_Selected ? m_Selected->GetTotalValue(m_CatalogNativeModule, m_Catalog.ForeignMultiplier) : 0; }
 	bool OpenPicker() {
-		if (!m_Active || m_Slot < 0 || m_Pending) return false;
-		if (!m_Picker) { m_Picker = std::make_unique<ObjectPickerGUI>(); if (m_Picker->Create(&m_Controller) < 0) { m_Picker.reset(); return false; } }
+		if (!m_Active || m_Slot < 0 || m_Pending || !m_CatalogReady) return false;
+		if (!m_Picker) {
+			m_Picker = std::make_unique<ObjectPickerGUI>(); if (m_Picker->Create(&m_Controller) < 0) { m_Picker.reset(); return false; }
+			if (m_CatalogSequence) m_Picker->ApplyNetworkCatalog(m_Catalog, m_CatalogNativeModule, m_CatalogModuleSpace);
+		}
 		m_Picker->SetEnabled(true); return true;
 	}
 	bool SelectObject(const SceneObject* preset) {
@@ -64,6 +69,7 @@ public:
 	void Reset() {
 		const ObjectScriptExecution::SuppressionScope suppress;
 		ClearSelection(); m_Picker.reset(); m_LastCost = 0; m_LastReason.clear(); m_LastPlacedId = 0;
+		m_Catalog = {}; m_CatalogSequence = 0; m_CatalogReady = true; m_CatalogNativeModule = 0; m_CatalogModuleSpace = -1;
 		for (auto& preview : m_Previews) { if (preview.Object) preview.Object->DestroyScriptState(); preview = {}; }
 		m_Active = m_Pending = m_LastAccepted = false; m_Revision = 0; m_Slot = -1; m_State = {}; m_Status.clear();
 	}
@@ -100,6 +106,18 @@ public:
 			m_State = {}; m_Status = "Waiting for construction controls..."; return;
 		}
 		m_State = incoming;
+		const auto& catalog = client.GetConstructionCatalog();
+		if (client.GetConstructionCatalogSequence() && catalog.SceneRevision == m_Revision && catalog.PlayerSlot == m_Slot &&
+		    (m_CatalogSequence != client.GetConstructionCatalogSequence() || !m_CatalogReady)) {
+			const int native = catalog.NativeModule.empty() ? 0 : g_PresetMan.GetModuleID(catalog.NativeModule);
+			const int space = catalog.ModuleSpace.empty() ? -1 : g_PresetMan.GetModuleID(catalog.ModuleSpace);
+			const bool reopen = m_Picker && m_Picker->IsEnabled();
+			ClearSelection(); m_Picker.reset(); m_Catalog = catalog; m_CatalogSequence = client.GetConstructionCatalogSequence();
+			m_CatalogReady = native >= 0 && (catalog.ModuleSpace.empty() || space >= 0);
+			m_CatalogNativeModule = native; m_CatalogModuleSpace = space;
+			if (!m_CatalogReady) m_Status = "Server construction catalog requires a missing module";
+			else if (reopen) OpenPicker();
+		}
 		for (const auto& reply : client.DrainConstructionResults()) {
 			if (!m_Pending || reply.RequestId != m_Request.RequestId || reply.SceneRevision != m_Revision) continue;
 			m_Pending = false; m_LastAccepted = reply.Accepted;
@@ -199,6 +217,10 @@ private:
 	std::unique_ptr<ObjectPickerGUI> m_Picker;
 	std::unique_ptr<SceneObject> m_Selected;
 	float m_LastCost = 0;
+	WorldStateProtocol::ConstructionCatalog m_Catalog;
+	std::uint32_t m_CatalogSequence = 0;
+	int m_CatalogNativeModule = 0, m_CatalogModuleSpace = -1;
+	bool m_CatalogReady = true;
 	std::uint64_t m_LastPlacedId = 0;
 	std::string m_LastReason;
 	WorldStateProtocol::ConstructionState m_State;
