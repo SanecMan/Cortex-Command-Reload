@@ -112,6 +112,9 @@ namespace RTE {
 		const SceneObject* ObjectPicked() const { return m_PickedObject; }
 		/// Check server-side placement eligibility using this picker's module/type/groups.
 		bool IsObjectAvailable(const SceneObject& object) const;
+		/// Select an available preset in the current group, expanding its module and scrolling to its row.
+		bool SelectObjectByPreset(const SceneObject* preset);
+		std::string GetSelectedPriceText() const;
 		int GetNativeTechModule() const { return m_NativeTechModuleID; }
 		int GetModuleSpace() const { return m_ModuleSpaceID; }
 		float GetForeignCostMultiplier() const { return m_ForeignCostMult; }

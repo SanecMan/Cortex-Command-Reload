@@ -3437,11 +3437,14 @@ void RunGameLoop() {
 						const int saved = g_FrameMan.SaveScreenToPNGBlocking(image);
 						uiTest.Log << "construction_preview_capture=" << (saved == 0 ? "passed" : "failed") << '\n' << std::flush;
 						const auto* gun = dynamic_cast<const SceneObject*>(g_PresetMan.GetEntityPreset("HDFirearm", "AK-47", "Ronin.rte"));
-						if (saved == 0 && worldStateConstructionMenu->OpenPicker() && worldStateConstructionMenu->GetPicker()->SelectGroupByName("Weapons") && worldStateConstructionMenu->SelectObject(gun)) {
+						if (saved == 0 && worldStateConstructionMenu->OpenPicker() && worldStateConstructionMenu->GetPicker()->SelectGroupByName("Weapons") && worldStateConstructionMenu->GetPicker()->SelectObjectByPreset(gun) && worldStateConstructionMenu->SelectObject(gun)) {
 							const auto& catalog = worldStateClient->GetConstructionCatalog();
 							const auto* picker = worldStateConstructionMenu->GetPicker();
 							RTEAssert(picker->GetTypeFilter() == catalog.TypeFilter && picker->GetForeignCostMultiplier() == catalog.ForeignMultiplier,
 							          "Construction picker did not apply server catalog");
+							RTEAssert(picker->ObjectPicked() == gun && picker->GetSelectedPriceText() == gun->GetGoldValueString(picker->GetNativeTechModule(), picker->GetForeignCostMultiplier()),
+							          "Construction picker selected row price mismatch");
+							uiTest.Log << "construction_catalog_price_row=passed displayed=" << picker->GetSelectedPriceText() << '\n' << std::flush;
 							uiTest.Log << "construction_catalog_applied=passed\n" << std::flush;
 							uiTest.ConstructionTestStage = 10; uiTest.ConstructionActionUpdate = uiTest.SimulationUpdates;
 						}

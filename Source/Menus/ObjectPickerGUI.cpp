@@ -286,6 +286,26 @@ const SceneObject* ObjectPickerGUI::GetSelectedObject() {
 	return nullptr;
 }
 
+bool ObjectPickerGUI::SelectObjectByPreset(const SceneObject* preset) {
+	if (!preset || !IsObjectAvailable(*preset)) return false;
+	const int module = preset->GetModuleID();
+	if (module > 0 && module < m_ExpandedModules.size() && !m_ExpandedModules.at(module))
+		SetObjectsListModuleGroupExpanded(module, true);
+	const auto* items = m_ObjectsList->GetItemList();
+	for (std::size_t index = 0; index < items->size(); ++index) {
+		const auto* item = items->at(index);
+		if (!item || item->m_pEntity != preset) continue;
+		SelectObjectByIndex(static_cast<int>(index), false); m_ObjectsList->ScrollToSelected(); m_PickedObject = preset;
+		return true;
+	}
+	return false;
+}
+
+std::string ObjectPickerGUI::GetSelectedPriceText() const {
+	const auto* selected = m_ObjectsList->GetSelected();
+	return selected && selected->m_pEntity ? selected->m_RightText : std::string{};
+}
+
 void ObjectPickerGUI::SelectObjectByIndex(int objectIndex, bool playSelectionSound) {
 	m_SelectedObjectIndex = objectIndex;
 	m_ObjectsList->SetSelectedIndex(m_SelectedObjectIndex);

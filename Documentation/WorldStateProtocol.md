@@ -49,10 +49,16 @@ checks passed. Run this fixture using RunDedicatedServerSmoke.ps1
 `-CheckConstructionPricing` with the Skirmish Defense/Ketanot Hills fixture.
 The first attempt's client runtime checks passed, but its runner rejected CRLF
 log endings; the verifier was corrected and the full scenario rerun. Faction
-skin application was visually inspected; the selected Ronin row was collapsed
-in that capture, so the test does not establish a visible AK-47 price screenshot.
-This pricing test used Meson binaries; root Final still corresponds to the
-previous catalog integration delivery.
+skin application was visually inspected. A subsequent ConstructionPriceRow run
+passed in 51.46 seconds with 63 further server updates, using the picker's new
+SelectObjectByPreset API to expand the preset's module in the current group,
+select its exact row and scroll it into view. Both clients verified the selected
+row's price text was 80. The captured catalog screenshot was inspected: Ronin
+is expanded and the selected AK-47 row visibly shows 80. The server again charged
+80 to the funded client and zero to the rejected client. This pricing test used
+Meson binaries; root Final still corresponds to the previous catalog integration
+delivery. Linux integration CI run 38606595091 passed for commit 4219dbae2a4;
+that run predates the pricing/row test additions.
 
 The standalone test passed MSVC and MinGW GCC, including Russian names, round
 trip, all truncated prefixes, malformed envelope/version/type/reserved/length,
