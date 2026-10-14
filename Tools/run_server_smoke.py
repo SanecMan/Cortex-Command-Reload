@@ -239,6 +239,8 @@ def main():
                     if args.brain_start and ('brain_start=1' not in report or 'activity_state=4 ' not in report):
                         raise RuntimeError('Native brain placement/start was not verified.')
                     if args.brain_start:
+                        if 'construction_catalog_received=passed' not in report:
+                            raise RuntimeError('Server construction catalog was not received for the assigned slot and scene.')
                         if 'construction_objects=passed' not in report:
                             raise RuntimeError('Construction object placement/replay/funds guards were not verified.')
                         if 'construction_removal=passed' not in report:

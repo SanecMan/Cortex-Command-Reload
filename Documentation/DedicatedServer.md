@@ -7,8 +7,9 @@ remain unchanged. The module must already be loaded and marked as a faction;
 unknown modules and non-factions are rejected with a server log and failed
 startup. Each applied team value is logged. Native restart retains the configured
 Activity template. This does not add team assignment or faction choice to the
-client lobby, and the construction catalog's default local pricing display still
-needs server editor pricing metadata for nondefault settings.
+client lobby. Construction picker metadata now comes from the server editor,
+including native pricing and module/type filters; focused nondefault pricing
+coverage is still required.
 
 Windows validation: both Meson targets built; Coalition was logged on all four
 teams. Base.rte was rejected as a non-faction with exit code 1.

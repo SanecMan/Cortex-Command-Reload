@@ -460,7 +460,7 @@ try {
             $clientReport -notmatch '(?m)^world_state_objectives_cleared=passed')) { throw 'Client objective create/clear checks failed.' }
         if ($EnableAudio -and $clientReport -notmatch '(?m)^audio_shutdown_complete\r?$') { throw 'Client audio shutdown was not verified.' }
         $clientNetwork = Read-Report (Join-Path $clientDirectory 'WorldStateClient.log')
-        if ($CheckConstruction -and ($clientReport -notmatch '(?m)^world_state_construction_ui=passed' -or $clientReport -notmatch '(?m)^construction_preview_capture=passed' -or $clientReport -notmatch '(?m)^construction_catalog_capture=passed' -or $clientReport -notmatch '(?m)^construction_object_ui=passed')) { throw 'Construction UI/preview/catalog/purchase/start did not pass.' }
+        if ($CheckConstruction -and ($clientReport -notmatch '(?m)^world_state_construction_ui=passed' -or $clientReport -notmatch '(?m)^construction_preview_capture=passed' -or $clientReport -notmatch '(?m)^construction_catalog_capture=passed' -or $clientReport -notmatch '(?m)^construction_catalog_applied=passed' -or $clientReport -notmatch '(?m)^construction_object_ui=passed')) { throw 'Construction UI/preview/catalog/purchase/start did not pass.' }
         if ($CheckConstruction -and $clientReport -notmatch '(?m)^construction_object_preview_capture=passed') { throw 'Object preview was not captured.' }
         if ($CheckDeployment -and ($clientReport -notmatch '(?m)^construction_deployment_ui=passed' -or $clientReport -notmatch '(?m)^construction_deployment_capture=passed')) { throw 'Deployment replica/render capture failed.' }
         if ($CheckDeployment -and $clientNetwork -notmatch '(?m)^client_local_simulation_ticks=0') { throw 'Replica client executed local simulation.' }

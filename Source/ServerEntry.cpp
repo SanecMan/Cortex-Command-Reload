@@ -76,6 +76,16 @@ bool VerifyConstructionBoundary(RTE::WorldStateClientSession& client) {
 
 bool VerifyBrainConstructionStart(RTE::WorldStateClientSession& client, const std::filesystem::path& exchange, bool deploymentCheck) {
 	using namespace RTE::WorldStateProtocol;
+	const auto catalogDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(6);
+	while (!client.GetConstructionCatalogSequence() && std::chrono::steady_clock::now() < catalogDeadline) {
+		client.Update(); client.SendInputCommand({}); std::this_thread::sleep_for(std::chrono::milliseconds(20));
+	}
+	const auto& catalog = client.GetConstructionCatalog();
+	if (!client.GetConstructionCatalogSequence() || catalog.SceneRevision != client.GetLatestSnapshot().SceneRevision ||
+	    catalog.PlayerSlot != client.GetAssignedPlayerSlot() || catalog.TypeFilter.empty()) {
+		std::cerr << "Construction catalog missing or mismatched\n"; return false;
+	}
+	std::cout << "construction_catalog_received=passed slot=" << static_cast<int>(catalog.PlayerSlot) << '\n';
 	std::array<std::array<int, 3>, 2> terrainSamples{{{{-1, -1, -1}}, {{-1, -1, -1}}}};
 	auto observeTerrain = [&]() {
 		for (const auto& received : client.DrainTerrainPatches(client.GetLatestSnapshot().SceneRevision)) {

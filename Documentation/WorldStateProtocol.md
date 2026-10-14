@@ -9,11 +9,28 @@ pricing; empty module space means all loaded modules. Strings are at most 1024
 bytes with no embedded NUL. The packet limit is 256 KiB. Decode commits both
 catalog and sequence only after full validation.
 
-This is only the codec foundation. Transport publication, session caching and
-application to ObjectPickerGUI are not integrated yet; current catalog behavior
-and the shipped game binaries are unchanged by this isolated header/test.
-The existing MessageType enum is unchanged; the reserved kind is explicitly
-encoded by this extension until routing integration.
+The server publishes this optional message over RELIABLE_ORDERED during native
+Activity editing whenever the assigned player's editor catalog changes. Client
+sessions retain the newest sequence and clear it on disconnect. The construction
+menu applies only metadata matching its current scene revision and player slot.
+Module names resolve against local content; a missing required module disables
+picker opening. Applying a changed catalog clears the selected preview and
+recreates an open picker. Visibility and assembly-group overrides are local to
+this picker and do not modify Settings.ini. Native pricing and type/module filters
+come from the authoritative editor. Existing servers without this optional packet
+retain the default picker behavior. The existing MessageType enum is unchanged;
+kind 14 is routed explicitly by the extension.
+
+Windows Meson integration validation: CatalogIntegrationBrain passed two-client
+brain placement, purchases/replay, ownership removal, terrain replication,
+deployment loadout and inventory gifting in 26.08 seconds, with 130 further server
+ticks and video_initialized=0. Both peers logged construction_catalog_received.
+CatalogIntegrationVisual passed in 53.25 seconds; both clients logged
+construction_catalog_applied, exercised the native picker, deployment rendering
+and gifts, menu cancellation/connection and attachment/audio checks. The server
+continued for 63 updates after disconnect. These are test binaries, not a new
+root Final delivery. Nondefault filters, live policy changes, missing-module UI
+and reconnect catalog replacement still require focused runtime coverage.
 
 The standalone test passed MSVC and MinGW GCC, including Russian names, round
 trip, all truncated prefixes, malformed envelope/version/type/reserved/length,

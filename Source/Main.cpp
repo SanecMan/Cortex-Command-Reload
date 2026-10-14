@@ -3407,7 +3407,7 @@ void RunGameLoop() {
 						if (localDeployment->GetBGArm() && countPistol(localDeployment->GetBGArm()->GetHeldDevice())) ++localPistols;
 						break;
 					}
-					if (uiTest.ConstructionTestStage == 0 && humans == 2 && slot >= 0 && worldStateConstructionMenu->IsActive()) {
+					if (uiTest.ConstructionTestStage == 0 && humans == 2 && slot >= 0 && worldStateConstructionMenu->IsActive() && worldStateConstructionMenu->HasAppliedCatalog()) {
 						if (worldStateConstructionMenu->PlaceBrain(*worldStateClient, Vector(100 + 100 * slot, 30))) {
 							uiTest.ConstructionTestStage = 1; uiTest.ConstructionActionUpdate = uiTest.SimulationUpdates;
 						}
@@ -3418,6 +3418,11 @@ void RunGameLoop() {
 						uiTest.Log << "construction_preview_capture=" << (saved == 0 ? "passed" : "failed") << '\n' << std::flush;
 						const auto* gun = dynamic_cast<const SceneObject*>(g_PresetMan.GetEntityPreset("HDFirearm", "AK-47", "Ronin.rte"));
 						if (saved == 0 && worldStateConstructionMenu->OpenPicker() && worldStateConstructionMenu->GetPicker()->SelectGroupByName("Weapons") && worldStateConstructionMenu->SelectObject(gun)) {
+							const auto& catalog = worldStateClient->GetConstructionCatalog();
+							const auto* picker = worldStateConstructionMenu->GetPicker();
+							RTEAssert(picker->GetTypeFilter() == catalog.TypeFilter && picker->GetForeignCostMultiplier() == catalog.ForeignMultiplier,
+							          "Construction picker did not apply server catalog");
+							uiTest.Log << "construction_catalog_applied=passed\n" << std::flush;
 							uiTest.ConstructionTestStage = 10; uiTest.ConstructionActionUpdate = uiTest.SimulationUpdates;
 						}
 					} else if (uiTest.ConstructionTestStage == 10 && uiTest.SimulationUpdates >= uiTest.ConstructionActionUpdate + 30) {
