@@ -32,6 +32,14 @@ join test and recorded audio comparison remain separate checks.
 Use `RunDedicatedServerSmoke.ps1 -CheckLateJoinSound -EnableAudio` for the
 new paused-loop-before-connection fixture; run it separately from `-CheckSoundMix`.
 
+The v23 ordinary audio regression (`SoundLoopsV23MixRegression`) also passed
+in 36.28 seconds with two FMOD-enabled clients and 63 updates after disconnect.
+Native MSBuild `Final|x64` compiled and linked successfully; the root client and
+matching server passed `SoundLoopsV23Delivered` in 32.29 seconds. Both clients
+restored the pre-existing paused loop at cursor 29 ms, passed owner-lifetime
+checks, received Stop and exited cleanly; the server continued 62 updates.
+Linux CI run `38491505316` verifies the v23 commit separately.
+
 ## Playback cursor groundwork
 
 `SoundContainer::SeekNetworkPlayback` can move already-playing voices to a
