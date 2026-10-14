@@ -84,6 +84,7 @@
 #include "System/DeliveryValidationTest.h"
 #include "System/WorldStatePurchaseTest.h"
 #include "System/WorldStateBuyMenu.h"
+#include "System/WorldStateConstructionMenu.h"
 #include "System/WorldStateInventoryTest.h"
 #include "System/WorldStateAttachmentTest.h"
 #include "WorldStateCompression.h"
@@ -150,6 +151,7 @@ namespace {
 	unsigned short worldStateClientPort = 8000;
 	std::unique_ptr<WorldStateClientSession> worldStateClient;
 	std::unique_ptr<WorldStateBuyMenu> worldStateBuyMenu;
+	std::unique_ptr<WorldStateConstructionMenu> worldStateConstructionMenu;
 	WorldStateClientReplica worldStateClientReplica;
 	WorldStateSoundPlayback worldStateSoundPlayback;
 	std::ofstream worldStateClientLog;
@@ -235,7 +237,7 @@ namespace {
 			if (worldStateClient) worldStateClient->Disconnect();
 			worldStateClientReplica.Forget();
 			g_FrameMan.SetClientGUIRenderer({});
-			worldStateBuyMenu.reset();
+			worldStateBuyMenu.reset(); worldStateConstructionMenu.reset();
 			worldStateClientAppliedSceneRevision = snapshot.SceneRevision;
 			worldStateClientRejectedSceneRevision = 0;
 			worldStateClientLastObservedSnapshotCount = worldStateClientLastLoggedSnapshotCount = 0;
@@ -331,6 +333,9 @@ namespace {
 		bool DeliveryValidationTest = false;
 		bool RequestPurchaseTest = false;
 		bool RequestBuyMenuTest = false;
+		bool RequestConstructionTest = false, ConstructionTestPassed = false;
+		int ConstructionTestStage = 0;
+		std::uint64_t ConstructionActionUpdate = 0;
 		bool RequirePurchasePolicyTest = false, PurchasePolicyTestObserved = false, RequirePurchasePricingTest = false;
 		bool RequestInventoryTest=false, InventoryInitialObserved=false, InventoryMutationObserved=false, InventoryReuseObserved=false;
 		int BuyMenuTestStage = 0;
@@ -463,6 +468,7 @@ namespace {
 			if (argument == "-debug-run-preflight-only") state.PreflightOnly = true;
 			if (argument == "-debug-run-world-state-purchase") state.RequestPurchaseTest = true;
 			if (argument == "-debug-run-world-state-buy-menu") state.RequestBuyMenuTest = true;
+			if (argument == "-debug-run-world-state-construction") state.RequestConstructionTest = true;
 			if (argument == "-debug-run-world-state-purchase-policy") { state.RequestBuyMenuTest=true; state.RequirePurchasePolicyTest=true; }
 			if (argument == "-debug-run-world-state-purchase-pricing") { state.RequestBuyMenuTest=true; state.RequirePurchasePolicyTest=true; state.RequirePurchasePricingTest=true; }
 			if (argument == "-debug-run-world-state-inventory") state.RequestInventoryTest=true;
@@ -2013,6 +2019,10 @@ namespace {
 		success = success && utf8GlyphRenderPassed && worldStateTransitionPassed && remoteTerrainMutationPassed && hostTerrainMutationPassed && hostEquipmentMutationPassed && remoteEquipmentMutationPassed &&
 		          state.HostSessionTestPassed && clientFailurePassed && worldIdentityStable && replicaSmokePassed && backgroundEquipmentPassed && attachmentsPassed && objectCallbacksPassed && transientPixelReplicaPassed && terrainPatchApplyPassed &&
 		          networkInputApplicationPassed && worldSnapshotPassed && snapshotCompressionPassed && liveSnapshotTransportPassed;
+		if (state.RequestConstructionTest) {
+			state.Log << "world_state_construction_ui=" << (state.ConstructionTestPassed ? "passed" : "failed") << '\n' << std::flush;
+			success = success && state.ConstructionTestPassed;
+		}
 		const double elapsedSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - state.StartTime).count();
 		if (state.RequestInventoryTest) {
 			const bool inventoryPassed=state.InventoryInitialObserved && state.InventoryMutationObserved && state.InventoryReuseObserved;
@@ -2796,7 +2806,7 @@ void RunMenuLoop() {
 		MainMenuGUI::DisconnectedNetworkSession = false;
 		worldStateClientReplica.Forget();
 		g_FrameMan.SetClientGUIRenderer({});
-		worldStateBuyMenu.reset();
+		worldStateBuyMenu.reset(); worldStateConstructionMenu.reset();
 	}
 	g_MenuMan.SetIsInMenuScreen(false);
 }
@@ -2974,7 +2984,7 @@ void RunGameLoop() {
 				                                                                            static_cast<int>(WorldStateProtocol::c_MaxMouseWheelDelta)));
 				inputCommand.ResetActivityVote = g_UInputMan.KeyHeld(SDL_SCANCODE_BACKSPACE);
 				inputCommand.RestartActivityVote = g_UInputMan.KeyHeld(SDL_SCANCODE_BACKSLASH);
-				if ((worldStateBuyMenu && worldStateBuyMenu->BlocksGameplayInput()) || g_UInputMan.KeyPressed(SDLK_F6)) {
+				if ((worldStateBuyMenu && worldStateBuyMenu->BlocksGameplayInput()) || worldStateClient->GetLatestSnapshot().ActivityState == 2 || g_UInputMan.KeyPressed(SDLK_F6)) {
 					const std::uint32_t tick=inputCommand.ClientTick;
 					inputCommand={}; inputCommand.ClientTick=tick;
 				}
@@ -3233,7 +3243,8 @@ void RunGameLoop() {
 					const auto& snapshot = worldStateClient->GetLatestSnapshot();
 					const auto& player = snapshot.Players[slot];
 					if (player.ActiveHuman) {
-						g_FrameMan.ApplyNetworkScreenText(player.ScreenText, static_cast<int>(player.TextBlinkInterval), player.TextCentered);
+						if (snapshot.ActivityState == 2) g_FrameMan.ApplyNetworkScreenText("Place your brain, then press F6 when ready", 0, false);
+						else g_FrameMan.ApplyNetworkScreenText(player.ScreenText, static_cast<int>(player.TextBlinkInterval), player.TextCentered);
 						if (System::IsDebugRun() && !GetDebugRunState().NetworkScreenTextVerified && player.ScreenText == "Network HUD: Привет, Ёжик!") {
 							const bool applied = g_FrameMan.GetScreenText() == player.ScreenText &&
 							    g_FrameMan.GetScreenTextBlinkInterval() == 250 && g_FrameMan.IsScreenTextCentered();
@@ -3327,11 +3338,33 @@ void RunGameLoop() {
 				if (!worldStateBuyMenu) {
 					worldStateBuyMenu=std::make_unique<WorldStateBuyMenu>();
 					g_FrameMan.SetClientGUIRenderer([](BITMAP* target, int screen, const Vector& offset) {
-						if (worldStateBuyMenu) worldStateBuyMenu->Draw(target, screen, offset);
+						if (worldStateConstructionMenu && worldStateConstructionMenu->IsActive()) worldStateConstructionMenu->Draw(target, screen, offset);
+						else if (worldStateBuyMenu) worldStateBuyMenu->Draw(target, screen, offset);
 					});
 				}
 				DebugRunState& uiTest=GetDebugRunState();
-				worldStateBuyMenu->Update(*worldStateClient, !uiTest.RequestBuyMenuTest);
+				if (!worldStateConstructionMenu) worldStateConstructionMenu = std::make_unique<WorldStateConstructionMenu>();
+				worldStateConstructionMenu->Update(*worldStateClient, !uiTest.RequestConstructionTest);
+				if (!worldStateConstructionMenu->IsActive()) worldStateBuyMenu->Update(*worldStateClient, !uiTest.RequestBuyMenuTest);
+				if (uiTest.RequestConstructionTest) {
+					const auto& snapshot = worldStateClient->GetLatestSnapshot();
+					const int slot = worldStateClient->GetAssignedPlayerSlot();
+					const auto humans = std::count_if(snapshot.Players.begin(), snapshot.Players.end(), [](const auto& player) { return player.ActiveHuman; });
+					if (uiTest.ConstructionTestStage == 0 && humans == 2 && slot >= 0 && worldStateConstructionMenu->IsActive()) {
+						if (worldStateConstructionMenu->PlaceBrain(*worldStateClient, Vector(100 + 100 * slot, 30))) {
+							uiTest.ConstructionTestStage = 1; uiTest.ConstructionActionUpdate = uiTest.SimulationUpdates;
+						}
+					} else if (uiTest.ConstructionTestStage == 1 && worldStateConstructionMenu->HasOwnPreview() && worldStateConstructionMenu->LastAccepted() &&
+					           uiTest.SimulationUpdates >= uiTest.ConstructionActionUpdate + 30) {
+						const std::string image = UTF8::PathToString(uiTest.OutputDirectory.filename()) + "/debug-run-construction-preview.png";
+						const int saved = g_FrameMan.SaveScreenToPNGBlocking(image);
+						uiTest.Log << "construction_preview_capture=" << (saved == 0 ? "passed" : "failed") << '\n' << std::flush;
+						if (saved == 0 && worldStateConstructionMenu->SetReady(*worldStateClient, true)) uiTest.ConstructionTestStage = 2;
+					} else if (uiTest.ConstructionTestStage == 2 && snapshot.ActivityState == 4 && slot >= 0 && snapshot.Players[slot].ControlledActorId != 0) {
+						uiTest.ConstructionTestPassed = true; uiTest.ConstructionTestStage = 3;
+						uiTest.Log << "world_state_construction_ui_started=passed\n" << std::flush;
+					}
+				}
 				if (uiTest.RequestBuyMenuTest && uiTest.SimulationUpdates>=60) {
 					if (worldStateBuyMenu->IsSpectator()) { uiTest.BuyMenuTestPassed=true; uiTest.BuyMenuTestStage=4; }
 					else if (uiTest.BuyMenuTestStage==0 && worldStateBuyMenu->GetMenu() && worldStateBuyMenu->IsPolicyReady()) {
@@ -4240,7 +4273,7 @@ int RunCortexCommand(int argc, char** argv) {
 		worldStateSoundPlayback.Clear();
 		worldStateClient.reset();
 		g_FrameMan.SetClientGUIRenderer({});
-		worldStateBuyMenu.reset();
+		worldStateBuyMenu.reset(); worldStateConstructionMenu.reset();
 	}
 	DiscordPresence::Shutdown();
 

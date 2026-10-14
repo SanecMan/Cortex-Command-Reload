@@ -17,7 +17,7 @@ Publication follows the snapshot cadence (20 Hz) while peers are connected.
 Outside editing it sends an empty resident baseline. Client sessions retain the
 latest sequence and clear it on disconnect. A consumer must match scene revision
 before using it. The state does not add residents to MovableMan or execute local
-physics/Lua; a client renderer and construction controls still need integration.
+physics/Lua. The client construction menu renders residents and sends brain placement/readiness requests; ordinary object placement/removal remains incomplete.
 
 `WorldStateConstructionStateTest.cpp` passed MSVC and MinGW GCC, covering Russian
 identities, atomic decode failure, all truncated prefixes, flags, inactive-slot
@@ -37,14 +37,41 @@ checks, revision 1 and 128 further ticks. `ResidentStateDeliveredVisual` passed
 existing menu/gameplay rendering regressions in 52.06 seconds with 63 further
 updates, strict attachments and audio shutdown. The Meson graphical pair also
 passed (`ResidentStateVisual`, 73.84 seconds, 66 further updates).
-Linux run `38573595112` is pending for commit `6c62ee15241`.
+Linux run `38573595112` succeeded for commit `6c62ee15241`.
+
+## Client construction controls
+
+During Editing, clients render native resident-brain sprites from the separate
+construction stream without adding them to local physics or running their scripts.
+Mouse/arrows move the placement cursor; Click/Enter requests brain placement;
+F6 toggles ready/cancel. The server validates placement and all-player readiness
+before starting the native Activity. Pending requests retry the same ID and time
+out after eight seconds. Spectators can see residents but cannot issue commands.
+Scene changes and disconnect clear the previews and pending state.
+
+`Tools/RunDedicatedServerSmoke.ps1 -CheckConstruction -ActivityClass GAScripted
+-ActivityName 'Skirmish Defense' -SceneName 'Ketanot Hills' -CheckMenuConnection
+-RequireAttachmentMatch -EnableAudio` checks two graphical clients, brain
+placement/confirmation, resident rendering capture, readiness, distinct controlled
+actors and continued server updates after disconnect. The automated fixture calls
+the same menu command methods; it does not synthesize physical mouse/key input.
+Captures are `debug-run-construction-preview.png` inside each diagnostic output
+folder and are removed by that folder's normal repeated-run cleanup.
+
+`ConstructionMenuFinalVisual` passed in 51 seconds with two clients and 62 further
+server updates. Both screenshots were inspected: native brain sprites, cursor and
+placement/readiness instructions were visible. `ConstructionMenuHeadlessFinal`
+passed the content/UTF-8/objective/spawn regression in 20.03 seconds with 129
+further ticks and video initialization disabled. These durations are validation
+wall times, not performance comparisons. Ordinary object construction/removal,
+physical-input testing and broader Activity compatibility are still outstanding.
 
 ## Construction command codec foundation
 
 `WorldStateConstructionProtocol.h` reserves envelope message kinds 11
 (`ConstructionRequest`) and 12 (`ConstructionResult`). The v29 snapshot layout
 and existing messages are unchanged. Sessions now route readiness requests and
-their responses and brain placement; ordinary object placement/removal and a client construction UI remain incomplete.
+their responses and brain placement; ordinary object placement/removal remains incomplete.
 This does not yet establish playable networked construction. Placement integration
 must validate content, ownership, scene bounds and native brain placement before
 modifying the authoritative scene.
