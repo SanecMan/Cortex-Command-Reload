@@ -1,5 +1,48 @@
 # World-state protocol
 
+## v24 sound cycle completion under validation
+
+Development sources add FinishBusLoops to session protocol 24 and inner sound
+schema 5. It uses container 0, player -1 and one validated bus index (0..2).
+`AudioMan::FinishIngameLoopingSounds` captures the SFX command while retaining
+the existing local FMOD/headless behavior. Replica playback sets loop count to
+zero without stopping the current sample cycle. The ordinary Lua API is unchanged.
+
+The active-voice journal updates each affected timeline with FinishLoops and
+retains the voice as a finite, non-repeating baseline at its current cursor.
+A paused finishing voice remains available to late joiners until its remaining
+cycle is consumed after resume; expired voices disappear from the baseline.
+Other buses remain unaffected.
+
+The standalone MSVC codec/capture/queue test passed the new action round trip,
+bus/identity rejection, paused finishing baseline, UI bus isolation and current
+cycle tail lifetime. `-CheckFinishLoops` checks connected clients through native
+FMOD loop-count queries and waits for voice expiration without Stop.
+`-CheckFinishingLateJoin` first connects one client, pauses and finishes the
+loop, connects the second client, then resumes both. It additionally requires
+the second client to restore completion state from the baseline.
+
+Both Meson executables compiled and linked. `SoundFinishV24Headless` passed in
+21.31 seconds with two external clients, 125 updates, replica finish/bus-isolation
+checks, UTF-8 input/text/configuration and no video initialization.
+`SoundFinishV24ConnectedFMOD` passed in 59.01 seconds with both clients checking
+native loop count and natural expiration, no Stop, and 63 further server updates.
+`SoundFinishV24LateJoinFMOD` passed in 117.97 seconds: client one received the
+command while paused, client two restored the finishing state from its baseline
+at cursor 45 ms, both resumed and naturally expired, and the server continued
+62 updates after disconnect. Both received a single fixture Play.
+
+An initial staggered trial ended client one before resume. Its timeout allowance
+is now 6,000 updates, with an explicit check that it remains alive when client
+two is ready. Repeating the same output prefix exposed stale readiness reports
+before client startup cleared them. The runner now removes only DebugRun.log
+and WorldStateClient.log in its two validated client output directories before
+starting processes; it rejects paths outside ScreenShots and reparse directories.
+The successful late-join rerun reused the same prefix, exercising that repair.
+These are elapsed test durations, not performance benchmarks; waveform quality
+and sample-accurate synchronization are separate checks. Native Final and Linux
+verification for v24 remain separate stages.
+
 ## v23 active sound baselines under validation
 
 Development sources add a sample cursor and optional remaining fade duration

@@ -17,11 +17,16 @@ param(
     [switch]$CheckSoundMix,
     [switch]$CheckLateJoinSound,
     [switch]$CheckStaggeredSound,
+    [switch]$CheckFinishLoops,
+    [switch]$CheckFinishingLateJoin,
     [switch]$EnableAudio,
     [ValidateRange(60, 600)]
     [int]$TimeoutSeconds = 360
 )
 $ErrorActionPreference = 'Stop'
+if ($CheckFinishingLateJoin) { $CheckStaggeredSound=$true; $CheckFinishLoops=$true }
+if ($CheckFinishLoops) { $CheckSound=$true }
+if ($CheckFinishLoops -and $CheckSoundMix) { throw 'Run loop completion separately from mix changes.' }
 if ($CheckSoundMix) { $CheckSound=$true }
 if ($CheckLateJoinSound) { $CheckSound=$true }
 if ($CheckStaggeredSound) { $CheckSound=$true }
@@ -64,6 +69,20 @@ function Start-PausedSoundFixture {
 foreach ($directory in @((Join-Path $gameDirectory 'ScreenShots'), $logDirectory)) {
     if ((Test-Path -LiteralPath $directory) -and
         ((Get-Item -LiteralPath $directory).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Reparse diagnostic path.' }
+}
+foreach ($index in 1..2) {
+    # Client startup also clears its output, but readiness must not read the
+    # preceding run's reports while the new process is still initializing.
+    $clientDirectory = [IO.Path]::GetFullPath((Join-Path $gameDirectory "ScreenShots\$OutputPrefix-Client$index"))
+    $screenshotsRoot = [IO.Path]::GetFullPath((Join-Path $gameDirectory 'ScreenShots')) + [IO.Path]::DirectorySeparatorChar
+    if (!$clientDirectory.StartsWith($screenshotsRoot, [StringComparison]::OrdinalIgnoreCase)) { throw 'Diagnostic client path escaped screenshots root.' }
+    if (Test-Path -LiteralPath $clientDirectory) {
+        if ((Get-Item -LiteralPath $clientDirectory).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Reparse client diagnostic path.' }
+        foreach ($name in @('DebugRun.log','WorldStateClient.log')) {
+            $reportPath = Join-Path $clientDirectory $name
+            if (Test-Path -LiteralPath $reportPath) { Remove-Item -LiteralPath $reportPath }
+        }
+    }
 }
 New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null
 foreach ($name in @('Server.log','ServerFailure.log','WorldStateServer.log','LogLoading.txt','LogConsole.txt','StdOut.log','StdErr.log')) {
@@ -119,7 +138,7 @@ try {
 		if ($CheckPurchasePolicy) { $purchaseArguments = @('-debug-run-world-state-purchase-policy') }
 		if ($CheckPurchasePricing) { $purchaseArguments = @('-debug-run-world-state-purchase-pricing') }
 		if ($CheckInventory) { $purchaseArguments = @('-debug-run-world-state-inventory') }
-        $frameCount = if ($CheckStaggeredSound -and $index -eq 1) { '1200' } else { '600' }
+        $frameCount = if ($CheckStaggeredSound -and $index -eq 1) { '6000' } else { '600' }
         $client = Start-Process -FilePath $clientBinary -WorkingDirectory $gameDirectory -WindowStyle Hidden -PassThru -ArgumentList (@(
             '-debug-run',$frameCount,'-debug-run-output',"$OutputPrefix-Client$index",$(if ($CheckMenuConnection) { '-debug-run-menu-connect' } else { '-world-state-client' }),'127.0.0.1',"$port"
         )+$purchaseArguments+$audioArguments)
@@ -136,6 +155,13 @@ try {
             while ((Read-Report $firstReport) -notmatch '(?m)^world_state_sound_bus_pause=1') {
                 Check-Time; if ($client.HasExited -or $server.HasExited) { throw 'First peer exited before sound pause.' }
                 Start-Sleep -Milliseconds 100
+            }
+            if ($CheckFinishingLateJoin) {
+                $server.StandardInput.WriteLine('debug-sound-finish'); $server.StandardInput.Flush()
+                while ((Read-Report $firstReport) -notmatch '(?m)^world_state_sound_finish_received=passed') {
+                    Check-Time; if ($client.HasExited -or $server.HasExited) { throw 'First peer exited before loop finish.' }
+                    Start-Sleep -Milliseconds 100
+                }
             }
         }
     }
@@ -184,7 +210,12 @@ try {
                 $mixReadyToStop = $mixResumed -and $resumedSeen
             }
             if ($soundStarted -and !$soundStopped -and $soundPlayed -and $mixReadyToStop) {
-                $server.StandardInput.WriteLine('debug-sound-stop'); $server.StandardInput.Flush(); $soundStopped=$true
+                if ($CheckStaggeredSound -and $clients[0].HasExited) { throw 'Existing peer exited before the later peer was ready.' }
+                if ($CheckFinishLoops) {
+                    $server.StandardInput.WriteLine('debug-sound-mix-resume')
+                    if (!$CheckFinishingLateJoin) { $server.StandardInput.WriteLine('debug-sound-finish') }
+                } else { $server.StandardInput.WriteLine('debug-sound-stop') }
+                $server.StandardInput.Flush(); $soundStopped=$true
             }
         }
         Check-Time
@@ -291,7 +322,10 @@ try {
         if ($CheckSoundMix -and ($clientReport -notmatch '(?m)^world_state_sound_bus_pause=1' -or
             $clientReport -notmatch '(?s)world_state_sound_bus_pause=1.*world_state_sound_bus_pause=0')) { throw 'Network sound group pause/resume failed.' }
         if ($CheckSound -and (!$soundStarted -or !$soundStopped -or $clientReport -notmatch '(?m)^world_state_sound_play=passed' -or
-            $clientReport -notmatch '(?m)^world_state_sound_stop=passed')) { throw 'Network sound playback/lifecycle fixture failed.' }
+            (!$CheckFinishLoops -and $clientReport -notmatch '(?m)^world_state_sound_stop=passed'))) { throw 'Network sound playback/lifecycle fixture failed.' }
+        if ($CheckFinishLoops -and ($clientReport -notmatch '(?m)^world_state_sound_finish_received=passed' -or
+            $clientReport -notmatch '(?m)^world_state_sound_finish_completed=passed' -or $clientReport -match '(?m)^world_state_sound_stop=passed')) { throw 'Loop did not finish its cycle without Stop.' }
+        if ($CheckFinishingLateJoin -and $index -eq 2 -and $clientReport -notmatch '(?m)^world_state_sound_finish_received=passed source=baseline') { throw 'Finishing state missing from late-join baseline.' }
         if ($EnableAudio -and $CheckSound -and ($clientReport -notmatch '(?m)^world_state_sound_play=passed audio_enabled=1' -or $clientReport -notmatch '(?m)^audio_owner_lifetime=passed')) { throw 'FMOD playback was not enabled.' }
         if ($CheckLateJoinSound -and $clientReport -notmatch '(?m)^world_state_sound_late_join=passed cursor_ms=[1-9][0-9]* paused=1') { throw 'Client did not restore the paused pre-existing loop.' }
         if ($CheckStaggeredSound) {
