@@ -316,6 +316,7 @@ function Destroy(self) count(self) end
 }
 
 bool WorldStateClientReplica::TestBackgroundEquipment() {
+	g_MovableMan.CommitPendingAdditions();
 	std::vector<MovableObject*> before; CollectLocalObjects(before);
 	const Entity* body = g_PresetMan.GetEntityPreset("AHuman", "Fat Culled Clone", "Base.rte");
 	const Entity* gunPreset = g_PresetMan.GetEntityPreset("HDFirearm", "Auto Pistol", "Coalition.rte");
@@ -336,6 +337,9 @@ bool WorldStateClientReplica::TestBackgroundEquipment() {
 	state.ClassName = body->GetClassName(); state.ModuleName = body->GetModuleName(); state.PresetName = body->GetPresetName();
 	state.Flags = WorldStateProtocol::c_ObjectFlagActor; state.Team = 0; state.Health = 42;
 	state.PositionX = 100000; state.PositionY = 100000;
+	// A replicated actor must survive simulation spawn guards and retain its
+	// authoritative state, even when first observed during a fast impulse.
+	state.VelocityX = 501; state.ActorStatus = Actor::INACTIVE;
 	state.BackgroundDevice = {true, gun->GetClassName(), gun->GetModuleName(), gun->GetPresetName(), true,
 	    gun->GetMagazine()->GetClassName(), gun->GetMagazine()->GetModuleName(), gun->GetMagazine()->GetPresetName(), 17};
 	WorldStateClientReplica replica;
@@ -350,6 +354,13 @@ bool WorldStateClientReplica::TestBackgroundEquipment() {
 	};
 	bool passed = true;
 	AHuman* human = apply();
+	if (!human || human->IsSetToDelete() || human->GetVel().GetX() != state.VelocityX ||
+	    human->GetPos() != Vector(state.PositionX, state.PositionY) || human->GetStatus() != Actor::INACTIVE) {
+		snapshot.Objects.clear(); replica.Apply(snapshot); replica.Forget();
+		return false;
+	}
+	g_MovableMan.CommitPendingAdditions();
+	if (!g_MovableMan.IsActor(human)) { replica.Forget(); return false; }
 	auto* original = human ? dynamic_cast<HDFirearm*>(human->GetEquippedBGItem()) : nullptr;
 	passed = original && original->GetMagazine() && original->GetMagazine()->GetRoundCount() == 17;
 	for (const int rounds : {3, -1}) {
@@ -584,17 +595,22 @@ WorldStateClientReplica::ApplyResult WorldStateClientReplica::Apply(const WorldS
 				}
 				continue;
 			}
-			const bool fieldsApplied = ApplyFields(*object, state);
-			if (state.ClassName == "AHuman") {
-				if (fieldsApplied) ++result.HumanEquipmentStatesApplied;
-				else ++result.MissingPresets;
-			} else if (!fieldsApplied) ++result.MissingPresets;
+			// AddActor publishes its team roster before the remaining authority is applied.
+			object->SetTeam(state.Team);
 			if (!g_MovableMan.AddMO(object)) {
 				object->DestroyScriptState();
 				delete object;
 				++result.MissingPresets;
 				continue;
 			}
+			// AddMO performs simulation spawn initialization (speed/deletion guards,
+			// terrain displacement and inactive-status reset). Apply authority after
+			// that initialization so a first snapshot does not lose or move the object.
+			const bool fieldsApplied = ApplyFields(*object, state);
+			if (state.ClassName == "AHuman") {
+				if (fieldsApplied) ++result.HumanEquipmentStatesApplied;
+				else ++result.MissingPresets;
+			} else if (!fieldsApplied) ++result.MissingPresets;
 			clientOwned = true;
 			++result.Spawned;
 			activeObjects.insert(object);

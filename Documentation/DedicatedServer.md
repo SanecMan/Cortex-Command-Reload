@@ -184,6 +184,43 @@ content/UTF-8/objective headless suite also passed (`ConnectedRosterHeadless`,
 objective stage; the new roster-restart CI scenario is pending. Construction
 editor parity and generic mid-match Lua player admission remain incomplete.
 
+### Authoritative replica spawn initialization
+
+`AddMO` runs normal simulation spawn initialization, including a >500 velocity
+deletion guard, inactive-actor status reset and terrain displacement. Applying
+the received state before that call could therefore discard or alter a new
+replica. Cloned replicas now receive their team before admission (for the native
+team roster), then the authoritative fields after admission. Local spawn rules
+for ordinary simulation are unchanged.
+
+The native background-equipment fixture now also creates an inactive actor with
+velocity 501, verifies its status/velocity/deletion state, commits pending adds
+and requires the actor to remain registered. The corrected fixture failed with
+the old order (`ReplicaSpawnCorrectBefore`) and passed with the new order
+(`ReplicaSpawnCorrectAfter`). Earlier `ReplicaSpawnBeforeVisual` and
+`ReplicaSpawnAfterVisual` results used a misplaced test assignment and are not
+valid before/after evidence.
+
+Two Meson graphical Bunker Breach admission runs passed exact sampled membership,
+attachment state, menu connections and audio shutdown: `ReplicaSpawnPairAfter`
+(60.18 seconds, 67 further updates) and `ReplicaSpawnPairRepeat` (103.66 seconds,
+63 further updates, concurrent native linking). These are test durations, not
+performance measurements. The earlier missing Exterminator's exact velocity was
+not captured, so these results establish the deterministic spawn defect and
+its correction; they do not prove the cause of every historical membership
+mismatch.
+
+The same native fixture now runs in the device-free simulation preflight after
+queued MOID drawings and worker tasks finish. It verifies exact spawn position
+as well as status/velocity and background equipment. The portable runner requires
+`headless_replica_spawn=passed`; Linux CI therefore cannot pass by silently
+skipping this check. Windows `ReplicaSpawnFinalHeadless` passed the full
+content/UTF-8/objective and two-client suite in 34.56 seconds with 123 further
+ticks and no video initialization.
+
+Linux run `38557226570` passed the preceding Army admission stage, including the
+actual-script LuaJIT loadout test and delayed connections in both Army modes.
+
 ### Restart after disconnects or with an empty server
 
 Before starting a new match, the session now deactivates human slots that have

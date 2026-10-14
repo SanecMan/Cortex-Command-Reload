@@ -3825,7 +3825,12 @@ int RunCortexCommand(int argc, char** argv) {
 						}
 						++updates;
 					}
-					contentPassed = started && particleMoved && updates == GetDebugRunState().UpdateLimit &&
+					g_MovableMan.CompleteQueuedMOIDDrawings();
+					g_ThreadMan.GetPriorityThreadPool().wait_for_tasks();
+					g_ThreadMan.GetBackgroundThreadPool().wait_for_tasks();
+					const bool replicaSpawnPassed = started && WorldStateClientReplica::TestBackgroundEquipment();
+					GetDebugRunState().Log << "headless_replica_spawn=" << (replicaSpawnPassed ? "passed" : "failed") << '\n' << std::flush;
+					contentPassed = started && replicaSpawnPassed && particleMoved && updates == GetDebugRunState().UpdateLimit &&
 					    g_TimerMan.GetSimUpdateCount() >= updates && SDL_WasInit(SDL_INIT_VIDEO) == 0 && !g_WindowMan.GetWindow();
 					if (!headlessServer && contentPassed) {
 						WorldStateServerSession loopback;
