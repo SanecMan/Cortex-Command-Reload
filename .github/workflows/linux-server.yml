@@ -63,6 +63,10 @@ jobs:
         run: |
           g++-13 -std=c++20 -Wall -Wextra -I Source/System Tools/WorldStateConstructionStateTest.cpp -o build-server/construction-state-test
           build-server/construction-state-test
+      - name: Verify construction catalog metadata codec
+        run: |
+          g++-13 -std=c++20 -Wall -Wextra -I Source/System Tools/WorldStateConstructionCatalogTest.cpp -o build-server/construction-catalog-test
+          build-server/construction-catalog-test
       - name: Verify scene load generations
         run: |
           g++-13 -std=c++20 -Wall -Wextra -I Source/System Tools/SceneLoadGenerationTest.cpp -o build-server/scene-generation-test

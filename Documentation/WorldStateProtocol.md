@@ -1,3 +1,30 @@
+## Construction catalog codec foundation
+
+WorldStateConstructionCatalog.h reserves optional message kind 14 independently
+of existing v29 snapshots, requests and resident state. It carries nonzero scene
+revision, player slot 0..3, UTF-8 native-module/module-space names, nonempty type
+filter, finite nonnegative foreign cost multiplier, strict show-foreign boolean
+and up to 128 visible assembly-group names. Empty native module means all-native
+pricing; empty module space means all loaded modules. Strings are at most 1024
+bytes with no embedded NUL. The packet limit is 256 KiB. Decode commits both
+catalog and sequence only after full validation.
+
+This is only the codec foundation. Transport publication, session caching and
+application to ObjectPickerGUI are not integrated yet; current catalog behavior
+and the shipped game binaries are unchanged by this isolated header/test.
+The existing MessageType enum is unchanged; the reserved kind is explicitly
+encoded by this extension until routing integration.
+
+The standalone test passed MSVC and MinGW GCC, including Russian names, round
+trip, all truncated prefixes, malformed envelope/version/type/reserved/length,
+zero sequence/revision, invalid slot and boolean, decoder NaN/invalid UTF-8,
+encoder negative/NaN/Infinity/NUL/oversized strings and groups, maximum valid
+group/string payload and oversized packets. Failure leaves outputs unchanged.
+Linux CI includes the same test. Existing shipped-server content/UTF-8/objective/
+spawn regression passed in 19.84 seconds with two device-free peers, 129 further
+ticks and video disabled (CatalogFoundationRegression). This proves existing
+runtime behavior still passes, not that catalog synchronization is implemented.
+
 # World-state protocol
 
 ## Resident-brain construction state
