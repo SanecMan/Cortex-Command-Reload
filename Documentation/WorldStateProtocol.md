@@ -320,6 +320,16 @@ The intermittent reconnect fixture is not declared fixed: additional logs now
 record restart success, bound port, connect/receive state and error, and each
 version trial's encoding/compression, rejection and snapshot counts. This retains
 all existing assertions and supplies evidence on the next recurrence.
+A delivered-root attempt later failed initial reconnection (before version
+trials); its construction/terrain checks passed but its overall result is
+excluded. Receive diagnostics now log connected/snapshot/count/port/error for
+every wait. Two trace runs passed with both clients (53.64 and 51.28 seconds),
+using the same output prefix. The receive wait predicate was then made consistent
+with its return invariant: it waits for both connection and snapshot, retaining
+the five-second deadline and all rejection/retry assertions. This prevents a
+possible early exit if a snapshot precedes the connection event; the earlier
+intermittent failure's cause remains unproven. `ConstructionTerrainReadyVisual` 
+passed in 54.51 seconds with 63 further updates after that change.
 Linux cross-peer authorization run `38588875168` succeeded for `1ec61b9636d`.
 
 ### Brain placement and native start

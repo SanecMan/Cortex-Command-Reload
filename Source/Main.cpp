@@ -1506,13 +1506,15 @@ namespace {
 		bool ready = server.StartServer(0, 1, "127.0.0.1");
 		auto receive = [&]() {
 			const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-			while (!client.HasSnapshot() && client.GetConnectionError().empty() && std::chrono::steady_clock::now() < deadline) {
+			while (!(client.IsConnected() && client.HasSnapshot()) && client.GetConnectionError().empty() && std::chrono::steady_clock::now() < deadline) {
 				std::vector<WorldStateTransport::ReceivedPacket> packets;
 				server.Poll(packets);
 				server.BroadcastSnapshot(snapshot, 1);
 				client.Update();
 				std::this_thread::sleep_for(std::chrono::milliseconds(5));
 			}
+			log << "client_failure_receive connected=" << client.IsConnected() << " snapshot=" << client.HasSnapshot()
+			    << " count=" << client.GetReceivedSnapshotCount() << " port=" << server.GetBoundPort() << " error=" << client.GetConnectionError() << '\n' << std::flush;
 			return client.IsConnected() && client.HasSnapshot();
 		};
 		ready = ready && client.Connect("127.0.0.1", server.GetBoundPort()) && receive();
