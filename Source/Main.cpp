@@ -3499,7 +3499,8 @@ int RunCortexCommand(int argc, char** argv) {
 					GUIFont* iconFont = g_FrameMan.GetLargeFont();
 					BITMAP* rawPixels = create_bitmap_ex(8, 80, 24);
 					BITMAP* utf8Pixels = create_bitmap_ex(8, 80, 24);
-					iconsPassed = iconFont && rawPixels && utf8Pixels;
+					BITMAP* atlas = ContentFile("Base.rte/GUIs/Skins/FontLarge.png").GetAsBitmap();
+					iconsPassed = iconFont && rawPixels && utf8Pixels && atlas;
 					if (iconsPassed) {
 						AllegroBitmap rawTarget(rawPixels), utf8Target(utf8Pixels);
 						for (unsigned int icon : {200U, 207U, 217U, 219U, 229U}) {
@@ -3509,21 +3510,50 @@ int RunCortexCommand(int argc, char** argv) {
 							clear_to_color(rawPixels, 0); clear_to_color(utf8Pixels, 0);
 							iconFont->Draw(&rawTarget, 2, 2, raw);
 							iconFont->Draw(&utf8Target, 2, 2, encoded);
-							iconsPassed = iconsPassed && iconFont->CalculateWidth(raw) == iconFont->CalculateWidth(raw[0]) &&
-							    iconFont->CalculateWidth(raw) == iconFont->CalculateWidth(encoded) &&
-							    iconFont->CalculateHeight(raw) == iconFont->CalculateHeight(encoded);
-							int visiblePixels = 0;
+							iconsPassed = iconsPassed && iconFont->CalculateWidth(raw) == iconFont->CalculateWidth(raw[0]) && iconFont->SupportsCodepoint(icon);
+							const int height = iconFont->GetFontHeight();
+							const int sourceY = ((icon - 32) / 16) * height;
+							const int separator = getpixel(atlas, 0, 0), background = getpixel(atlas, atlas->w - 1, 0);
+							int sourceX = 1;
+							for (unsigned int column = 0; column < (icon - 32) % 16; ++column) {
+								while (sourceX < atlas->w && getpixel(atlas, sourceX, sourceY) != separator) ++sourceX;
+								++sourceX;
+							}
+							int endX = sourceX;
+							while (endX < atlas->w && getpixel(atlas, endX, sourceY) != separator) ++endX;
+							const int width = endX - sourceX - 1;
+							iconsPassed = iconsPassed && iconFont->CalculateWidth(raw) == width + iconFont->GetKerning();
+							int visiblePixels = 0, unicodePixels = 0, differences = 0;
 							for (int row = 0; row < rawPixels->h; ++row) for (int column = 0; column < rawPixels->w; ++column) {
 								const int pixel = getpixel(rawPixels, column, row);
 								if (pixel) ++visiblePixels;
-								iconsPassed = iconsPassed && pixel == getpixel(utf8Pixels, column, row);
+								const int unicodePixel = getpixel(utf8Pixels, column, row);
+								if (unicodePixel) ++unicodePixels;
+								if (pixel != unicodePixel) ++differences;
+								int expected = 0;
+								if (column >= 2 && column < 2 + width && row >= 2 && row < 2 + height) {
+									const int atlasPixel = getpixel(atlas, sourceX + column - 2, sourceY + row - 2);
+									if (atlasPixel != background) expected = atlasPixel;
+								}
+								iconsPassed = iconsPassed && pixel == expected;
 							}
 							// Atlas slot 207 is the blank spacer in one-handed reload strings.
 							iconsPassed = iconsPassed && (icon == 207U ? visiblePixels == 0 : visiblePixels > 0);
+							iconsPassed = iconsPassed && unicodePixels > 0 && differences > 0;
 							GetDebugRunState().Log << "legacy_hud_icon=" << icon << " width=" << iconFont->CalculateWidth(raw)
 							    << " byte_width=" << iconFont->CalculateWidth(raw[0]) << " encoded_width=" << iconFont->CalculateWidth(encoded)
-							    << " pixels=" << visiblePixels << '\n';
+							    << " pixels=" << visiblePixels << " unicode_pixels=" << unicodePixels << " differences=" << differences << '\n';
 						}
+						std::string missingGlyph;
+						UTF8::AppendCodepoint(missingGlyph, 0x10FFFF);
+						clear_to_color(rawPixels, 0); clear_to_color(utf8Pixels, 0);
+						iconFont->Draw(&rawTarget, 2, 2, "?");
+						iconFont->Draw(&utf8Target, 2, 2, missingGlyph);
+						bool fallbackPassed = !iconFont->SupportsCodepoint(0x10FFFF) && iconFont->CalculateWidth(missingGlyph) == iconFont->CalculateWidth("?");
+						for (int row = 0; row < rawPixels->h; ++row) for (int column = 0; column < rawPixels->w; ++column)
+							fallbackPassed = fallbackPassed && getpixel(rawPixels, column, row) == getpixel(utf8Pixels, column, row);
+						GetDebugRunState().Log << "utf8_missing_glyph_fallback=" << (fallbackPassed ? "passed" : "failed") << '\n' << std::flush;
+						iconsPassed = iconsPassed && fallbackPassed;
 					}
 					if (rawPixels) destroy_bitmap(rawPixels);
 					if (utf8Pixels) destroy_bitmap(utf8Pixels);

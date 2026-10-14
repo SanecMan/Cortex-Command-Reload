@@ -182,7 +182,7 @@ void GUIFont::Draw(GUIBitmap* Bitmap, int X, int Y, const std::string& Text, uns
 	for (std::size_t i = 0; i < Text.size();) {
 		std::uint32_t codePoint = 0;
 		std::size_t byteCount = 1;
-		DecodeFontGlyph(Text, i, codePoint, byteCount);
+		const bool legacyByte = DecodeFontGlyph(Text, i, codePoint, byteCount);
 		if (codePoint == '\n') {
 			Y += m_FontHeight;
 			X = initX;
@@ -199,7 +199,8 @@ void GUIFont::Draw(GUIBitmap* Bitmap, int X, int Y, const std::string& Text, uns
 			continue;
 		}
 
-		if (codePoint >= m_CharIndexCap && m_TrueTypeFont) {
+		const bool useAtlas = UseBitmapFontGlyph(codePoint, legacyByte, m_CharIndexCap);
+		if (!useAtlas && m_TrueTypeFont) {
 			if (const TrueTypeGlyph* glyph = GetTrueTypeGlyph(codePoint)) {
 				if (Shadow) DrawTrueTypeGlyph(Bitmap, X + 1, Y + 1, *glyph, Shadow);
 				const auto foreground = m_CurrentBitmap == m_Font ? m_UnicodeDefaultColor : m_CurrentColor;
@@ -208,13 +209,14 @@ void GUIFont::Draw(GUIBitmap* Bitmap, int X, int Y, const std::string& Text, uns
 			} else {
 				const unsigned char c = '?';
 				const int charWidth = m_Characters[c].m_Width;
-				SetRect(&Rect, m_Characters[c].m_Offset, 0, m_Characters[c].m_Offset + charWidth, m_FontHeight);
+				const int offY = ((c - 32) / 16) * m_FontHeight;
+				SetRect(&Rect, m_Characters[c].m_Offset, offY, m_Characters[c].m_Offset + charWidth, offY + m_FontHeight);
 				if (Shadow && FSC) FSC->m_Bitmap->DrawTrans(Bitmap, X + 1, Y + 1, &Rect);
 				Surf->DrawTrans(Bitmap, X, Y, &Rect);
 				X += charWidth + m_Kerning;
 			}
 		} else {
-			unsigned char c = codePoint < m_CharIndexCap ? static_cast<unsigned char>(codePoint) : static_cast<unsigned char>('?');
+			unsigned char c = useAtlas ? static_cast<unsigned char>(codePoint) : static_cast<unsigned char>('?');
 			int CharWidth = m_Characters[c].m_Width;
 			int offX = m_Characters[c].m_Offset;
 			int offY = ((c - 32) / 16) * m_FontHeight;
@@ -330,7 +332,7 @@ int GUIFont::CalculateWidth(const std::string& Text) {
 	for (std::size_t i = 0; i < Text.size();) {
 		std::uint32_t codePoint = 0;
 		std::size_t byteCount = 1;
-		DecodeFontGlyph(Text, i, codePoint, byteCount);
+		const bool legacyByte = DecodeFontGlyph(Text, i, codePoint, byteCount);
 		// Reset line counting if newline encountered
 		if (codePoint == '\n') {
 			if (Width > WidestLine) {
@@ -344,7 +346,7 @@ int GUIFont::CalculateWidth(const std::string& Text) {
 			i += byteCount;
 			continue;
 		}
-		Width += GetCodepointWidth(codePoint) + m_Kerning;
+		Width += GetCodepointWidth(codePoint, legacyByte) + m_Kerning;
 		i += byteCount;
 	}
 	if (Width > WidestLine) {
@@ -374,7 +376,7 @@ int GUIFont::CalculateHeight(const std::string& Text, int MaxWidth) {
 	for (std::size_t i = 0; i < Text.size();) {
 		std::uint32_t codePoint = 0;
 		std::size_t byteCount = 1;
-		DecodeFontGlyph(Text, i, codePoint, byteCount);
+		const bool legacyByte = DecodeFontGlyph(Text, i, codePoint, byteCount);
 
 		// Add the new line's height if newline encountered
 		if (codePoint == '\n') {
@@ -391,7 +393,7 @@ int GUIFont::CalculateHeight(const std::string& Text, int MaxWidth) {
 			lastSpacePos = i;
 		}
 
-		Width += GetCodepointWidth(codePoint) + m_Kerning;
+		Width += GetCodepointWidth(codePoint, legacyByte) + m_Kerning;
 		if (MaxWidth > 0 && Width > MaxWidth) {
 			// Rewind to the last space, and do line break, but only if we've passed a space since last wrap
 			if (lastSpacePos > 0) {
@@ -473,14 +475,14 @@ int GUIFont::GetKerning() const {
 }
 
 bool GUIFont::SupportsCodepoint(std::uint32_t codePoint) {
-	if (codePoint < m_CharIndexCap) {
+	if (UseBitmapFontGlyph(codePoint, false, m_CharIndexCap)) {
 		return codePoint >= 32 && m_Characters[codePoint].m_Width > 0;
 	}
 	return m_TrueTypeFont && stbtt_FindGlyphIndex(&m_TrueTypeFont->m_Info, static_cast<int>(codePoint)) != 0 && GetTrueTypeGlyph(codePoint);
 }
 
 const GUIFont::TrueTypeGlyph* GUIFont::GetTrueTypeGlyph(std::uint32_t codePoint) {
-	if (!m_TrueTypeFont) {
+	if (!m_TrueTypeFont || stbtt_FindGlyphIndex(&m_TrueTypeFont->m_Info, static_cast<int>(codePoint)) == 0) {
 		return nullptr;
 	}
 	if (const auto existing = m_TrueTypeFont->m_Glyphs.find(codePoint); existing != m_TrueTypeFont->m_Glyphs.end()) {
@@ -510,8 +512,8 @@ const GUIFont::TrueTypeGlyph* GUIFont::GetTrueTypeGlyph(std::uint32_t codePoint)
 	return &m_TrueTypeFont->m_Glyphs.emplace(codePoint, std::move(glyph)).first->second;
 }
 
-int GUIFont::GetCodepointWidth(std::uint32_t codePoint) {
-	if (codePoint < m_CharIndexCap) {
+int GUIFont::GetCodepointWidth(std::uint32_t codePoint, bool legacyByte) {
+	if (UseBitmapFontGlyph(codePoint, legacyByte, m_CharIndexCap)) {
 		return m_Characters[codePoint].m_Width;
 	}
 	if (const TrueTypeGlyph* glyph = GetTrueTypeGlyph(codePoint)) {

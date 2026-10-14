@@ -6,7 +6,7 @@ int main() {
 	std::size_t count = 0;
 	for (unsigned int icon : {200U, 207U, 217U, 219U, 229U}) {
 		const std::string raw(1, static_cast<char>(icon));
-		RTE::DecodeFontGlyph(raw, 0, glyph, count);
+		if (!RTE::DecodeFontGlyph(raw, 0, glyph, count) || !RTE::UseBitmapFontGlyph(glyph, true, 256)) return 7;
 		if (glyph != icon || count != 1) return 1;
 		if (RTE::UTF8::Decode(raw, 0, glyph, count) || glyph != 0xFFFDU) return 2;
 	}
@@ -22,5 +22,7 @@ int main() {
 	}
 	RTE::DecodeFontGlyph(text, text.size(), glyph, count);
 	if (glyph != 0 || count != 0) return 6;
+	if (RTE::DecodeFontGlyph("È", 0, glyph, count) || glyph != 200 || count != 2 || RTE::UseBitmapFontGlyph(glyph, false, 256)) return 8;
+	if (!RTE::UseBitmapFontGlyph('A', false, 256) || RTE::UseBitmapFontGlyph(1046, false, 256)) return 9;
 	std::cout << "font_glyph_decode=passed\n";
 }

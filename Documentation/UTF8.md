@@ -1,5 +1,25 @@
 # UTF-8 text support
 
+Unicode text and legacy bitmap symbols are separate. ASCII uses the original
+bitmap style. Valid non-ASCII UTF-8 uses the TrueType fallback even when its
+code point is below 256: U+00C8 is the letter È, whereas a standalone byte 200
+still selects the ammo icon. Drawing, width, height and glyph coverage use the
+same selection rule. A missing TrueType glyph uses the atlas question mark with
+its correct row and width, rather than the font's .notdef box or an unrelated
+bitmap symbol. Valid byte pairs in old symbol strings remain inherently
+ambiguous and are interpreted as UTF-8; new text should always be UTF-8.
+
+`UnicodeAtlasFallback` passed device-free content/simulation and two-client
+input/UTF-8 checks in 18.16 seconds with 127 ticks. Raw slots 200, 207, 217, 219,
+229 matched the source FontLarge PNG pixel for pixel; the Unicode letters with
+those scalar values produced different nonempty rasters. U+10FFFF matched `?`
+in both pixels and measured width. Cyrillic retained its expected palette color.
+`UnicodeAtlasVisual` passed two menu-connected clients, reload HUD and clean
+audio shutdown in 57.63 seconds with 65 updates after disconnect. These elapsed
+durations describe test runs, not performance comparisons. Native Final is
+being built separately. The older encoded-index icon comparison below describes
+the earlier implementation and is superseded by the direct-atlas regression.
+
 Legacy HUD icons remain compatible with the bitmap atlas: font drawing and
 measurement preserve an isolated non-UTF-8 byte as its original unsigned atlas
 index. Valid UTF-8 is always decoded as Unicode. This rule belongs only to the

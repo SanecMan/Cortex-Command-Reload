@@ -133,7 +133,7 @@ namespace RTE {
 		int m_Leading; // Spacing between lines
 
 		const TrueTypeGlyph* GetTrueTypeGlyph(std::uint32_t codePoint);
-		int GetCodepointWidth(std::uint32_t codePoint);
+		int GetCodepointWidth(std::uint32_t codePoint, bool legacyByte = false);
 		void DrawTrueTypeGlyph(GUIBitmap* bitmap, int x, int y, const TrueTypeGlyph& glyph, unsigned long color);
 	};
 } // namespace RTE
