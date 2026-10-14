@@ -88,6 +88,32 @@ Its total verification time was 167.71 seconds including startup, not a benchmar
 
 ## Connection failure handling
 
+### Extended device-free client probes
+
+`--probe-client ADDRESS PORT --probe-seconds 60 --input-silence` keeps a probe
+connected for at least 60 seconds, pausing neutral input for the last two seconds
+of each six-second period. Duration is bounded to 3..3600 seconds; the deadline
+allows another 30 seconds for startup/world reception. `--screen-text` remains
+optional. No game content, graphics or audio devices are loaded by these probes.
+
+The portable runner accepts `--probe-seconds`, `--input-silence`,
+`--activity-class`, `--activity`, `--scene` and `--require-players 0..2`.
+It requires repeated timeout warnings for each assigned active slot, advancing
+populated snapshots and successful client exits. Each client's assigned slot is
+reported; spectator connections do not establish multi-player control coverage.
+Use, for example:
+
+```powershell
+python Tools/run_server_smoke.py --exe CortexCommandServer.exe --game-dir . --output-prefix BrainVsBrainSoak --timeout 180 --probe-clients --probe-seconds 30 --input-silence --activity-class GAScripted --activity "Brain vs Brain" --scene "Fredeleig Bunkers" --require-players 2
+```
+
+`ClientSilenceSoak` passed a 60-second Tutorial connection with two processes:
+both received 1199 snapshots and 3594 advancing ticks, with 10 silence windows.
+Tutorial limits humans to one, so the assigned slots were 0 and spectator (-1).
+The full run took 76.31 seconds with no video initialization. This is a soak
+diagnostic, not a gameplay/visual check. Invalid duration values 2, 3601, text
+and a missing duration were rejected with exit code 2.
+
 The authoritative host neutralizes held buttons, mouse/analog input after one
 second without an accepted fresh input command. This uses a monotonic wall clock,
 independent of simulation speed. The transport connection and player assignment

@@ -19,9 +19,21 @@ def main():
     parser.add_argument('--self-test', action='store_true', help='Run the server binary device-free diagnostics before startup checks.')
     parser.add_argument('--probe-clients', action='store_true', help='Connect two separate device-free client processes to the live server.')
     parser.add_argument('--screen-text', action='store_true', help='Require server HUD messages in the separate client probes.')
+    parser.add_argument('--probe-seconds', type=int, default=3, help='Duration of each client connection (3..3600 seconds).')
+    parser.add_argument('--input-silence', action='store_true', help='Pause client input for two seconds every six seconds.')
+    parser.add_argument('--activity-class', default='GATutorial')
+    parser.add_argument('--activity', default='Tutorial Mission')
+    parser.add_argument('--scene', default='Tutorial Bunker')
+    parser.add_argument('--require-players', type=int, default=0, help='Require this many distinct active player slots (0..2).')
     args = parser.parse_args()
     if args.screen_text and not args.probe_clients:
         parser.error('--screen-text requires --probe-clients.')
+    if not 3 <= args.probe_seconds <= 3600 or (args.input_silence and (not args.probe_clients or args.probe_seconds < 12)):
+        parser.error('Use probe duration 3..3600; input silence requires clients and at least 12 seconds.')
+    if not 0 <= args.require_players <= 2 or (args.require_players and not args.probe_clients):
+        parser.error('Require players must be 0..2 and needs client probes.')
+    if any(not value or '\n' in value or '\r' in value for value in (args.activity_class, args.activity, args.scene)):
+        parser.error('Activity and scene must be nonempty single-line preset names.')
     if not re.fullmatch(r'[A-Za-z0-9_-]{1,48}', args.output_prefix) or args.timeout <= 0:
         parser.error('Use a simple output prefix and a positive timeout.')
     game = args.game_dir.resolve(strict=True)
@@ -43,8 +55,8 @@ def main():
                 path.unlink()
     config = root / 'сервер.ini'
     config.write_text('[Server]\nListenAddress = 0.0.0.0\nPort = 1\nPlayers = 2\n'
-                      'Name = Сервер config Ж\nActivityClass = GATutorial\nActivity = Tutorial Mission\n'
-                      'Scene = Tutorial Bunker\nIncludeMods = false\nLogDirectory = "' + str(logs) + '"\n', encoding='utf-8')
+                      'Name = Сервер config Ж\nActivityClass = ' + args.activity_class + '\nActivity = ' + args.activity + '\n'
+                      'Scene = ' + args.scene + '\nIncludeMods = false\nLogDirectory = "' + str(logs) + '"\n', encoding='utf-8')
     environment = os.environ.copy()
     environment.pop('DISPLAY', None)
     environment.pop('WAYLAND_DISPLAY', None)
@@ -111,7 +123,7 @@ def main():
                     try:
                         for index in range(2):
                             output = streams.enter_context((root / f'client-{index}.log').open('wb'))
-                            probes.append(subprocess.Popen([str(binary), '--probe-client', '127.0.0.1', str(port)] + (['--screen-text'] if args.screen_text else []),
+                            probes.append(subprocess.Popen([str(binary), '--probe-client', '127.0.0.1', str(port), '--probe-seconds', str(args.probe_seconds)] + (['--screen-text'] if args.screen_text else []) + (['--input-silence'] if args.input_silence else []),
                                 cwd=game, env=environment, stdout=output, stderr=subprocess.STDOUT,
                                 creationflags=creation_flags))
                         observed_two = False
@@ -130,16 +142,30 @@ def main():
                                     probe.wait(timeout=5)
                                 except subprocess.TimeoutExpired:
                                     probe.kill(); probe.wait()
+                active_slots = set()
                 for index in range(2):
                     report = (root / f'client-{index}.log').read_text(encoding='utf-8')
                     if not re.search(r'result=passed snapshots=\d+ objects=[1-9]\d* tick_delta=\d+ input_queued=[1-9]\d*', report):
                         raise RuntimeError('Separate client did not receive an advancing populated world.')
                     if args.screen_text and 'hud_received=1' not in report:
                         raise RuntimeError('Separate client did not receive a server HUD message.')
+                    silence_match = re.search(r'silence_windows=(\d+)', report)
+                    if args.input_silence and (not silence_match or int(silence_match.group(1)) < 2):
+                        raise RuntimeError('Client did not exercise repeated input silence.')
+                    assignment = re.search(r'assigned_slot=(-?\d+)', report)
+                    if assignment and int(assignment.group(1)) >= 0:
+                        active_slots.add(int(assignment.group(1)))
+                if len(active_slots) < args.require_players:
+                    raise RuntimeError('Not enough distinct active player assignments.')
                 network_log = (logs / 'WorldStateServer.log').read_text(encoding='utf-8')
                 if not re.search(r'INFO: applied [1-9]\d* client input commands to player slot', network_log):
                     raise RuntimeError('Server did not apply neutral input from a probe client.')
+                if args.input_silence and (not active_slots or any(network_log.count(f'neutralized stale network input for player slot {slot}') < 2 for slot in active_slots)):
+                    raise RuntimeError('Server did not neutralize each active silent player repeatedly.')
                 result['separate_clients'] = 2
+                result['probe_seconds'] = args.probe_seconds
+                result['input_silence'] = args.input_silence
+                result['active_player_slots'] = sorted(active_slots)
                 result['probe_input_applied'] = True
                 if args.screen_text:
                     result['screen_text_received'] = True
@@ -202,7 +228,8 @@ def main():
                     except subprocess.TimeoutExpired:
                         process.kill(); process.wait()
             if process.stdin is not None:
-                process.stdin.close()
+                with contextlib.suppress(OSError):
+                    process.stdin.close()
         result['elapsed_seconds'] = round(time.monotonic()-started, 2)
         (root / 'result.json').write_text(json.dumps(result, ensure_ascii=False, indent=2)+'\n', encoding='utf-8')
     print(json.dumps(result, ensure_ascii=False))

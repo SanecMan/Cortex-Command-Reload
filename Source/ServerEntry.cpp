@@ -21,9 +21,21 @@ namespace {
 // Separate-process transport diagnostic. It loads no content or devices and
 // does not stand in for a graphical client's replica/gameplay validation.
 int RunClientProbe(const std::vector<std::string>& arguments) {
-	const bool requireText = arguments.size() == 5 && arguments[4] == "--screen-text";
-	if ((arguments.size() != 4 && !requireText) || arguments[2].empty()) {
-		std::cerr << "Usage: CortexCommandServer --probe-client ADDRESS PORT [--screen-text]\n"; return 2;
+	bool requireText = false, inputSilence = false;
+	unsigned int probeSeconds = 3;
+	if (arguments.size() < 4 || arguments[2].empty()) {
+		std::cerr << "Usage: CortexCommandServer --probe-client ADDRESS PORT [--screen-text] [--probe-seconds 3..3600] [--input-silence]\n"; return 2;
+	}
+	for (std::size_t index = 4; index < arguments.size(); ++index) {
+		if (arguments[index] == "--screen-text") requireText = true;
+		else if (arguments[index] == "--input-silence") inputSilence = true;
+		else if (arguments[index] == "--probe-seconds" && index + 1 < arguments.size()) {
+			const auto& value = arguments[++index];
+			const auto number = std::from_chars(value.data(), value.data() + value.size(), probeSeconds);
+			if (number.ec != std::errc{} || number.ptr != value.data() + value.size() || probeSeconds < 3 || probeSeconds > 3600) {
+				std::cerr << "Probe duration must be an integer from 3 to 3600.\n"; return 2;
+			}
+		} else { std::cerr << "Unknown or incomplete probe option.\n"; return 2; }
 	}
 	unsigned int port = 0;
 	const auto& text = arguments[3];
@@ -37,8 +49,9 @@ int RunClientProbe(const std::vector<std::string>& arguments) {
 	}
 	const auto started = std::chrono::steady_clock::now();
 	std::uint32_t firstTick = 0, commands = 0;
-	bool receivedWorld = false, receivedText = false;
-	while (std::chrono::steady_clock::now() - started < std::chrono::seconds(30)) {
+	bool receivedWorld = false, receivedText = false, wasSilent = false;
+	unsigned int silenceWindows = 0;
+	while (std::chrono::steady_clock::now() - started < std::chrono::seconds(probeSeconds + 30)) {
 		client.Update();
 		if (!client.GetConnectionError().empty()) {
 			std::cerr << client.GetConnectionError() << '\n'; client.Disconnect(); return 1;
@@ -51,14 +64,19 @@ int RunClientProbe(const std::vector<std::string>& arguments) {
 			if (!snapshot.Objects.empty() && !snapshot.ScenePreset.empty() && !snapshot.ActivityPreset.empty()) {
 				if (!receivedWorld) { firstTick = snapshot.Tick; receivedWorld = true; }
 				RTE::WorldStateProtocol::InputCommand command;
-				command.ClientTick = ++commands; // Neutral input; no gameplay mutation requested.
-				if (!client.SendInputCommand(command)) {
+				const auto elapsedSeconds = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - started).count();
+				const bool silent = inputSilence && elapsedSeconds % 6 >= 4;
+				if (silent && !wasSilent) ++silenceWindows;
+				wasSilent = silent;
+				if (!silent) command.ClientTick = ++commands; // Neutral input; no gameplay mutation requested.
+				if (!silent && !client.SendInputCommand(command)) {
 					std::cerr << "Probe failed to queue neutral input.\n"; client.Disconnect(); return 1;
 				}
 				if (client.GetReceivedSnapshotCount() >= 10 && static_cast<std::int32_t>(snapshot.Tick - firstTick) >= 60 &&
-				    std::chrono::steady_clock::now() - started >= std::chrono::seconds(3) && (!requireText || receivedText)) {
+				    std::chrono::steady_clock::now() - started >= std::chrono::seconds(probeSeconds) && (!requireText || receivedText)) {
 					std::cout << "result=passed snapshots=" << client.GetReceivedSnapshotCount() << " objects=" << snapshot.Objects.size()
 					          << " tick_delta=" << snapshot.Tick - firstTick << " input_queued=" << commands
+					          << " probe_seconds=" << probeSeconds << " silence_windows=" << silenceWindows
 					          << " assigned_slot=" << client.GetAssignedPlayerSlot() << " hud_received=" << receivedText << '\n';
 					client.Disconnect(); return 0;
 				}
