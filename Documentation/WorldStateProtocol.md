@@ -31,6 +31,14 @@ seconds, 127 further ticks). These are test durations, not performance measureme
 or visual validation of a construction interface. Linux CI runs the codec and
 the strengthened brain-start fixture.
 
+Native Final compiled and linked. The delivered root server passed
+`ResidentStateDelivered` in 12.04 seconds with actors 1/2, resident receipt/clear
+checks, revision 1 and 128 further ticks. `ResidentStateDeliveredVisual` passed
+existing menu/gameplay rendering regressions in 52.06 seconds with 63 further
+updates, strict attachments and audio shutdown. The Meson graphical pair also
+passed (`ResidentStateVisual`, 73.84 seconds, 66 further updates).
+Linux run `38573595112` is pending for commit `6c62ee15241`.
+
 ## Construction command codec foundation
 
 `WorldStateConstructionProtocol.h` reserves envelope message kinds 11
