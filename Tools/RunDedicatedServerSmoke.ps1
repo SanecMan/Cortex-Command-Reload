@@ -11,6 +11,7 @@ param(
     [switch]$CheckPurchasePolicy,
     [switch]$CheckPurchasePricing,
     [switch]$CheckInventory,
+    [switch]$CheckReloadHud,
     [switch]$CheckMenuConnection,
     [switch]$CheckScreenText,
     [switch]$CheckSound,
@@ -42,6 +43,7 @@ if ($CheckPurchasePolicy) { $CheckBuyMenu=$true }
 if ($CheckPurchases -and $CheckTeamFunds) { throw 'Run purchase and administrative funds fixtures separately.' }
 if ($CheckBuyMenu -and ($CheckPurchases -or $CheckTeamFunds)) { throw 'Run the buy-menu fixture separately.' }
 if ($CheckInventory -and ($CheckBuyMenu -or $CheckPurchases -or $CheckTeamFunds)) { throw 'Run the inventory fixture separately.' }
+if ($CheckReloadHud -and ($CheckInventory -or $CheckBuyMenu -or $CheckPurchases -or $CheckTeamFunds)) { throw 'Run reload HUD independently from other gameplay fixtures.' }
 if (!$ServerExecutablePath) { $ServerExecutablePath = Join-Path $PSScriptRoot '..\CortexCommandServer.exe' }
 if (!$ClientExecutablePath) { $ClientExecutablePath = Join-Path $PSScriptRoot '..\Cortex Command.exe' }
 $serverBinary = (Resolve-Path -LiteralPath $ServerExecutablePath).Path
@@ -192,6 +194,7 @@ try {
     $policyChanged = $false
     $inventoryMutated = $false
     $inventoryCreated = $false
+    $reloadHudCreated = $false; $reloadHudChanged = $false
     while (@($clients | Where-Object { !$_.HasExited }).Count -gt 0) {
         if ($CheckScreenText) {
             # Activity updates may clear ordinary messages while clients load.
@@ -249,6 +252,16 @@ try {
         }
         Check-Time
         if ($server.HasExited) { throw 'Server stopped while clients were running.' }
+        if ($CheckReloadHud) {
+            $hudClientsReady=$true; $hudInitial=$false
+            foreach ($index in 1..2) {
+                $hudDirectory=Join-Path $gameDirectory "ScreenShots\$OutputPrefix-Client$index"
+                $hudClientsReady=$hudClientsReady -and ((Read-Report (Join-Path $hudDirectory 'WorldStateClient.log')) -match '(?m)^snapshot=')
+                $hudInitial=$hudInitial -or ((Read-Report (Join-Path $hudDirectory 'DebugRun.log')) -match '(?m)^world_state_reload_hud_initial=passed')
+            }
+            if (!$reloadHudCreated -and $hudClientsReady) { $server.StandardInput.WriteLine('debug-reload-hud-create'); $server.StandardInput.Flush(); $reloadHudCreated=$true }
+            if ($reloadHudCreated -and !$reloadHudChanged -and $hudInitial) { $server.StandardInput.WriteLine('debug-reload-hud-mutate'); $server.StandardInput.Flush(); $reloadHudChanged=$true }
+        }
         if ($CheckInventory -and !$inventoryCreated) {
             $inventoryClientsReady=$true
             foreach ($index in 1..2) {
@@ -370,6 +383,17 @@ try {
             $clientNetwork -notmatch 'funds_team0=12345\.250000 funds_team1=-17\.500000')) { throw 'Client team funds replication failed.' }
     }
     if ($CheckPurchasePolicy -and !$displayedStockPriceObserved) { throw 'Client catalog stock discount does not match the server charge.' }
+    if ($CheckReloadHud) {
+        $hudVerified=$false
+        foreach ($index in 1..2) {
+            $hudDirectory=Join-Path $gameDirectory "ScreenShots\$OutputPrefix-Client$index"
+            $hudReport=Read-Report (Join-Path $hudDirectory 'DebugRun.log')
+            $hudVerified=$hudVerified -or ($hudReport -match '(?m)^world_state_reload_hud_initial=passed' -and
+                $hudReport -match '(?m)^world_state_reload_hud_changed=passed' -and
+                (Test-Path (Join-Path $hudDirectory 'debug-run-reload-hud-35.png')) -and (Test-Path (Join-Path $hudDirectory 'debug-run-reload-hud-75.png')))
+        }
+        if (!$reloadHudCreated -or !$reloadHudChanged -or !$hudVerified) { throw 'Controlled player reload HUD fixture failed.' }
+    }
     [pscustomobject]@{ Result='passed'; Clients=2; UpdatesAfterDisconnect=($latestTick-$baselineTick); Port=$port; ServerBinary=$serverBinary; ElapsedSeconds=[Math]::Round($timer.Elapsed.TotalSeconds,2) }
 } finally {
     foreach ($process in $processes) {

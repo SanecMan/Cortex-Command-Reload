@@ -305,6 +305,7 @@ namespace {
 		bool NetworkSoundPlayVerified = false, NetworkSoundStopVerified = false;
 		bool NetworkSoundFinishRequested = false, NetworkSoundFinishVerified = false;
 		bool NetworkSoundFadeRequested = false, NetworkSoundFadeMidpoint = false, NetworkSoundFadeFrozen = false, NetworkSoundFadeEnded = false;
+		bool ReloadHudInitialCaptured = false, ReloadHudChangedCaptured = false;
 		float NetworkSoundFadePausedVolume = -1;
 		double NetworkSoundFadePauseTime = 0;
 		bool Enabled = false;
@@ -2054,7 +2055,23 @@ namespace {
 		const std::string imageName = UTF8::PathToString(state.OutputDirectory.filename()) + "/debug-run-" + std::string(label) + ".png";
 			const int screenshotResult = g_FrameMan.SaveScreenToPNGBlocking(imageName);
 			state.Log << "screenshot=" << imageName << " result=" << screenshotResult << '\n' << std::flush;
+			return screenshotResult;
 		};
+		if (worldStateClient && worldStateClient->IsConnected() && worldStateClient->HasSnapshot() && g_ActivityMan.GetActivity()) {
+			auto* actor = dynamic_cast<AHuman*>(g_ActivityMan.GetActivity()->GetControlledActor(Players::PlayerOne));
+			auto* gun = actor ? dynamic_cast<HDFirearm*>(actor->GetEquippedItem()) : nullptr;
+			if (actor && actor->GetHealth() == 61.125F && gun && gun->IsReloading()) {
+				const float progress = gun->GetReloadProgress();
+				if (!state.ReloadHudInitialCaptured && progress >= 0.34F && progress <= 0.38F) {
+					if (capture("reload-hud-35") != 0) { FinishDebugRun(false); return; } state.ReloadHudInitialCaptured = true;
+					state.Log << "world_state_reload_hud_initial=passed progress=" << progress << '\n' << std::flush;
+				}
+				if (state.ReloadHudInitialCaptured && !state.ReloadHudChangedCaptured && progress >= 0.74F && progress <= 0.78F) {
+					if (capture("reload-hud-75") != 0) { FinishDebugRun(false); return; } state.ReloadHudChangedCaptured = true;
+					state.Log << "world_state_reload_hud_changed=passed progress=" << progress << '\n' << std::flush;
+				}
+			}
+		}
 		if (state.RequestBuyMenuTest && worldStateBuyMenu && state.BuyMenuTestStage==1 && state.SimulationUpdates>=120 && !state.BuyMenuCatalogCaptured) {
 			capture("buy-catalog"); state.BuyMenuCatalogCaptured=true;
 		}
@@ -2191,6 +2208,7 @@ int RunPersistentHeadlessServer(const ServerConfiguration& config) {
 		}
 	}
 	std::unique_ptr<SoundContainer> diagnosticSound;
+	AHuman* diagnosticReloadActor = nullptr;
 	std::uint32_t tick = 0;
 	if (success) log("INFO ready port=" + std::to_string(session.GetBoundPort()) + " video_initialized=" + std::to_string(SDL_WasInit(SDL_INIT_VIDEO) != 0));
 	else log("ERROR startup failed");
@@ -2198,7 +2216,30 @@ int RunPersistentHeadlessServer(const ServerConfiguration& config) {
 		for (const std::string& command : console.Poll()) {
 			if (command == "quit" || command == "exit" || command == "stop") ServerConsole::StopRequested.store(true);
 			else if (command == "status") log("INFO status tick=" + std::to_string(tick) + " clients=" + std::to_string(session.GetConnectedClientCount()) + " actors=" + std::to_string(g_MovableMan.GetActorCount()));
-			else if (command == "debug-sound") {
+			else if (command == "debug-reload-hud-create") {
+				g_ThreadMan.GetPriorityThreadPool().wait_for_tasks();
+				Activity* activity = g_ActivityMan.GetActivity();
+				const Entity* body = g_PresetMan.GetEntityPreset("AHuman", "Fat Culled Clone", "Base.rte");
+				const Entity* weapon = g_PresetMan.GetEntityPreset("HDFirearm", "Auto Pistol", "Coalition.rte");
+				std::unique_ptr<AHuman> actor(body ? dynamic_cast<AHuman*>(body->Clone()) : nullptr);
+				std::unique_ptr<HDFirearm> gun(weapon ? dynamic_cast<HDFirearm*>(weapon->Clone()) : nullptr);
+				if (!activity || !activity->PlayerActive(0) || !actor || !gun || (diagnosticReloadActor && g_MovableMan.IsActor(diagnosticReloadActor))) {
+					log("ERROR debug_reload_hud=create_failed"); continue;
+				}
+				actor->SetTeam(activity->GetTeamOfPlayer(0)); actor->SetHealth(61.125F); actor->SetHUDVisible(true);
+				actor->SetPos(g_SceneMan.MovePointToGround(Vector(400, 0), 0, 3)); actor->SetGlobalAccScalar(0); actor->SetPinStrength(1000000);
+				actor->AddInventoryItem(gun.get()); gun.release(); actor->EquipFirearm();
+				auto* equipped = dynamic_cast<HDFirearm*>(actor->GetEquippedItem());
+				if (!equipped || !g_MovableMan.AddMO(actor.get())) { log("ERROR debug_reload_hud=equip_failed"); continue; }
+				diagnosticReloadActor = actor.release(); activity->SetPlayerBrain(diagnosticReloadActor, 0);
+				if (!activity->SwitchToActor(diagnosticReloadActor, 0, diagnosticReloadActor->GetTeam())) { log("ERROR debug_reload_hud=control_failed"); continue; }
+				equipped->SetBaseReloadTime(600000); equipped->Reload(); equipped->SetReloadProgress(0.35F);
+				log(equipped->IsReloading() ? "INFO debug_reload_hud=created" : "ERROR debug_reload_hud=reload_failed");
+			} else if (command == "debug-reload-hud-mutate") {
+				auto* gun = diagnosticReloadActor && g_MovableMan.IsActor(diagnosticReloadActor) ? dynamic_cast<HDFirearm*>(diagnosticReloadActor->GetEquippedItem()) : nullptr;
+				if (gun && gun->IsReloading()) { gun->SetReloadProgress(0.75F); log("INFO debug_reload_hud=changed"); }
+				else log("ERROR debug_reload_hud=mutation_failed");
+			} else if (command == "debug-sound") {
 				if (!diagnosticSound) {
 					const Entity* preset = g_PresetMan.GetEntityPreset("SoundContainer", "Confirm", "Base.rte");
 					diagnosticSound.reset(preset ? dynamic_cast<SoundContainer*>(preset->Clone()) : nullptr);

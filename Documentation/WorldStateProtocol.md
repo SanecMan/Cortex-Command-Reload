@@ -35,8 +35,26 @@ Native MSBuild `Final|x64` subsequently compiled and linked. The updated root
 pair passed `DeviceVisualV26Delivered` in 31.63 seconds with two menu-connected
 clients, exact inventory device-state transitions, zero attachment mismatches,
 clean exits and 63 additional server updates after disconnect. Linux CI run
-`38501991229` validates commit `87cfef33db3` separately. A visible player HUD bar
-is not established by the stored-device fixture.
+`38501991229` for `87cfef33db3` passed the GCC device/attachment codec test,
+server-only build and two-client headless checks. Build-tree and extracted
+package runs passed in 13.23/9.61 seconds with UTF-8 configuration/input/text,
+no video initialization and clean SIGTERM shutdown.
+
+The separate `-CheckReloadHud` fixture spawns a disposable, pinned player-zero
+AHuman, equips an Auto Pistol and invokes the normal authoritative Reload path
+with a long reload timer. The client captures its rendered HUD near progress
+0.35, then captures it again after the server changes timer progress to 0.75.
+It does not start Reload on the replica. Screenshot failures terminate the
+diagnostic instead of reporting success. `ReloadHudV26Visual` passed initially
+in 29.44 seconds; its same-prefix rerun after the screenshot-error guard passed
+in 29.03 seconds with 63 further server updates. Both screenshots were visually
+inspected: Reloading and the player actor were visible. Reading the first pair
+of PNGs found 11 filled bar pixels near (184,301) at progress 0.350056 and 22
+near (400,304) at progress 0.750019, matching the HUD's inclusive 28-pixel formula.
+The bar changed palette index 77 to 13 due to existing one-handed reload blink.
+Camera positions differ between frames; this is a HUD-content check, not an
+identical-frame render comparison. The latest guard still needs native Final
+delivery validation.
 This does not yet replicate fire/recoil timing,
 arbitrary weapon Lua state or all Activity-specific HUD elements.
 
