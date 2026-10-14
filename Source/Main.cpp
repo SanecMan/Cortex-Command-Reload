@@ -3559,6 +3559,28 @@ int RunCortexCommand(int argc, char** argv) {
 					if (utf8Pixels) destroy_bitmap(utf8Pixels);
 					GetDebugRunState().Log << "legacy_hud_icon_raster=" << (iconsPassed ? "passed" : "failed") << '\n' << std::flush;
 					contentPassed = contentPassed && iconsPassed;
+					BITMAP* wrappedPixels = create_bitmap_ex(8, 160, 120);
+					BITMAP* explicitPixels = create_bitmap_ex(8, 160, 120);
+					bool wrapPassed = iconFont && wrappedPixels && explicitPixels;
+					if (wrapPassed) {
+						AllegroBitmap wrappedTarget(wrappedPixels), explicitTarget(explicitPixels);
+						const std::string text = "Ж ЖЖ Ж\nÈ Ï";
+						const int width = std::max(iconFont->CalculateWidth("ЖЖ"), iconFont->CalculateWidth("È Ï"));
+						const int height = iconFont->GetFontHeight();
+						clear_to_color(wrappedPixels, 0); clear_to_color(explicitPixels, 0);
+						iconFont->DrawAligned(&wrappedTarget, 2, 2, text, GUIFont::Left, GUIFont::Top, width);
+						const std::vector<std::string> expected{"Ж", "ЖЖ", "Ж", "È Ï"};
+						for (std::size_t line = 0; line < expected.size(); ++line) iconFont->Draw(&explicitTarget, 2, 2 + static_cast<int>(line) * height, expected[line]);
+						wrapPassed = iconFont->CalculateHeight(text, width) == 4 * height &&
+						    iconFont->CalculateHeight("\n\n", width) == 3 * height && iconFont->CalculateHeight("", width) == 0 &&
+						    iconFont->CalculateWidth("\t") == 4 * iconFont->CalculateWidth(' ');
+						for (int row = 0; row < wrappedPixels->h; ++row) for (int column = 0; column < wrappedPixels->w; ++column)
+							wrapPassed = wrapPassed && getpixel(wrappedPixels, column, row) == getpixel(explicitPixels, column, row);
+					}
+					if (wrappedPixels) destroy_bitmap(wrappedPixels);
+					if (explicitPixels) destroy_bitmap(explicitPixels);
+					GetDebugRunState().Log << "utf8_wrapped_raster_layout=" << (wrapPassed ? "passed" : "failed") << '\n' << std::flush;
+					contentPassed = contentPassed && wrapPassed;
 				}
 				if (contentPassed && GetDebugRunState().HeadlessSimulationPreflight) {
 					// A remote slot can exist before its presentation menus are initialized.

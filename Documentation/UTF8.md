@@ -1,5 +1,27 @@
 # UTF-8 text support
 
+Wrapped drawing and height measurement now share `FontLineLayout.h`. Breaks
+occur only at ASCII spaces and explicit newlines, never inside a UTF-8 glyph.
+Oversized words remain intact; following words and paragraphs are preserved.
+Repeated spaces after a wrap are skipped. Empty text has zero height; explicit
+empty paragraphs each occupy one font line. Tab measurement matches drawing
+(four bitmap-space widths). This does not add Unicode word-break rules.
+
+`Tools/FontLineLayoutTest.cpp` passed with MSVC and MinGW GCC. The device-free
+content diagnostic reported `utf8_wrapped_raster_layout=passed`: actual wrapped
+Cyrillic/Latin rendering matched four manually positioned lines pixel for pixel,
+with matching height and tab measurement. Meson rebuilt both executables;
+`FontLineLayoutVisual` passed two menu-connected graphical clients, reload HUD,
+UTF-8 screen text and audio shutdown in 56.79 seconds, with 68 server updates
+after disconnect. Its 35% HUD screenshot was visually inspected. These are test
+durations, not performance benchmarks.
+
+Native MSBuild `Final|x64` also compiled and linked. The delivered root
+client/server pair passed `FontLineLayoutDelivered` in 34.74 seconds with two
+menu-connected clients, UTF-8 screen text, reload HUD, clean audio shutdown and
+62 server updates after disconnect. Linux validation of this layout change
+is submitted separately from the earlier atlas fix.
+
 Unicode text and legacy bitmap symbols are separate. ASCII uses the original
 bitmap style. Valid non-ASCII UTF-8 uses the TrueType fallback even when its
 code point is below 256: U+00C8 is the letter È, whereas a standalone byte 200
@@ -21,7 +43,7 @@ Final|x64 compiled and linked; the root pair passed `UnicodeAtlasDelivered` in
 34.90 seconds with two clients, reload HUD, UTF-8 screen text, audio shutdown
 and 62 server updates after disconnect. The Meson 35% HUD screenshot was
 visually inspected for ammo/reload icons and Cyrillic text. Linux CI
-`38527037754` for `a6e09fc2ddf` is pending. The older encoded-index icon comparison below describes
+`38527037754` for `a6e09fc2ddf` passed. The older encoded-index icon comparison below describes
 the earlier implementation and is superseded by the direct-atlas regression.
 
 Legacy HUD icons remain compatible with the bitmap atlas: font drawing and

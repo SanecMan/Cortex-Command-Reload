@@ -3,6 +3,7 @@
 #include "../System/System.h"
 #include "../System/UTF8.h"
 #include "FontGlyphDecode.h"
+#include "FontLineLayout.h"
 
 #include <cassert>
 #include <filesystem>
@@ -231,58 +232,17 @@ void GUIFont::Draw(GUIBitmap* Bitmap, int X, int Y, const std::string& Text, uns
 }
 
 void GUIFont::DrawAligned(GUIBitmap* Bitmap, int X, int Y, const std::string& Text, int HAlign, int VAlign, int MaxWidth, unsigned long Shadow) {
-	std::string TextLine = Text;
-	int lineStartPos = 0;
-	int lineEndPos = 0;
-	int lineWidth = 0;
 	int yLine = Y;
-	int lastSpacePos = 0;
 
 	// Adjust the starting of the Y based on vertical alignment
 	if (VAlign == Middle) {
-		yLine -= (CalculateHeight(TextLine, MaxWidth) / 2);
+		yLine -= (CalculateHeight(Text, MaxWidth) / 2);
 	} else if (VAlign == Bottom) {
-		yLine -= CalculateHeight(TextLine, MaxWidth);
+		yLine -= CalculateHeight(Text, MaxWidth);
 	}
 
-	while (lineStartPos < Text.size()) {
-		// Find the next newline, if any
-		lineEndPos = Text.find('\n', lineStartPos);
-		// Grab the whole line
-		TextLine = Text.substr(lineStartPos, (lineEndPos == std::string::npos ? Text.size() : lineEndPos) - lineStartPos);
-		// Figure its width, in pixels
-		lineWidth = CalculateWidth(TextLine);
-
-		// See if it's too wide to fit within the maxWidth
-		if (MaxWidth > 0 && lineWidth > MaxWidth) {
-			// Find the last space that makes the line within the max width
-			do {
-				// Find last space
-				lastSpacePos = Text.rfind(' ', lineEndPos - 1);
-				// if there was no space encountered before hitting beginning, then just leave the too long line as is and let it exceed the max width
-				if (lastSpacePos == std::string::npos || lastSpacePos <= lineStartPos) {
-					lineEndPos = Text.size();
-					break;
-				}
-				// Update the new end position
-				lineEndPos = lastSpacePos;
-				// Get the new, shorter line
-				TextLine = Text.substr(lineStartPos, lineEndPos - lineStartPos);
-				// Figure the new line width, in pixels
-				lineWidth = CalculateWidth(TextLine);
-			} while (lineWidth > MaxWidth);
-
-			// Update the new start position for next line
-			lineStartPos = lineEndPos + 1;
-			// Make sure it's not starting on a space
-			while (lineStartPos < Text.size() && Text.at(lineStartPos) == ' ') {
-				lineStartPos++;
-			}
-		} else {
-			// Advance the line start to the next line, or to the end of the text if there are no more lines
-			lineStartPos = lineEndPos == std::string::npos ? Text.size() : (lineEndPos + 1);
-		}
-
+	ForEachFontLine(Text, MaxWidth, [this](std::string_view line) { return MeasureTextWidth(line); }, [&](std::string_view line, int lineWidth) {
+		const std::string TextLine(line);
 		// If the line is scrolled above the bitmap top, then don't try to draw anything
 		if ((yLine + m_FontHeight) >= 0) {
 			switch (HAlign) {
@@ -307,7 +267,7 @@ void GUIFont::DrawAligned(GUIBitmap* Bitmap, int X, int Y, const std::string& Te
 
 		// Add the height
 		yLine += m_FontHeight;
-	}
+	});
 }
 
 void GUIFont::SetColor(unsigned long Color) {
@@ -326,6 +286,10 @@ void GUIFont::SetColor(unsigned long Color) {
 }
 
 int GUIFont::CalculateWidth(const std::string& Text) {
+	return MeasureTextWidth(Text);
+}
+
+int GUIFont::MeasureTextWidth(std::string_view Text) {
 	int Width = 0;
 	int WidestLine = 0;
 
@@ -333,6 +297,11 @@ int GUIFont::CalculateWidth(const std::string& Text) {
 		std::uint32_t codePoint = 0;
 		std::size_t byteCount = 1;
 		const bool legacyByte = DecodeFontGlyph(Text, i, codePoint, byteCount);
+		if (codePoint == '\t') {
+			Width += m_Characters[' '].m_Width * 4;
+			i += byteCount;
+			continue;
+		}
 		// Reset line counting if newline encountered
 		if (codePoint == '\n') {
 			if (Width > WidestLine) {
@@ -365,50 +334,9 @@ int GUIFont::CalculateWidth(const char Character) {
 }
 
 int GUIFont::CalculateHeight(const std::string& Text, int MaxWidth) {
-	if (Text.empty()) {
-		return 0;
-	}
-	int Width = 0;
-	int Height = m_FontHeight;
-	int lastSpacePos = 0;
-
-	// Go through every character
-	for (std::size_t i = 0; i < Text.size();) {
-		std::uint32_t codePoint = 0;
-		std::size_t byteCount = 1;
-		const bool legacyByte = DecodeFontGlyph(Text, i, codePoint, byteCount);
-
-		// Add the new line's height if newline encountered
-		if (codePoint == '\n') {
-			Width = 0;
-			Height += m_FontHeight;
-			i += byteCount;
-			continue;
-		}
-		if (codePoint < 32) {
-			i += byteCount;
-			continue;
-		}
-		if (codePoint == ' ') {
-			lastSpacePos = i;
-		}
-
-		Width += GetCodepointWidth(codePoint, legacyByte) + m_Kerning;
-		if (MaxWidth > 0 && Width > MaxWidth) {
-			// Rewind to the last space, and do line break, but only if we've passed a space since last wrap
-			if (lastSpacePos > 0) {
-				i = lastSpacePos;
-				lastSpacePos = 0;
-				Width = 0;
-				Height += m_FontHeight;
-			}
-			i += byteCount;
-			continue;
-		}
-		i += byteCount;
-	}
-
-	return Height;
+	int lines = 0;
+	ForEachFontLine(Text, MaxWidth, [this](std::string_view line) { return MeasureTextWidth(line); }, [&](std::string_view, int) { ++lines; });
+	return lines * m_FontHeight;
 }
 
 void GUIFont::CacheColor(unsigned long Color) {

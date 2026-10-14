@@ -56,6 +56,10 @@ jobs:
         run: |
           g++-13 -std=c++20 -Wall -Wextra Tools/FontGlyphDecodeTest.cpp -o build-server/font-glyph-test
           build-server/font-glyph-test
+      - name: Verify UTF-8 line layout
+        run: |
+          g++-13 -std=c++20 -Wall -Wextra -I Source/System Tools/FontLineLayoutTest.cpp -o build-server/font-line-layout-test
+          build-server/font-line-layout-test
       - name: Verify device presentation codec
         run: |
           g++-13 -std=c++20 -Wall -Wextra -I Source/System Tools/WorldStateDeviceVisualTest.cpp -o build-server/device-visual-test

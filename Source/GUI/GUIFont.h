@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -134,6 +135,7 @@ namespace RTE {
 
 		const TrueTypeGlyph* GetTrueTypeGlyph(std::uint32_t codePoint);
 		int GetCodepointWidth(std::uint32_t codePoint, bool legacyByte = false);
+		int MeasureTextWidth(std::string_view text);
 		void DrawTrueTypeGlyph(GUIBitmap* bitmap, int x, int y, const TrueTypeGlyph& glyph, unsigned long color);
 	};
 } // namespace RTE
