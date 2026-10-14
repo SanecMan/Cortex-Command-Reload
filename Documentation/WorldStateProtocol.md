@@ -105,6 +105,15 @@ images were visually inspected. A preceding repaired-camera run had one failed
 compressed-version reconnect fixture while its second client passed; this
 intermittent loopback failure is recorded, not claimed fixed by the passing rerun.
 
+Native Final rebuilt with the Actor-aware diagnostic fix. `ConstructionPickerDelivered` 
+passed against the delivered root binaries in 55.70 seconds with both graphical
+clients, a paid placement, all construction/camera/replica/menu/audio assertions
+and 63 further server updates. Its catalog screenshot was inspected. The
+headless content/UTF-8/objective/spawn regression passed in 22.50 seconds with
+128 further ticks and no video initialization (`ConstructionPickerFullFinal`).
+Linux CI run `38584475211` is in progress for `6784e34fb00`; previous server
+placement run `38581552495` succeeded.
+
 ## Construction command codec foundation
 
 `WorldStateConstructionProtocol.h` reserves envelope message kinds 11
