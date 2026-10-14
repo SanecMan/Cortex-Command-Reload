@@ -3083,6 +3083,12 @@ void RunGameLoop() {
 						debugRunState.ReplicaWorldExact = false;
 						debugRunState.Log << "replica_membership_mismatch live=" << liveReplicaObjects
 						                  << " expected=" << receivedSnapshot.Objects.size() << '\n' << std::flush;
+						std::unordered_map<std::string, int> identities;
+						for (const auto& object : receivedSnapshot.Objects) ++identities[object.ClassName + "/" + object.ModuleName + "/" + object.PresetName];
+						std::list<SceneObject*> local;
+						g_MovableMan.GetAllActors(false, local); g_MovableMan.GetAllItems(false, local); g_MovableMan.GetAllParticles(false, local);
+						for (const auto* object : local) --identities[object->GetClassName() + "/" + object->GetModuleName() + "/" + object->GetPresetName()];
+						for (const auto& [identity, count] : identities) if (count != 0) debugRunState.Log << "replica_identity_difference=" << identity << " count=" << count << '\n';
 					}
 					if (debugRunState.RequireReconnectMenuTest && debugRunState.ReconnectMenuQueued && !debugRunState.ReconnectWorldApplied &&
 					    receivedSnapshot.ActivityPreset == "Skirmish Defense" && receivedSnapshot.ScenePreset == "Ketanot Hills" && !receivedSnapshot.Objects.empty() &&

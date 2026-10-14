@@ -45,7 +45,7 @@ WorldStateProtocol::Snapshot WorldStateSnapshotBuilder::CaptureIdentity() {
 	const std::uintptr_t activityAddress = reinterpret_cast<std::uintptr_t>(activity);
 	const std::uintptr_t sceneAddress = reinterpret_cast<std::uintptr_t>(scene);
 
-	if (sceneAddress != m_LastSceneAddress || activityAddress != m_LastActivityAddress || snapshot.ScenePreset != m_LastScenePreset ||
+	if (m_SceneLoads.Changed(SceneLoadGeneration::Get()) || sceneAddress != m_LastSceneAddress || activityAddress != m_LastActivityAddress || snapshot.ScenePreset != m_LastScenePreset ||
 	    snapshot.ActivityClassName != m_LastActivityClassName || snapshot.ActivityPreset != m_LastActivityPreset ||
 	    snapshot.ActivityModuleName != m_LastActivityModuleName || snapshot.SceneModuleName != m_LastSceneModuleName) {
 		++m_SceneRevision;

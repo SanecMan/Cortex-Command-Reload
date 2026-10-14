@@ -1,4 +1,5 @@
 #include "SceneMan.h"
+#include "System/SceneLoadGeneration.h"
 #include "PostProcessMan.h"
 #include "PresetMan.h"
 #include "FrameMan.h"
@@ -139,6 +140,7 @@ int SceneMan::LoadScene(Scene* pNewScene, bool placeObjects, bool placeUnits) {
 		g_ConsoleMan.PrintString("ERROR: Loading scene \'" + m_pCurrentScene->GetPresetName() + "\' failed! Has it been properly defined?");
 		return -1;
 	}
+	SceneLoadGeneration::Advance();
 	if (m_WorldStateTerrainTrackingEnabled) {
 		m_TerrainDirtyGrid.Configure(GetSceneWidth(), GetSceneHeight(), 64, SceneWrapsX());
 	}

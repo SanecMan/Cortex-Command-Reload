@@ -28,6 +28,7 @@ def main():
     parser.add_argument('--require-players', type=int, default=0, help='Require this many distinct active player slots (0..2).')
     parser.add_argument('--restart-with-clients', action='store_true', help='Restart the Activity after both peers connect.')
     parser.add_argument('--require-control', action='store_true', help='Require distinct controlled actors after restart.')
+    parser.add_argument('--restart-count', type=int, default=1, help='Number of connected-roster restarts (1..16).')
     args = parser.parse_args()
     if (args.screen_text or args.objectives) and not args.probe_clients:
         parser.error('--screen-text/--objectives require --probe-clients.')
@@ -37,6 +38,8 @@ def main():
         parser.error('Require players must be 0..2 and needs client probes.')
     if (args.restart_with_clients and not args.probe_clients) or (args.require_control and not args.restart_with_clients):
         parser.error('Restart requires clients; control checks require restart.')
+    if not 1 <= args.restart_count <= 16 or (args.restart_count > 1 and (not args.require_control or args.probe_seconds < args.restart_count * 3)):
+        parser.error('Repeated restarts need control checks and at least three probe seconds per restart.')
     if any(not value or '\n' in value or '\r' in value for value in (args.activity_class, args.activity, args.scene)):
         parser.error('Activity and scene must be nonempty single-line preset names.')
     if not re.fullmatch(r'[A-Za-z0-9_-]{1,48}', args.output_prefix) or args.timeout <= 0:
@@ -130,11 +133,13 @@ def main():
                     try:
                         for index in range(2):
                             output = streams.enter_context((root / f'client-{index}.log').open('wb'))
-                            probes.append(subprocess.Popen([str(binary), '--probe-client', '127.0.0.1', str(port), '--probe-seconds', str(args.probe_seconds)] + (['--screen-text'] if args.screen_text else []) + (['--objectives'] if args.objectives else []) + (['--require-control'] if args.require_control else []) + (['--input-silence'] if args.input_silence else []),
+                            probes.append(subprocess.Popen([str(binary), '--probe-client', '127.0.0.1', str(port), '--probe-seconds', str(args.probe_seconds)] + (['--screen-text'] if args.screen_text else []) + (['--objectives'] if args.objectives else []) + (['--require-control', '--minimum-revision', str(args.restart_count + 1)] if args.require_control else []) + (['--input-silence'] if args.input_silence else []),
                                 cwd=game, env=environment, stdout=output, stderr=subprocess.STDOUT,
                                 creationflags=creation_flags))
                         observed_two = False
                         restart_sent = False
+                        restarts_sent = 0
+                        last_restart = 0.0
                         while any(probe.poll() is None for probe in probes):
                             check()
                             if args.objectives:
@@ -142,9 +147,11 @@ def main():
                             process.stdin.write(b'status\n'); process.stdin.flush()
                             time.sleep(0.1)
                             observed_two |= bool(re.search(r'INFO status tick=\d+ clients=2 actors=\d+', read_log()))
-                            if args.restart_with_clients and observed_two and not restart_sent:
+                            if args.restart_with_clients and observed_two and restarts_sent < args.restart_count and time.monotonic() - last_restart >= 3:
                                 process.stdin.write(b'restart\n'); process.stdin.flush()
                                 restart_sent = True
+                                restarts_sent += 1
+                                last_restart = time.monotonic()
                         if not observed_two or any(probe.returncode != 0 for probe in probes):
                             raise RuntimeError('Separate client connection check failed; inspect client logs.')
                     finally:
@@ -173,14 +180,14 @@ def main():
                         active_slots.add(int(assignment.group(1)))
                     control = re.search(r'controlled_actor=(\d+) scene_revision=(\d+)', report)
                     if args.require_control:
-                        if not control or int(control.group(1)) == 0 or int(control.group(2)) < 2:
+                        if not control or int(control.group(1)) == 0 or int(control.group(2)) < args.restart_count + 1:
                             raise RuntimeError('Client did not receive a controlled actor after restart.')
                         controlled_actors.add(int(control.group(1)))
                 if len(active_slots) < args.require_players:
                     raise RuntimeError('Not enough distinct active player assignments.')
                 if args.require_control and len(controlled_actors) != 2:
                     raise RuntimeError('Clients do not have distinct controlled actors.')
-                if args.restart_with_clients and (not restart_sent or 'INFO activity_restart=completed humans=2' not in read_log()):
+                if args.restart_with_clients and (not restart_sent or restarts_sent != args.restart_count or read_log().count('INFO activity_restart=completed humans=2') != args.restart_count):
                     raise RuntimeError('Activity restart with the connected roster was not verified.')
                 network_log = (logs / 'WorldStateServer.log').read_text(encoding='utf-8')
                 if not re.search(r'INFO: applied [1-9]\d* client input commands to player slot', network_log):
@@ -193,6 +200,7 @@ def main():
                 result['active_player_slots'] = sorted(active_slots)
                 if args.require_control:
                     result['controlled_actors'] = sorted(controlled_actors)
+                    result['restarts'] = args.restart_count
                 result['probe_input_applied'] = True
                 if args.objectives:
                     result['objectives_received'] = True

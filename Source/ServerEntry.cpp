@@ -23,6 +23,7 @@ namespace {
 int RunClientProbe(const std::vector<std::string>& arguments) {
 	bool requireText = false, inputSilence = false, requireObjectives = false, requireControl = false;
 	unsigned int probeSeconds = 3;
+	unsigned int minimumRevision = 2;
 	if (arguments.size() < 4 || arguments[2].empty()) {
 		std::cerr << "Usage: CortexCommandServer --probe-client ADDRESS PORT [--screen-text] [--probe-seconds 3..3600] [--input-silence]\n"; return 2;
 	}
@@ -30,6 +31,13 @@ int RunClientProbe(const std::vector<std::string>& arguments) {
 		if (arguments[index] == "--screen-text") requireText = true;
 		else if (arguments[index] == "--objectives") requireObjectives = true;
 		else if (arguments[index] == "--require-control") requireControl = true;
+		else if (arguments[index] == "--minimum-revision" && index + 1 < arguments.size()) {
+			const auto& value = arguments[++index];
+			const auto number = std::from_chars(value.data(), value.data() + value.size(), minimumRevision);
+			if (number.ec != std::errc{} || number.ptr != value.data() + value.size() || minimumRevision < 2 || minimumRevision > 65535) {
+				std::cerr << "Minimum scene revision must be 2..65535.\n"; return 2;
+			}
+		}
 		else if (arguments[index] == "--input-silence") inputSilence = true;
 		else if (arguments[index] == "--probe-seconds" && index + 1 < arguments.size()) {
 			const auto& value = arguments[++index];
@@ -89,7 +97,7 @@ int RunClientProbe(const std::vector<std::string>& arguments) {
 				}
 				if (client.GetReceivedSnapshotCount() >= 10 && static_cast<std::int32_t>(snapshot.Tick - firstTick) >= 60 &&
 				    std::chrono::steady_clock::now() - started >= std::chrono::seconds(probeSeconds) && (!requireText || receivedText) && (!requireObjectives || receivedObjectives) &&
-				    (!requireControl || (controlledActor != 0 && snapshot.SceneRevision > 1))) {
+				    (!requireControl || (controlledActor != 0 && snapshot.SceneRevision >= minimumRevision))) {
 					std::cout << "result=passed snapshots=" << client.GetReceivedSnapshotCount() << " objects=" << snapshot.Objects.size()
 					          << " tick_delta=" << snapshot.Tick - firstTick << " input_queued=" << commands
 					          << " probe_seconds=" << probeSeconds << " silence_windows=" << silenceWindows

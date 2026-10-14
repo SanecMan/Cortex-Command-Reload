@@ -51,6 +51,10 @@ jobs:
         run: |
           g++-13 -std=c++20 -Wall -Wextra -I Source/System Tools/WorldStateObjectivesTest.cpp -o build-server/objectives-test
           build-server/objectives-test
+      - name: Verify scene load generations
+        run: |
+          g++-13 -std=c++20 -Wall -Wextra -I Source/System Tools/SceneLoadGenerationTest.cpp -o build-server/scene-generation-test
+          build-server/scene-generation-test
       - name: Verify peer identities
         run: |
           g++-13 -std=c++20 -Wall -Wextra -pthread -I external/sources/RakNet/include Tools/RakNetGuidTest.cpp -o build-server/peer-guid-test
@@ -112,7 +116,7 @@ jobs:
         run: >-
           python Tools/run_server_smoke.py --exe build-server/CortexCommandServer
           --game-dir . --output-prefix LinuxRosterRestartCI --timeout 300
-          --probe-clients --probe-seconds 15 --input-silence --restart-with-clients --require-control
+          --probe-clients --probe-seconds 30 --input-silence --restart-with-clients --restart-count 3 --require-control
           --activity-class GAScripted --activity "Bunker Breach"
           --scene "Zekarra Mining Outpost" --require-players 2
       - name: Package server

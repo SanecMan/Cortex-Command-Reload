@@ -1,6 +1,7 @@
 #pragma once
 
 #include "WorldStateProtocol.h"
+#include "System/SceneLoadGeneration.h"
 
 #include <cstdint>
 #include <string>
@@ -18,6 +19,7 @@ namespace RTE {
 	private:
 		WorldStateProtocol::Snapshot CaptureIdentity();
 		std::uint32_t m_SceneRevision = 0;
+		SceneLoadGeneration::Observer m_SceneLoads;
 		std::uintptr_t m_LastActivityAddress = 0;
 		std::uintptr_t m_LastSceneAddress = 0;
 		std::string m_LastActivityClassName;

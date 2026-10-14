@@ -88,6 +88,47 @@ Its total verification time was 167.71 seconds including startup, not a benchmar
 
 ## Connection failure handling
 
+### Repeated scene loads
+
+The host snapshot builder observes a process-local generation advanced by
+successful `SceneMan::LoadScene` data loads, in addition to object addresses and
+preset names. Multiple loads between captures can return to the same allocator
+addresses; that must still invalidate the client's old world/terrain baseline.
+The generation observer detects a new load without relying on address changes.
+It does not change wire v29 or any Lua/content API. Atomic generation access
+does not make other scene state safe for concurrent mutation.
+
+`Tools/SceneLoadGenerationTest.cpp` passed MSVC and GCC, checking changed,
+unchanged and wrapped generation values. `--restart-count 1..16` extends the
+portable runner; client probes wait for at least count+1 scene revision and
+distinct controlled actors. Three restarts require a sufficiently long probe.
+The 15-second combined restart/silence test reached revision 4 but lacked repeated
+input neutralization during reload pauses. The 30-second run passed all gates:
+`RepeatedRosterHeadless`, 40.67 seconds total, slots 0/1, actors 389/390,
+revision 4, three restart completions and five timeout neutralizations per slot,
+followed by 129 further ticks and 24 actors. No video was initialized.
+
+The delivered full headless suite passed in 31.11 seconds with content/UTF-8/
+objective checks and 128 ticks (`SceneGenerationHeadless`). The first graphical
+delivery regression failed exact membership at the initial snapshot (120 live
+objects vs 121 authoritative), without a crash. Replica field application now
+clears a local deletion flag for objects present in the snapshot; a preset/startup
+deletion request must not remove an authoritative object during pending-add
+publication. The background-equipment regression explicitly checks an actor
+marked for deletion before authoritative field application. The corrected Meson
+pair passed in 37.90 seconds (`SceneGenerationDeletionVisual`), with exact
+membership, attachment state, distinct restarted actors and clean audio shutdown.
+This checks scene invalidation and replica publication; it does not prove every
+terrain pixel after restart or reproduce allocator address reuse in a live match.
+The next graphical repeat still failed by one object despite the deletion-flag
+fix. Clearing that flag is a separately tested correctness fix, not a complete
+explanation of this intermittent membership difference. Diagnostic failures now
+log per-class/module/preset count differences. Two subsequent runs with that
+instrumentation passed (31.89 and 32.68 seconds, each with 62 post-disconnect
+updates), but the intermittent failure remains unresolved and is not waived.
+The current native binary compiled/linked with the deletion fix; the additional
+identity logging is validated in Meson and has not yet been rebuilt natively.
+
 ### Activity teams and connected-roster restart
 
 Remote players retain `TeamOfPlayerN` from the Activity preset. The previous
