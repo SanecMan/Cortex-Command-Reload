@@ -1131,12 +1131,29 @@ is now described above; complete inventory replication remains outstanding.
 ## Network sound validation
 
 The development client now plays server-selected SoundContainer resources and
-applies their container controls. Use matching v22 client/server binaries and the
+applies their container controls. Use matching client/server protocol versions and the
 same installed modules. Sound resources are resolved inside loaded module roots;
 missing resources are skipped rather than causing an assertion. Active loops that
-began before a client joined are not yet reconstructed. v22 additionally transfers
+began before a client joined are reconstructed starting with v23. v22 transfers
 bus pause/pitch and container pan/panning controls, including a group-state baseline
 on connection. See `WorldStateProtocol.md` for measured checks and limits.
+
+v24 additionally replicates SFX cycle completion: `FinishIngameLoopingSounds`
+removes repeating playback while preserving the current cycle tail. A joining
+client restores a paused finishing voice as a finite sample at its saved cursor.
+Automated Windows fixtures use:
+
+```powershell
+.\Tools\RunDedicatedServerSmoke.ps1 -CheckFinishLoops -EnableAudio
+.\Tools\RunDedicatedServerSmoke.ps1 -CheckMenuConnection -CheckFinishingLateJoin -EnableAudio
+```
+
+The finishing late-join fixture holds client one for up to 6,000 updates and
+verifies it remains connected when client two is ready. It checks actual FMOD
+loop counts and expiration without Stop, not recorded waveform quality.
+The runner removes stale client readiness reports before launching new processes
+with a reused output prefix. Client startup clears that prefix's remaining debug
+outputs; other runs' output directories are retained.
 
 The automated two-client runner can exercise server-selected looping sound and
 its Stop event:

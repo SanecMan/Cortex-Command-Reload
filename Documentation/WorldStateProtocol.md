@@ -43,6 +43,12 @@ These are elapsed test durations, not performance benchmarks; waveform quality
 and sample-accurate synchronization are separate checks. Native Final and Linux
 verification for v24 remain separate stages.
 
+Native MSBuild `Final|x64` subsequently compiled and linked successfully. The
+root pair passed `SoundFinishV24Delivered` in 33.24 seconds: both audio-enabled
+clients connected through the menu, queried native loop count zero, naturally
+expired without Stop and exited cleanly. The server continued 63 updates after
+disconnect. Linux CI run `38494425830` checks the v24 commit separately.
+
 ## v23 active sound baselines under validation
 
 Development sources add a sample cursor and optional remaining fade duration
