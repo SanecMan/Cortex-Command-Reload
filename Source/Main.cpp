@@ -2926,6 +2926,10 @@ void RunGameLoop() {
 				if (System::IsDebugRun()) {
 					auto& state = GetDebugRunState();
 					for (const auto& event : soundEvents) {
+						if (event.Type == WorldStateSoundProtocol::Action::Play && event.Module == "Base.rte" &&
+						    event.Resource == "Sounds/GUIs/SlicePicked.flac" && event.Loops == -1)
+							state.Log << "world_state_sound_fixture_event voice=" << event.Voice
+							          << " cursor_ms=" << event.CursorMilliseconds << '\n' << std::flush;
 						if (!state.NetworkSoundPlayVerified && event.Type == WorldStateSoundProtocol::Action::Play &&
 						    event.Module == "Base.rte" && event.Resource == "Sounds/GUIs/SlicePicked.flac" && event.Loops == -1 &&
 						    worldStateSoundPlayback.HasVoice(event.Voice)) {

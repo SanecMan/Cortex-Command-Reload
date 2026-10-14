@@ -27,8 +27,8 @@ external clients, input and UTF-8 screen messages, without video initialization.
 a loop before either client connected; both restored it with cursor 12 ms and
 actual FMOD pause state, verified owner lifetime, received Stop and exited
 cleanly. The server continued 62 updates after disconnect. These are elapsed
-test durations, not performance benchmark results. A connected-client-plus-later
-join test and recorded audio comparison remain separate checks.
+test durations, not performance benchmark results. Recorded audio comparison
+remains a separate check.
 Use `RunDedicatedServerSmoke.ps1 -CheckLateJoinSound -EnableAudio` for the
 new paused-loop-before-connection fixture; run it separately from `-CheckSoundMix`.
 
@@ -39,6 +39,17 @@ matching server passed `SoundLoopsV23Delivered` in 32.29 seconds. Both clients
 restored the pre-existing paused loop at cursor 29 ms, passed owner-lifetime
 checks, received Stop and exited cleanly; the server continued 62 updates.
 Linux CI run `38491505316` verifies the v23 commit separately.
+
+`-CheckStaggeredSound` checks a different ordering: client one connects first,
+then receives Play and bus pause; client two connects afterwards and receives
+the active-loop baseline. It requires exactly one fixture Play event per client,
+no late-join marker on the existing client, a nonzero cursor with native pause
+state on the new client and Stop on both. `SoundStaggeredV23FMOD` passed in
+42.57 seconds, with 62 further server updates after disconnect. Both clients
+received voice ID 2 exactly once: cursor 0 for client one, cursor 29 ms for client
+two. This demonstrates targeted baseline delivery without an extra Play sent
+to the existing peer; it does not compare recorded waveforms or FMOD channel
+positions over the network.
 
 ## Playback cursor groundwork
 
