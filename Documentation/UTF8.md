@@ -1,5 +1,26 @@
 # UTF-8 text support
 
+Clipboard paste uses the same `GUITextPanel::OnTextInput` path as typed text:
+UTF-8 decoding, code-point length limits, numeric-only filtering and numeric
+maximum apply to both. Invalid byte sequences and single-line control characters
+are skipped. A rejected/empty input leaves the selection intact; accepted input
+replaces it. Locked panels reject text events too. Numeric maximum checks use
+nonthrowing parsing, including integers larger than the C++ integer range.
+
+`TextInputPolicyHeadless` passed with `utf8_text_input_policy=passed`: a real
+font-backed text panel checked Cyrillic/emoji length limits, whole-code-point
+Backspace/Delete, selection replacement and locked input. A numeric panel checked
+filtering and overflowing input. The headless suite also passed two-client
+input/screen-text replication with 127 observed ticks and no video initialization
+in 18.28 seconds. This exercises the shared input path, not the OS clipboard
+transport or IME composition UI.
+
+Meson and native MSBuild `Final|x64` compiled and linked this change. The Meson
+two-client menu/screen-text/audio regression passed in 59.41 seconds with 62
+post-disconnect updates; the delivered native pair passed in 33.68 seconds with
+63 updates (`TextInputPolicyDelivered`). Linux CI runs the text-panel regression
+as part of the existing device-free content self-test.
+
 Wrapped drawing and height measurement now share `FontLineLayout.h`. Breaks
 occur only at ASCII spaces and explicit newlines, never inside a UTF-8 glyph.
 Oversized words remain intact; following words and paragraphs are preserved.

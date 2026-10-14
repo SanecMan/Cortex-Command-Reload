@@ -3,6 +3,7 @@
 #include "../System/UTF8.h"
 
 #include <cassert>
+#include <charconv>
 
 using namespace RTE;
 
@@ -265,13 +266,9 @@ void GUITextPanel::OnKeyPress(int KeyCode, int Modifier) {
 
 	// ModKey-V (Paste)
 	if (KeyCode == 'v' && ModKey) {
-		RemoveSelectionText();
 		std::string Text = "";
 		GUIUtil::GetClipboardText(&Text);
-		m_Text.insert(m_CursorIndex, Text);
-		m_CursorIndex += Text.size();
-		UpdateText(true, true);
-		SendSignal(Changed, 0);
+		OnTextInput(Text);
 		return;
 	}
 
@@ -290,6 +287,7 @@ void GUITextPanel::OnKeyPress(int KeyCode, int Modifier) {
 }
 
 void GUITextPanel::OnTextInput(std::string_view inputText) {
+	if (m_Locked) return;
 	for (std::size_t offset = 0; offset < inputText.size();) {
 		std::uint32_t codePoint = 0;
 		std::size_t byteCount = 1;
@@ -306,9 +304,13 @@ void GUITextPanel::OnTextInput(std::string_view inputText) {
 			m_Text.insert(static_cast<std::size_t>(m_CursorIndex), inputText.substr(offset, byteCount));
 			m_CursorIndex += static_cast<int>(byteCount);
 
-			if (m_NumericOnly && m_MaxNumericValue > 0 && std::stoi(m_Text) > m_MaxNumericValue) {
-				m_Text = std::to_string(m_MaxNumericValue);
-				m_CursorIndex = static_cast<int>(m_Text.size());
+			if (m_NumericOnly && m_MaxNumericValue > 0) {
+				int value = 0;
+				const auto parsed = std::from_chars(m_Text.data(), m_Text.data() + m_Text.size(), value);
+				if (parsed.ec == std::errc::result_out_of_range || (parsed.ec == std::errc{} && value > m_MaxNumericValue)) {
+					m_Text = std::to_string(m_MaxNumericValue);
+					m_CursorIndex = static_cast<int>(m_Text.size());
+				}
 			}
 
 			SendSignal(Changed, 0);

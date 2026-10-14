@@ -28,6 +28,7 @@
 #include "AllegroScreen.h"
 #include "AllegroBitmap.h"
 #include "GUIFont.h"
+#include "GUITextPanel.h"
 
 #include "MainMenuGUI.h"
 #include "ScenarioGUI.h"
@@ -3581,6 +3582,36 @@ int RunCortexCommand(int argc, char** argv) {
 					if (explicitPixels) destroy_bitmap(explicitPixels);
 					GetDebugRunState().Log << "utf8_wrapped_raster_layout=" << (wrapPassed ? "passed" : "failed") << '\n' << std::flush;
 					contentPassed = contentPassed && wrapPassed;
+					GUITextPanel textInputProbe;
+					textInputProbe.Create(0, 0, 300, 24);
+					textInputProbe.SetFont(iconFont);
+					textInputProbe.SetMaxTextLength(3);
+					textInputProbe.OnTextInput("Ж🙂AB");
+					bool textInputPassed = textInputProbe.GetText() == "Ж🙂A";
+					textInputProbe.SetCursorPos(6);
+					textInputProbe.OnKeyPress(GUIInput::Key_Backspace, 0);
+					textInputPassed = textInputPassed && textInputProbe.GetText() == "ЖA";
+					textInputProbe.SetCursorPos(0);
+					textInputProbe.OnKeyPress(GUIInput::Key_Delete, 0);
+					textInputPassed = textInputPassed && textInputProbe.GetText() == "A";
+					textInputProbe.SetText("Ж🙂A");
+					textInputProbe.SetSelection(2, 6);
+					textInputProbe.OnTextInput("БВ");
+					textInputPassed = textInputPassed && textInputProbe.GetText() == "ЖБA";
+					textInputProbe.SetLocked(true);
+					textInputProbe.OnTextInput("C");
+					textInputPassed = textInputPassed && textInputProbe.GetText() == "ЖБA";
+					GUITextPanel numericProbe;
+					numericProbe.SetNumericOnly(true);
+					numericProbe.SetMaxNumericValue(8000);
+					numericProbe.OnTextInput("Ж12\n34");
+					textInputPassed = textInputPassed && numericProbe.GetText() == "1234";
+					numericProbe.SetText("999999999999999999999");
+					numericProbe.SetCursorPos(static_cast<int>(numericProbe.GetText().size()));
+					numericProbe.OnTextInput("9");
+					textInputPassed = textInputPassed && numericProbe.GetText() == "8000";
+					GetDebugRunState().Log << "utf8_text_input_policy=" << (textInputPassed ? "passed" : "failed") << '\n' << std::flush;
+					contentPassed = contentPassed && textInputPassed;
 				}
 				if (contentPassed && GetDebugRunState().HeadlessSimulationPreflight) {
 					// A remote slot can exist before its presentation menus are initialized.
