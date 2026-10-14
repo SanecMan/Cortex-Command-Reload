@@ -5,7 +5,7 @@
 `WorldStateConstructionProtocol.h` reserves envelope message kinds 11
 (`ConstructionRequest`) and 12 (`ConstructionResult`). The v29 snapshot layout
 and existing messages are unchanged. Sessions now route readiness requests and
-their responses; placement/removal and a client construction UI remain incomplete.
+their responses and brain placement; ordinary object placement/removal and a client construction UI remain incomplete.
 This does not yet establish playable networked construction. Placement integration
 must validate content, ownership, scene bounds and native brain placement before
 modifying the authoritative scene.
@@ -63,7 +63,7 @@ an identical repeat returns the original response without applying an action
 again. Conflicting/stale IDs do not replace that cached original response.
 Connection teardown clears the cache and cooldown.
 
-Only SetReady is currently applied. Other valid construction actions return
+SetReady and PlaceBrain are currently applied. Other valid construction actions return
 `placement_unavailable` during editing. Outside editing the response is
 `not_editing`; spectators receive `spectator`. A stale scene is rejected before
 replay handling. `GameActivity::SetNetworkConstructionReady` validates the player
@@ -73,6 +73,49 @@ brain denies readiness. A valid intent sets the native DONEEDITING mode;
 `UpdateEditing` performs the normal all-player transition. Cancellation clears
 that player's readiness and restores its appropriate native placement mode.
 No GUI window is needed on the server.
+
+### Brain placement and native start
+
+`SceneEditorGUI::InstallNetworkBrain` clones the server's selected brain, existing
+resident brain, or the default Base.rte Brain Case. Brain deployments use their
+native deployed-actor conversion. Only an Actor in the Brains group can become
+a resident. The server assigns team/player ownership, validates finite pose and
+scene bounds before integer coordinate conversion, and applies rotation/flip.
+It joins the existing background path workers before replacing the callback
+target, refreshes pathfinding and applies the native orbit-path cost limit when
+the Activity requires it. No new worker threads or simulation copies are added.
+
+Ownership transfers to ResidentBrains only after validation; rejected placement
+retains the previous resident. Accepted placement cancels that player's ready
+intent. Brain installation has the same free-brain cost behavior as the native
+editor. Ordinary simulation objects and terrain already use their existing
+snapshot/terrain streams; resident-brain preview replication is still needed.
+The native INSTALLINGBRAIN path also now handles an empty held-object pointer
+when a resident exists, rather than dereferencing it.
+
+The portable `--brain-start` fixture waits for two active humans, places a brain
+for each through separate clients, repeats the placement request, rejects an
+out-of-bounds replacement, then sends readiness. It requires the native running
+state, distinct controlled actor IDs and unchanged scene revision without an
+admin restart. `BrainConstructionStart` passed on Windows in 11.68 seconds:
+actors 1/2, state 4, revision 1, zero restarts, 128 further ticks and two actors
+after disconnect, with no initialized video driver. Skirmish Defense's default
+requires a clear orbit path. This verifies a positive native path; blocked-orbit
+placement is not yet covered by a separate fixture.
+
+`BrainConstructionRegression` passed full content/UTF-8/objective/spawn preflight
+in 19.36 seconds with 128 further ticks. The existing Meson Bunker Breach GUI
+regression passed (`BrainConstructionVisualRegression`, 67.88 seconds,
+62 further updates, menu late admission, strict attachments and audio shutdown).
+These are test durations, not performance measurements or proof of a client
+construction interface. Linux CI runs the placement/start scenario separately.
+
+Native Final compiled and linked. The root server passed `BrainConstructionDelivered`
+in 12.25 seconds with actors 1/2, running state, revision 1, zero restarts and
+129 further ticks. The delivered graphical gameplay regression passed
+`BrainConstructionDeliveredVisual` in 51.75 seconds with 62 further updates.
+Linux run `38567206238` passed the preceding readiness-routing stage; brain
+installation/start requires the new CI scenario.
 
 `--construction-check` runs seven checks per separate probe: cancellation,
 exact replay, conflicting body under the same ID, unchanged original reply after
@@ -89,7 +132,7 @@ seven checks against Skirmish Defense in 12.72 seconds, with native readiness
 cancellation accepted, readiness without a brain denied, zero actors and 128
 further ticks. The full content/UTF-8/objective/spawn preflight passed
 (`ConstructionRoutingRegression`, 39.57 seconds, 136 further ticks).
-These are test elapsed times, not performance measurements. They do not prove
+These routing checks are test elapsed times, not performance measurements. They do not themselves prove
 successful brain placement, a ready-all match start, spectator rejection in an
 independent probe, or a player-facing construction interface. Linux CI contains
 the phase and editing fixtures separately.

@@ -33,6 +33,7 @@ def main():
     parser.add_argument('--check-deferred-restart', action='store_true', help='Request restart with no peers, then connect a new player and require completion.')
     parser.add_argument('--second-client-delay', type=float, default=0, help='Delay the second peer by 0..30 seconds for late admission checks.')
     parser.add_argument('--construction-check', action='store_true', help='Check construction response routing and replay/scene/phase guards.')
+    parser.add_argument('--brain-start', action='store_true', help='Place brains through two clients, reject out-of-bounds replacement and start the native match.')
     args = parser.parse_args()
     if (args.screen_text or args.objectives) and not args.probe_clients:
         parser.error('--screen-text/--objectives require --probe-clients.')
@@ -50,6 +51,11 @@ def main():
         parser.error('Deferred restart check requires client probes.')
     if args.construction_check and (not args.probe_clients or args.restart_with_clients or args.input_silence):
         parser.error('Construction checks need probes and must run separately from restart/silence fixtures.')
+    if args.brain_start:
+        if not args.probe_clients or args.construction_check or args.restart_with_clients or args.input_silence or args.second_client_delay:
+            parser.error('Brain start needs two concurrent probes and a separate editing fixture.')
+        args.require_control = True
+        args.require_players = 2
     if not 0 <= args.second_client_delay <= 30 or (args.second_client_delay and (not args.probe_clients or args.probe_seconds < args.second_client_delay + 3)):
         parser.error('Second client delay needs probes lasting at least delay + 3 seconds.')
     if args.second_client_delay and args.disconnect_one_restart:
@@ -160,7 +166,7 @@ def main():
                             control_options = ['--require-control', '--minimum-revision', str(minimum_revision)] if args.require_control else []
                             if args.disconnect_one_restart:
                                 control_options += ['--expected-humans', str(2 if index == 0 else 1)]
-                            probes.append(subprocess.Popen([str(binary), '--probe-client', '127.0.0.1', str(port), '--probe-seconds', str(duration)] + (['--screen-text'] if args.screen_text else []) + (['--objectives'] if args.objectives else []) + control_options + (['--input-silence'] if args.input_silence else []) + (['--construction-check'] if args.construction_check else []),
+                            probes.append(subprocess.Popen([str(binary), '--probe-client', '127.0.0.1', str(port), '--probe-seconds', str(duration)] + (['--screen-text'] if args.screen_text else []) + (['--objectives'] if args.objectives else []) + control_options + (['--input-silence'] if args.input_silence else []) + (['--construction-check'] if args.construction_check else []) + (['--brain-start'] if args.brain_start else []),
                                 cwd=game, env=environment, stdout=output, stderr=subprocess.STDOUT,
                                 creationflags=creation_flags))
                         observed_two = False
@@ -210,6 +216,8 @@ def main():
                     if args.construction_check and 'construction_checks=7' not in report:
                         raise RuntimeError('Construction command checks were not verified.')
                     editing_probes &= 'activity_state=2 ' in report
+                    if args.brain_start and ('brain_start=1' not in report or 'activity_state=4 ' not in report):
+                        raise RuntimeError('Native brain placement/start was not verified.')
                     silence_match = re.search(r'silence_windows=(\d+)', report)
                     if args.input_silence and (not silence_match or int(silence_match.group(1)) < 2):
                         raise RuntimeError('Client did not exercise repeated input silence.')
@@ -240,6 +248,8 @@ def main():
                 if args.input_silence and (not active_slots or any(network_log.count(f'neutralized stale network input for player slot {slot}') < 2 for slot in active_slots)):
                     raise RuntimeError('Server did not neutralize each active silent player repeatedly.')
                 result['separate_clients'] = 2
+                if args.brain_start:
+                    result['brain_placement_and_start'] = True
                 if args.construction_check:
                     result['construction_checks_per_client'] = 7
                 result['probe_seconds'] = args.probe_seconds

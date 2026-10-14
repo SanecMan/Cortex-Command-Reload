@@ -11,6 +11,7 @@
 #include "PresetMan.h"
 #include "ThreadMan.h"
 #include "BuyMenuGUI.h"
+#include "SceneEditorGUI.h"
 #include "MetaMan.h"
 #include "NetworkMessages.h"
 #include "SceneMan.h"
@@ -384,11 +385,18 @@ void WorldStateServerSession::ProcessConstruction(const WorldStateTransport::Rec
 		const auto lastTime = m_LastConstructionTimeByClient.find(client);
 		if (lastTime != m_LastConstructionTimeByClient.end() && now - lastTime->second < std::chrono::milliseconds(250)) result.Reason = "rate_limit";
 		else if (!activity || activity->GetActivityState() != Activity::Editing) result.Reason = "not_editing";
-		else if (request.Action != WorldStateProtocol::ConstructionAction::SetReady) result.Reason = "placement_unavailable";
+		else if (request.Action != WorldStateProtocol::ConstructionAction::SetReady && request.Action != WorldStateProtocol::ConstructionAction::PlaceBrain) result.Reason = "placement_unavailable";
 		else {
 			g_ThreadMan.GetPriorityThreadPool().wait_for_tasks();
 			g_ThreadMan.GetBackgroundThreadPool().wait_for_tasks();
-			result.Accepted = activity->SetNetworkConstructionReady(slot->second, request.Ready, result.Reason);
+			if (request.Action == WorldStateProtocol::ConstructionAction::SetReady) {
+				result.Accepted = activity->SetNetworkConstructionReady(slot->second, request.Ready, result.Reason);
+			} else if (slot->second >= Players::MaxPlayerCount || !activity->PlayerActive(slot->second) || !activity->PlayerHuman(slot->second)) {
+				result.Reason = "inactive_player";
+			} else if (auto* editor = activity->GetEditorGUI(slot->second)) {
+				result.Accepted = editor->InstallNetworkBrain(Vector(request.X, request.Y), request.Rotation, request.HFlipped, result.Reason);
+				if (result.Accepted) result.Accepted = activity->SetNetworkConstructionReady(slot->second, false, result.Reason);
+			} else result.Reason = "editor_unavailable";
 		}
 		m_LastConstructionTimeByClient[client] = now;
 	}

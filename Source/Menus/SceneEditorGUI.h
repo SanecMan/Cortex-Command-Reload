@@ -150,6 +150,8 @@ namespace RTE {
 		/// into isntallation mode if no brain was found.
 		/// @return Whether a resident brain was found, AND found in a valid location!
 		bool TestBrainResidence(bool noBrainIsOK = false);
+		/// Install the server-selected brain on the simulation thread using native path validation.
+		bool InstallNetworkBrain(const Vector& position, float rotation, bool hFlipped, std::string& reason);
 
 		/// Updates the state of this Menu each frame
 		void Update();

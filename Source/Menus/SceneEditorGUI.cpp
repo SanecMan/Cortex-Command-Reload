@@ -20,6 +20,8 @@
 #include "SLTerrain.h"
 #include "ObjectPickerGUI.h"
 #include "Scene.h"
+#include "ThreadMan.h"
+#include "Constants.h"
 #include "SettingsMan.h"
 #include "Deployment.h"
 #include "BunkerAssemblyScheme.h"
@@ -31,6 +33,8 @@
 
 #include <array>
 #include <string>
+#include <cmath>
+#include <memory>
 
 using namespace RTE;
 
@@ -228,6 +232,50 @@ void SceneEditorGUI::SetNativeTechModule(int whichModule) {
 void SceneEditorGUI::SetForeignCostMultiplier(float newMultiplier) {
 	m_ForeignCostMult = newMultiplier;
 	m_pPicker->SetForeignCostMultiplier(m_ForeignCostMult);
+}
+
+bool SceneEditorGUI::InstallNetworkBrain(const Vector& position, float rotation, bool hFlipped, std::string& reason) {
+	reason.clear();
+	auto* activity = g_ActivityMan.GetActivity();
+	auto* scene = g_SceneMan.GetScene();
+	const int player = m_pController ? m_pController->GetPlayer() : -1;
+	if (!activity || !scene || m_FeatureSet != INGAMEEDIT || player < 0 || player >= Players::MaxPlayerCount ||
+	    !activity->PlayerActive(player) || !activity->PlayerHuman(player) || activity->GetActivityState() != Activity::Editing) {
+		reason = "editor_unavailable"; return false;
+	}
+	if (!std::isfinite(position.GetX()) || !std::isfinite(position.GetY()) || !std::isfinite(rotation) ||
+	    position.GetX() < 0 || position.GetY() < 0 || position.GetX() >= g_SceneMan.GetSceneWidth() || position.GetY() >= g_SceneMan.GetSceneHeight()) {
+		reason = "outside_scene"; return false;
+	}
+	const SceneObject* source = m_pCurrentObject && m_pCurrentObject->IsInGroup("Brains") ? m_pCurrentObject : scene->GetResidentBrain(player);
+	if (!source) source = dynamic_cast<const SceneObject*>(g_PresetMan.GetEntityPreset("Actor", "Brain Case", "Base.rte"));
+	std::unique_ptr<SceneObject> clone(source ? dynamic_cast<SceneObject*>(source->Clone()) : nullptr);
+	if (auto* deployment = dynamic_cast<Deployment*>(clone.get())) {
+		deployment->SetTeam(activity->GetTeamOfPlayer(player)); deployment->SetPlacedByPlayer(player);
+		float ignoredCost = 0;
+		clone.reset(deployment->CreateDeployedActor(player, ignoredCost));
+	}
+	auto* brain = dynamic_cast<Actor*>(clone.get());
+	if (!brain || !brain->IsInGroup("Brains")) { reason = "brain_unavailable"; return false; }
+	brain->SetPos(position); brain->SetRotAngle(std::remainder(rotation, c_TwoPI)); brain->SetHFlipped(hFlipped);
+	brain->SetTeam(activity->GetTeamOfPlayer(player)); brain->SetPlacedByPlayer(player);
+	// Join the native path worker before replacing its target/callback state.
+	g_ThreadMan.GetBackgroundThreadPool().wait_for_tasks();
+	m_PathRequest.reset();
+	scene->UpdatePathFinding();
+	UpdateBrainSkyPathAndCost(position);
+	g_ThreadMan.GetBackgroundThreadPool().wait_for_tasks();
+	if (m_RequireClearPathToOrbit && (!std::isfinite(m_BrainSkyPathCost) || m_BrainSkyPathCost > MAXBRAINPATHCOST)) {
+		reason = "invalid_brain_placement"; return false;
+	}
+	// Transfer ownership only after validation, keeping the old resident on failure.
+	scene->SetResidentBrain(player, clone.release());
+	SetCurrentObject(nullptr);
+	m_CursorPos = position;
+	m_EditorGUIMode = PICKINGOBJECT;
+	m_ModeChanged = true;
+	m_EditMade = true;
+	return true;
 }
 
 bool SceneEditorGUI::TestBrainResidence(bool noBrainIsOK) {
@@ -551,7 +599,7 @@ void SceneEditorGUI::Update() {
 				// Fly over to where the brain was previously found
 				SetCursorPos(pBrain->GetPos());
 				// If the brain in hand is not appropriate replacement, then just use the resident brain as a copy to re-place it
-				if (!m_pCurrentObject->IsInGroup("Brains")) {
+				if (!m_pCurrentObject || !m_pCurrentObject->IsInGroup("Brains")) {
 					// Make sure the player's resident brain is the one being held in cursor
 					SetCurrentObject(dynamic_cast<SceneObject*>(pBrain->Clone()));
 					// Clear the brain of the scene; it will be reinstated when we place it again

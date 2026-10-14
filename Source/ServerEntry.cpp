@@ -71,12 +71,49 @@ bool VerifyConstructionBoundary(RTE::WorldStateClientSession& client) {
 	return checkReply(request, false, spectator ? "spectator" : "stale_request");
 }
 
+bool VerifyBrainConstructionStart(RTE::WorldStateClientSession& client) {
+	using namespace RTE::WorldStateProtocol;
+	ConstructionRequest request;
+	request.RequestId = 1; request.SceneRevision = client.GetLatestSnapshot().SceneRevision;
+	request.Action = ConstructionAction::PlaceBrain;
+	request.X = 100.0F + 100.0F * client.GetAssignedPlayerSlot(); request.Y = 30;
+	auto send = [&](const ConstructionRequest& command, bool accepted, const std::string& reason) {
+		client.DrainConstructionResults();
+		if (!client.SendConstructionRequest(command)) return false;
+		const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(6);
+		while (std::chrono::steady_clock::now() < deadline) {
+			client.Update(); client.SendInputCommand({});
+			if (client.HasSnapshot()) {
+				const auto revision = client.GetLatestSnapshot().SceneRevision;
+				client.DrainSoundEvents(revision); client.DrainTerrainPatches(revision); client.DrainPurchaseResults();
+			}
+			for (const auto& reply : client.DrainConstructionResults()) {
+				if (reply.RequestId != command.RequestId) continue;
+				if (reply.Accepted != accepted || reply.Reason != reason || reply.SceneRevision != request.SceneRevision || reply.ChargedCost != 0) {
+					std::cerr << "Brain response mismatch id=" << reply.RequestId << " accepted=" << reply.Accepted << " reason=" << reply.Reason << '\n'; return false;
+				}
+				std::this_thread::sleep_for(std::chrono::milliseconds(350)); return true;
+			}
+			if (!client.GetConnectionError().empty()) return false;
+			std::this_thread::sleep_for(std::chrono::milliseconds(20));
+		}
+		std::cerr << "Brain construction reply timed out\n"; return false;
+	};
+	if (!send(request, true, "") || !send(request, true, "")) return false;
+	ConstructionRequest invalid = request; invalid.RequestId = 2; invalid.X = -1;
+	if (!send(invalid, false, "outside_scene")) return false;
+	request = {}; request.RequestId = 3; request.SceneRevision = client.GetLatestSnapshot().SceneRevision;
+	request.Action = ConstructionAction::SetReady; request.Ready = true;
+	return send(request, true, "");
+}
+
 int RunClientProbe(const std::vector<std::string>& arguments) {
 	bool requireText = false, inputSilence = false, requireObjectives = false, requireControl = false;
 	unsigned int probeSeconds = 3;
 	unsigned int minimumRevision = 1;
 	unsigned int expectedHumans = 0;
 	bool constructionCheck = false, constructionPassed = false;
+	bool brainStart = false, brainPlaced = false;
 	if (arguments.size() < 4 || arguments[2].empty()) {
 		std::cerr << "Usage: CortexCommandServer --probe-client ADDRESS PORT [--screen-text] [--probe-seconds 3..3600] [--input-silence]\n"; return 2;
 	}
@@ -85,6 +122,7 @@ int RunClientProbe(const std::vector<std::string>& arguments) {
 		else if (arguments[index] == "--objectives") requireObjectives = true;
 		else if (arguments[index] == "--require-control") requireControl = true;
 		else if (arguments[index] == "--construction-check") constructionCheck = true;
+		else if (arguments[index] == "--brain-start") { brainStart = true; requireControl = true; }
 		else if (arguments[index] == "--expected-humans" && index + 1 < arguments.size()) {
 			const auto& value = arguments[++index];
 			const auto number = std::from_chars(value.data(), value.data() + value.size(), expectedHumans);
@@ -136,6 +174,13 @@ int RunClientProbe(const std::vector<std::string>& arguments) {
 			std::cerr << client.GetConnectionError() << '\n'; client.Disconnect(); return 1;
 		}
 		if (client.IsConnected() && client.HasPlayerAssignment() && client.HasSnapshot()) {
+			if (brainStart && !brainPlaced) {
+				const auto& before = client.GetLatestSnapshot();
+				const auto humans = std::count_if(before.Players.begin(), before.Players.end(), [](const auto& player) { return player.ActiveHuman; });
+				if (client.GetAssignedPlayerSlot() < 0 || humans != 2) { client.SendInputCommand({}); std::this_thread::sleep_for(std::chrono::milliseconds(20)); continue; }
+				if (before.ActivityState != 2 || !VerifyBrainConstructionStart(client)) { client.Disconnect(); return 1; }
+				brainPlaced = true;
+			}
 			if (constructionCheck && !constructionPassed) {
 				// The initial assignment is a spectator placeholder until Activity activation.
 				if (client.GetAssignedPlayerSlot() < 0) { std::this_thread::sleep_for(std::chrono::milliseconds(20)); continue; }
@@ -166,6 +211,7 @@ int RunClientProbe(const std::vector<std::string>& arguments) {
 				if (client.GetReceivedSnapshotCount() >= 10 && static_cast<std::int32_t>(snapshot.Tick - firstTick) >= 60 &&
 				    std::chrono::steady_clock::now() - started >= std::chrono::seconds(probeSeconds) && (!requireText || receivedText) && (!requireObjectives || receivedObjectives) &&
 				    (!requireControl || (controlledActor != 0 && snapshot.SceneRevision >= minimumRevision)) && (!expectedHumans || humans == expectedHumans)) {
+					if (brainStart && snapshot.ActivityState != 4) continue;
 					std::cout << "result=passed snapshots=" << client.GetReceivedSnapshotCount() << " objects=" << snapshot.Objects.size()
 					          << " tick_delta=" << snapshot.Tick - firstTick << " input_queued=" << commands
 					          << " probe_seconds=" << probeSeconds << " silence_windows=" << silenceWindows
@@ -173,6 +219,7 @@ int RunClientProbe(const std::vector<std::string>& arguments) {
 					          << " controlled_actor=" << controlledActor << " scene_revision=" << snapshot.SceneRevision
 					          << " humans=" << humans
 					          << " construction_checks=" << (constructionPassed ? 7 : 0)
+					          << " brain_start=" << brainPlaced
 					          << " activity_state=" << static_cast<int>(snapshot.ActivityState)
 					          << " assigned_slot=" << client.GetAssignedPlayerSlot() << " hud_received=" << receivedText << '\n';
 					client.Disconnect(); return 0;
