@@ -330,6 +330,11 @@ the five-second deadline and all rejection/retry assertions. This prevents a
 possible early exit if a snapshot precedes the connection event; the earlier
 intermittent failure's cause remains unproven. `ConstructionTerrainReadyVisual` 
 passed in 54.51 seconds with 63 further updates after that change.
+Native Final compiled and linked. `ConstructionTerrainReadyDelivered` passed
+against the delivered root client/server in 55.75 seconds with both clients and
+63 further server updates. Both wait states and both foreign-version rejection
+checks passed; the delivered terrain screenshot was inspected without a selected
+object preview. Linux terrain run `38592076787` succeeded for `ac7487c274c`.
 Linux cross-peer authorization run `38588875168` succeeded for `1ec61b9636d`.
 
 ### Brain placement and native start
