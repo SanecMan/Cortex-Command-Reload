@@ -10,9 +10,12 @@
 #include "WindowMan.h"
 #include "SoundSet.h"
 #include "TimerMan.h"
+#include "SoundFadeMath.h"
 
 #include <array>
 #include <cstring>
+#include <chrono>
+#include <thread>
 
 using namespace RTE;
 
@@ -670,22 +673,27 @@ void AudioMan::FadeOutSoundContainerPlayingChannels(SoundContainer* soundContain
 		RegisterSoundEvent(-1, SOUND_FADE_OUT, soundContainer, fadeOutTime);
 	}
 
-	int sampleRate;
-	m_AudioSystem->getSoftwareFormat(&sampleRate, nullptr, nullptr);
-	int fadeOutTimeAsSamples = fadeOutTime * sampleRate / 1000;
+	if (fadeOutTime <= 0) { soundContainer->Stop(); return; }
+	int sampleRate = 0;
+	if (m_AudioSystem->getSoftwareFormat(&sampleRate, nullptr, nullptr) != FMOD_OK || sampleRate <= 0) {
+		g_ConsoleMan.PrintString("ERROR: Could not get sample rate for sound fade"); return;
+	}
+	const auto fadeOutTimeAsSamples = SoundFadeSamples(fadeOutTime, sampleRate);
 
 	FMOD_RESULT result;
 	FMOD::Channel* soundChannel;
 	unsigned long long parentClock;
-	float currentVolume;
 
 	const std::unordered_set<int> channels = *soundContainer->GetPlayingChannels();
 	for (int channel: channels) {
 		result = m_AudioSystem->getChannel(channel, &soundChannel);
 		result = (result == FMOD_OK) ? soundChannel->getDSPClock(nullptr, &parentClock) : result;
-		result = (result == FMOD_OK) ? soundChannel->getVolume(&currentVolume) : result;
-		result = (result == FMOD_OK) ? soundChannel->addFadePoint(parentClock, currentVolume) : result;
-		result = (result == FMOD_OK) ? soundChannel->addFadePoint(parentClock + fadeOutTimeAsSamples, 0) : result;
+		std::uint64_t fadeEnd = 0;
+		if (result == FMOD_OK && !SoundFadeEnd(parentClock, fadeOutTimeAsSamples, fadeEnd)) result = FMOD_ERR_INVALID_PARAM;
+		// Fade points multiply channel volume; using its volume again squares it.
+		result = (result == FMOD_OK) ? soundChannel->addFadePoint(parentClock, 1.0F) : result;
+		result = (result == FMOD_OK) ? soundChannel->addFadePoint(fadeEnd, 0) : result;
+		result = (result == FMOD_OK) ? soundChannel->setDelay(0, fadeEnd, true) : result;
 
 		if (result != FMOD_OK) {
 			g_ConsoleMan.PrintString("ERROR: Could not fade out sounds in SoundContainer " + soundContainer->GetPresetName() + ": " + std::string(FMOD_ErrorString(result)));
@@ -923,6 +931,36 @@ bool AudioMan::VerifySoundContainerLifetime() {
 		passed = (queried == FMOD_ERR_INVALID_HANDLE || (queried == FMOD_OK && !playing)) && passed;
 	} else passed = status == FMOD_ERR_INVALID_HANDLE && passed;
 	m_AudioSystem->update(); DrainFinishedChannels();
+	auto fadeSound = std::make_unique<SoundContainer>();
+	fadeSound->GetTopLevelSoundSet().AddSound("Base.rte/Sounds/GUIs/SlicePicked.flac", Vector(), 0, -1, false);
+	fadeSound->SetImmobile(true); fadeSound->SetVolume(0.5F); fadeSound->SetLoopSetting(-1);
+	if (!fadeSound->Play() || fadeSound->GetPlayingChannels()->empty()) return false;
+	const int fadeIndex = *fadeSound->GetPlayingChannels()->begin();
+	fadeSound->FadeOut(100);
+	channel = nullptr; unsigned int points = 2;
+	unsigned long long clocks[2]{}, delayStart = 0, delayEnd = 0; float gains[2]{}, baseVolume = 0; bool stopAtEnd = false;
+	passed = m_AudioSystem->getChannel(fadeIndex, &channel) == FMOD_OK && channel &&
+	    channel->getFadePoints(&points, clocks, gains) == FMOD_OK && points == 2 && gains[0] == 1 && gains[1] == 0 &&
+	    channel->getVolume(&baseVolume) == FMOD_OK && baseVolume == 0.5F &&
+	    channel->getDelay(&delayStart, &delayEnd, &stopAtEnd) == FMOD_OK && stopAtEnd && delayEnd == clocks[1] && delayEnd > clocks[0] && passed;
+	const auto fadeDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+	while (fadeSound->IsBeingPlayed() && std::chrono::steady_clock::now() < fadeDeadline) {
+		m_AudioSystem->update(); DrainFinishedChannels();
+		std::this_thread::sleep_for(std::chrono::milliseconds(5));
+	}
+	passed = !fadeSound->IsBeingPlayed() && passed;
+	auto zeroFade = std::make_unique<SoundContainer>();
+	zeroFade->GetTopLevelSoundSet().AddSound("Base.rte/Sounds/GUIs/SlicePicked.flac", Vector(), 0, -1, false);
+	zeroFade->SetImmobile(true); zeroFade->SetLoopSetting(-1);
+	if (!zeroFade->Play() || zeroFade->GetPlayingChannels()->empty()) return false;
+	const int zeroFadeIndex = *zeroFade->GetPlayingChannels()->begin();
+	FadeOutSoundContainerPlayingChannels(zeroFade.get(), 0);
+	channel = nullptr; playing = false;
+	const auto fadeStatus = m_AudioSystem->getChannel(zeroFadeIndex, &channel);
+	if (fadeStatus == FMOD_OK && channel) {
+		const auto queried = channel->isPlaying(&playing);
+		passed = (queried == FMOD_ERR_INVALID_HANDLE || (queried == FMOD_OK && !playing)) && passed;
+	} else passed = fadeStatus == FMOD_ERR_INVALID_HANDLE && passed;
 	return passed;
 }
 

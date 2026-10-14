@@ -1,5 +1,36 @@
 # World-state protocol
 
+## Native fade lifecycle fixes under validation
+
+The silent `Tools/FmodFadeProbe.cpp` checks the installed FMOD build using
+NOSOUND_NRT. With base channel volume 0.5, a fade point of 0.5 produced
+audibility 0.25; changing that point to 1 restored audibility 0.5. Therefore
+fade points are multipliers, and the former engine code applied channel volume
+twice. Native FadeOut now starts its envelope at 1, keeps the channel's base
+volume and schedules channel termination at the end of the envelope. Zero or
+negative durations stop immediately. Sample-count arithmetic uses 64-bit values
+and checks deadline addition, rather than multiplying two signed ints.
+
+The portable `SoundFadeMathTest` passed maximum-int duration and overflow checks.
+The FMOD probe also showed that group pause freezes parent DSP time, while
+individual channel pause does not. Reaching a zero fade point alone left an
+infinite channel playing; a scheduled end stopped it after resume. A paused
+channel can remain allocated until resume, even with a scheduled end.
+
+The engine audio diagnostic now checks the actual normalized fade points, base
+volume 0.5, scheduled end, natural expiration of a 100 ms infinite voice and
+immediate zero-duration termination. Both Meson targets compiled and linked;
+`SoundFadeLifecycleFMOD` passed in 29.68 seconds with two audio-enabled clients,
+group pause/resume and owner/fade checks, clean exits and 62 further server
+updates. The rerun reused the same output prefix. Native Final delivery and
+Linux checks for this update are separate stages.
+
+Late-join fade gain is not yet reconstructed. The headless timeline currently
+freezes fades for both explicit and bus pause, whereas FMOD distinguishes these
+clocks and replicas implement bus pause through individual channels. That
+remaining clock/envelope mismatch must be handled before claiming matching
+fade playback across headless simulation, host audio and network replicas.
+
 ## v24 sound cycle completion under validation
 
 Development sources add FinishBusLoops to session protocol 24 and inner sound
@@ -47,7 +78,11 @@ Native MSBuild `Final|x64` subsequently compiled and linked successfully. The
 root pair passed `SoundFinishV24Delivered` in 33.24 seconds: both audio-enabled
 clients connected through the menu, queried native loop count zero, naturally
 expired without Stop and exited cleanly. The server continued 63 updates after
-disconnect. Linux CI run `38494425830` checks the v24 commit separately.
+disconnect. Linux CI run `38494425830` for `5d2cfaf03f8` passed the v24 server
+build, codec/capture checks and extracted-package verification. Build-tree and
+package checks passed in 13.24/9.72 seconds with two external clients, input and
+UTF-8 screen messages, no video initialization and clean SIGTERM shutdown.
+This run precedes the native fade lifecycle changes.
 
 ## v23 active sound baselines under validation
 
