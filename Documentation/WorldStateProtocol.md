@@ -30,6 +30,13 @@ comparison included the new state; no inventory/attachment mismatches were
 reported. Both exited cleanly and the server continued after disconnect.
 These are elapsed test durations, not performance measurements. Native Final,
 Linux and a visible player HUD reload-bar check are separate gates.
+
+Native MSBuild `Final|x64` subsequently compiled and linked. The updated root
+pair passed `DeviceVisualV26Delivered` in 31.63 seconds with two menu-connected
+clients, exact inventory device-state transitions, zero attachment mismatches,
+clean exits and 63 additional server updates after disconnect. Linux CI run
+`38501991229` validates commit `87cfef33db3` separately. A visible player HUD bar
+is not established by the stored-device fixture.
 This does not yet replicate fire/recoil timing,
 arbitrary weapon Lua state or all Activity-specific HUD elements.
 
