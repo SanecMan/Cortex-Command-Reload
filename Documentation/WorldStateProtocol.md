@@ -25,7 +25,11 @@ seconds with two separate clients, 128 observed ticks, input and UTF-8 text,
 without video initialization. `DeviceVisualV27Inventory` passed in 30.52 seconds
 with two menu-connected clients, inventory changes and the native fire/recoil
 on/off attachment tests. Both clients exited successfully; the server continued
-62 updates after disconnect. Native Final and Linux verification are pending.
+62 updates after disconnect. Native MSBuild Final|x64 compiled and linked;
+the root matched client/server pair passed `DeviceVisualV27Delivered` in
+32.45 seconds, including both native attachment tests and inventory changes,
+with 62 server updates after disconnect. Linux CI `38506544539` for
+`94f6fc8b68f` is pending; no Linux v27 runtime result is claimed yet.
 
 This is snapshot presentation, not a reliable shot-event stream. A shot entirely
 between snapshot captures can still be missed visually. Event history/counters
