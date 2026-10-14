@@ -80,6 +80,11 @@ jobs:
         run: |
           g++-13 -std=c++20 -Wall -Wextra -I Source/System Tools/SoundFadeEnvelopeTest.cpp -o build-server/sound-fade-envelope-test
           build-server/sound-fade-envelope-test
+      - name: Verify asynchronous sound resource shutdown
+        run: |
+          g++-13 -std=c++20 -Wall -Wextra -I external/include/fmod-2.2.13 Tools/FmodAsyncSoundShutdownTest.cpp external/lib/linux/x86_64/libfmod.so.13.20 -o build-server/fmod-async-shutdown-test
+          cp external/lib/linux/x86_64/libfmod.so.13.20 build-server/libfmod.so.13
+          LD_LIBRARY_PATH="$PWD/build-server${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" build-server/fmod-async-shutdown-test Data
       - name: Check dependencies
         run: |
           ldd build-server/CortexCommandServer | tee build-server/runtime-dependencies.txt

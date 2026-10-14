@@ -12,6 +12,7 @@
 #include "TimerMan.h"
 #include "SoundFadeMath.h"
 #include "SoundPlaybackClock.h"
+#include "ContentFile.h"
 
 #include <array>
 #include <cstring>
@@ -140,6 +141,8 @@ bool AudioMan::Initialize() {
 void AudioMan::Destroy() {
 	if (m_AudioEnabled) {
 		StopAll();
+		// Finish asynchronously loaded samples before FMOD tears down its workers.
+		ContentFile::ReleaseLoadedSounds();
 		const auto closed = m_AudioSystem->close();
 		if (closed != FMOD_OK) g_ConsoleMan.PrintString("ERROR: FMOD close failed: " + std::string(FMOD_ErrorString(closed)));
 		m_AudioSystem->release();

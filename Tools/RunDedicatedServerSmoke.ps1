@@ -385,6 +385,7 @@ try {
     foreach ($index in 1..2) {
         $clientDirectory = Join-Path $gameDirectory "ScreenShots\$OutputPrefix-Client$index"
         $clientReport = Read-Report (Join-Path $clientDirectory 'DebugRun.log')
+        if ($EnableAudio -and $clientReport -notmatch '(?m)^audio_shutdown_complete\r?$') { throw 'Client audio shutdown was not verified.' }
         $clientNetwork = Read-Report (Join-Path $clientDirectory 'WorldStateClient.log')
         if ($CheckMenuConnection -and ($clientReport -notmatch '(?m)^menu_connection=passed' -or
             $clientReport -notmatch '(?m)^menu_validation_and_cancel=passed' -or

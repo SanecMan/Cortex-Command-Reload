@@ -971,6 +971,13 @@ both debug clients to log `unexpected_network_disconnect` and exit 1 with
 runs that would otherwise remain in the connection/menu screen indefinitely.
 Normal interactive clients retain the disconnected menu and reconnect flow.
 
+Audio-enabled diagnostics also require `audio_shutdown_complete` after gameplay
+finishes. Cached asynchronous samples are released before FMOD closes. A
+standalone SDK regression can be compiled from
+`Tools/FmodAsyncSoundShutdownTest.cpp` with the bundled FMOD include path/library;
+run it from the game directory with `Data` as its argument. It opens no window
+or output device and tests three cycles of all supported audio files in Data.
+
 ## Remaining limits
 
 This is a working Windows/Linux headless host foundation. A complete gameplay release

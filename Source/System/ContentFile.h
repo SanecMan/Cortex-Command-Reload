@@ -3,6 +3,7 @@
 #include "Serializable.h"
 
 #include <array>
+#include <cstddef>
 #include <unordered_map>
 #include <string>
 #include <vector>
@@ -61,6 +62,8 @@ namespace RTE {
 
 		/// Frees all loaded data used by all ContentFile instances. This should ONLY be done when quitting the app, or after everything else is completely destroyed.
 		static void FreeAllLoaded();
+		// Shutdown only: call after stopping voices, before releasing FMOD System.
+		static std::size_t ReleaseLoadedSounds();
 #pragma endregion
 
 #pragma region Getters and Setters

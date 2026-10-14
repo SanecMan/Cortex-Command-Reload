@@ -68,6 +68,34 @@ the deliberate-server-shutdown test in 18.46 seconds: both root debug clients
 logged the disconnect and exited 1; the server exited 0. The queue/debug-guard
 follow-up still requires its own Linux CI run.
 
+## Audio sample cache shutdown regression
+
+Enabling audio in a later v28 client check exposed EXCEPTION_ACCESS_VIOLATION
+inside FMOD::getGlobals while releasing the playback System. It also reproduced
+in a single-player diagnostic, so it was not attributed to world replication.
+Small standalone FMOD tests passed 30 cycles with DSP groups, per-voice DSPs and
+a second metadata System. Loading all 2248 Data audio files asynchronously in
+the standalone test reproduced the crash on System-only teardown. Releasing
+each Sound first then releasing System passed three cycles with the same files.
+
+ContentFile::ReleaseLoadedSounds now releases and clears the cached FMOD samples
+after channels stop and before the playback System closes. Its implementation
+is separate from bitmap cleanup and is compiled by MSBuild and Meson. Shutdown
+waits for queued MOID/priority tasks and reopens the debug report for
+audio_shutdown_begin/audio_shutdown_complete markers. Audio-enabled smoke tests
+now require the completion marker. Experimental callback/polling and metadata
+changes that did not remove the crash were reverted.
+
+MSBuild Final|x64 and both Meson binaries compiled/linked. The previously failing
+single-player diagnostic exited 0. Three consecutive delivered two-client
+recent-shot/audio runs passed in 33.26, 34.15 and 34.40 seconds, with 62/63/63
+server updates after disconnect and six clean client audio shutdowns. The
+standalone Tools/FmodAsyncSoundShutdownTest.cpp passed three cycles of 2248
+samples. The root headless regression passed in 18.92 seconds with two clients,
+127 ticks, input/config/text UTF-8, no video device and clean exits. These checks
+cover the reproduced shutdown failure, not every possible FMOD or mod race.
+Linux verification of this cache-release follow-up remains pending.
+
 This is bounded latest-shot reconstruction rather than a queue of every shot:
 bursts can coalesce, removed weapons have no surviving history, and packet
 latency is not subtracted from the reported simulation age. Arbitrary weapon Lua

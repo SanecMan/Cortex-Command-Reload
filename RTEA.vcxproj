@@ -1341,6 +1341,7 @@
     <ClCompile Include="Source\System\Box.cpp" />
     <ClCompile Include="Source\System\Color.cpp" />
     <ClCompile Include="Source\System\ContentFile.cpp" />
+    <ClCompile Include="Source\System\ContentFileSoundCache.cpp" />
     <ClCompile Include="Source\System\DataModule.cpp" />
     <ClCompile Include="Source\System\RTEError.cpp" />
     <ClCompile Include="Source\System\RTETools.cpp" />

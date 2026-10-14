@@ -2449,7 +2449,12 @@ void InitializeManagers() {
 /// Destroys all the managers and frees all loaded data before termination.
 /// </summary>
 void DestroyManagers() {
+	g_MovableMan.CompleteQueuedMOIDDrawings();
+	g_ThreadMan.GetPriorityThreadPool().wait_for_tasks();
 	// Stop FMOD while every channel owner and the console still exist.
+	if (System::IsDebugRun() && !GetDebugRunState().Log.is_open()) {
+		GetDebugRunState().Log.open(GetDebugRunState().OutputDirectory / "DebugRun.log", std::ios::app);
+	}
 	if (System::IsDebugRun()) GetDebugRunState().Log << "audio_shutdown_begin\n" << std::flush;
 	g_AudioMan.Destroy();
 	if (System::IsDebugRun()) GetDebugRunState().Log << "audio_shutdown_complete\n" << std::flush;

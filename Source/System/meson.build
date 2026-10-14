@@ -8,6 +8,7 @@ sources += files(
 'AllegroTools.cpp',
 'Atom.cpp',
 'ContentFile.cpp',
+'ContentFileSoundCache.cpp',
 'Controller.cpp',
 'GenericSavedData.cpp',
 'Writer.cpp',
