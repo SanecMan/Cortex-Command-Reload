@@ -15,6 +15,7 @@
 #include "MovableObject.h"
 #include <chrono>
 #include <memory>
+#include <unordered_set>
 
 namespace RTE {
 class WorldStateConstructionMenu {
@@ -29,9 +30,30 @@ public:
 	float LastChargedCost() const { return m_LastCost; }
 	std::uint64_t LastPlacedObjectId() const { return m_LastPlacedId; }
 	bool RemoveLastObject(WorldStateClientSession& client) {
-		if (!m_Active || m_Slot < 0 || m_Pending || !m_State.SceneRevision || !m_LastPlacedId) return false;
+		return RemoveObject(client, m_LastPlacedId);
+	}
+	std::uint64_t FindOwnedObjectAt(const WorldStateClientSession& client, const Vector& position) const {
+		if (!m_Active || m_Slot < 0 || !client.HasSnapshot() || client.GetLatestSnapshot().SceneRevision != m_Revision) return 0;
+		std::uint64_t nearest = 0; float distanceSquared = 24.0F * 24.0F;
+		for (const auto& object : client.GetLatestSnapshot().Objects) {
+			if (!m_OwnedObjects.contains(object.NetworkId) || object.Team != m_State.Players[m_Slot].Team) continue;
+			const auto distance = g_SceneMan.ShortestDistance(position, Vector(object.PositionX, object.PositionY), true);
+			const float squared = distance.GetX() * distance.GetX() + distance.GetY() * distance.GetY();
+			if (squared < distanceSquared || (squared == distanceSquared && (!nearest || object.NetworkId < nearest))) {
+				nearest = object.NetworkId; distanceSquared = squared;
+			}
+		}
+		return nearest;
+	}
+	bool RemoveObjectAt(WorldStateClientSession& client, const Vector& position) {
+		const auto target = FindOwnedObjectAt(client, position);
+		if (!target) { m_Status = "Move the cursor near an object you placed"; return false; }
+		return RemoveObject(client, target);
+	}
+	bool RemoveObject(WorldStateClientSession& client, std::uint64_t objectId) {
+		if (!m_Active || m_Slot < 0 || m_Pending || !m_State.SceneRevision || !objectId || !m_OwnedObjects.contains(objectId)) return false;
 		WorldStateProtocol::ConstructionRequest request;
-		request.Action = WorldStateProtocol::ConstructionAction::RemoveObject; request.ObjectId = m_LastPlacedId;
+		request.Action = WorldStateProtocol::ConstructionAction::RemoveObject; request.ObjectId = objectId;
 		return Send(client, request);
 	}
 	const std::string& LastRejection() const { return m_LastReason; }
@@ -68,7 +90,7 @@ public:
 	}
 	void Reset() {
 		const ObjectScriptExecution::SuppressionScope suppress;
-		ClearSelection(); m_Picker.reset(); m_LastCost = 0; m_LastReason.clear(); m_LastPlacedId = 0;
+		ClearSelection(); m_Picker.reset(); m_LastCost = 0; m_LastReason.clear(); m_LastPlacedId = 0; m_OwnedObjects.clear();
 		m_Catalog = {}; m_CatalogSequence = 0; m_CatalogReady = true; m_CatalogNativeModule = 0; m_CatalogModuleSpace = -1;
 		for (auto& preview : m_Previews) { if (preview.Object) preview.Object->DestroyScriptState(); preview = {}; }
 		m_Active = m_Pending = m_LastAccepted = false; m_Revision = 0; m_Slot = -1; m_State = {}; m_Status.clear();
@@ -123,8 +145,12 @@ public:
 			m_Pending = false; m_LastAccepted = reply.Accepted;
 			m_LastCost = reply.ChargedCost;
 			m_LastReason = reply.Reason;
-			if (reply.Accepted && m_Request.Action == WorldStateProtocol::ConstructionAction::PlaceObject && reply.ObjectId) m_LastPlacedId = reply.ObjectId;
-			if (m_Request.Action == WorldStateProtocol::ConstructionAction::RemoveObject && (reply.Accepted || reply.Reason == "object_missing")) m_LastPlacedId = 0;
+			if (reply.Accepted && m_Request.Action == WorldStateProtocol::ConstructionAction::PlaceObject && reply.ObjectId) {
+				m_LastPlacedId = reply.ObjectId; m_OwnedObjects.insert(reply.ObjectId);
+			}
+			if (m_Request.Action == WorldStateProtocol::ConstructionAction::RemoveObject && (reply.Accepted || reply.Reason == "object_missing")) {
+				m_OwnedObjects.erase(m_Request.ObjectId); if (m_LastPlacedId == m_Request.ObjectId) m_LastPlacedId = 0;
+			}
 			m_Status = reply.Accepted ? "Server confirmed" : RejectionText(reply.Reason);
 			if (reply.Accepted && m_Request.Action == WorldStateProtocol::ConstructionAction::RemoveObject) m_Status = "Object removed; placement cost is not refunded";
 		}
@@ -158,7 +184,7 @@ public:
 				m_Controller.RelativeCursorMovement(m_Cursor); g_SceneMan.ForceBounds(m_Cursor);
 				if (m_Selected && !m_Pending && g_UInputMan.KeyPressed(SDLK_F8)) m_Selected->SetRotAngle(m_Selected->GetRotAngle() + 0.2617994F);
 				if (m_Selected && !m_Pending && g_UInputMan.KeyPressed(SDLK_F9)) m_Selected->SetHFlipped(!m_Selected->IsHFlipped());
-				if (!m_Pending && g_UInputMan.KeyPressed(SDLK_DELETE)) RemoveLastObject(client);
+				if (!m_Pending && g_UInputMan.KeyPressed(SDLK_DELETE)) RemoveObjectAt(client, m_Cursor);
 				if (!m_Pending && (m_Controller.IsState(PRESS_PRIMARY) || g_UInputMan.KeyPressed(SDLK_RETURN))) {
 					if (m_Selected) PlaceObject(client, m_Cursor); else PlaceBrain(client, m_Cursor);
 				}
@@ -182,7 +208,7 @@ public:
 		line(target, point.GetFloorIntX() - 20, point.GetFloorIntY(), point.GetFloorIntX() + 20, point.GetFloorIntY(), g_YellowGlowColor);
 		AllegroBitmap bitmap(target);
 		g_FrameMan.GetSmallFont()->DrawAligned(&bitmap, target->w / 2, target->h - 56, m_Selected ? m_Selected->GetPresetName() : "Brain placement", GUIFont::Centre);
-		g_FrameMan.GetSmallFont()->DrawAligned(&bitmap, target->w / 2, target->h - 40, "Click: place | F7: objects | B: brain | F8/F9: rotate/flip | Del: last movable | F6: ready", GUIFont::Centre);
+		g_FrameMan.GetSmallFont()->DrawAligned(&bitmap, target->w / 2, target->h - 40, "Click: place | F7: objects | B: brain | F8/F9: rotate/flip | Del: object under cursor | F6: ready", GUIFont::Centre);
 		g_FrameMan.GetSmallFont()->DrawAligned(&bitmap, target->w / 2, target->h - 24, IsReady() ? "Ready - waiting for other players" : (m_Pending ? "Waiting for server..." : m_Status), GUIFont::Centre);
 		if (m_Picker) m_Picker->Draw(target);
 	}
@@ -222,6 +248,7 @@ private:
 	int m_CatalogNativeModule = 0, m_CatalogModuleSpace = -1;
 	bool m_CatalogReady = true;
 	std::uint64_t m_LastPlacedId = 0;
+	std::unordered_set<std::uint64_t> m_OwnedObjects;
 	std::string m_LastReason;
 	WorldStateProtocol::ConstructionState m_State;
 	WorldStateProtocol::ConstructionRequest m_Request;

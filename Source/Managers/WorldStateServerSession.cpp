@@ -403,7 +403,7 @@ void WorldStateServerSession::ProcessConstruction(const WorldStateTransport::Rec
 			g_ThreadMan.GetBackgroundThreadPool().wait_for_tasks();
 			if (request.Action == WorldStateProtocol::ConstructionAction::PlaceObject) {
 				std::erase_if(m_ConstructionOwners, [&](const auto& entry) {
-					const auto* object = entry.first > static_cast<std::uint64_t>(std::numeric_limits<long>::max()) ? nullptr : g_MovableMan.FindObjectByUniqueID(static_cast<long>(entry.first));
+					const auto* object = g_MovableMan.FindObjectByUniqueID(entry.second.RuntimeId);
 					return !object || object->IsSetToDelete();
 				});
 			}
@@ -416,8 +416,7 @@ void WorldStateServerSession::ProcessConstruction(const WorldStateTransport::Rec
 				if (owner == m_ConstructionOwners.end() || owner->second.Client != client || owner->second.Revision != result.SceneRevision ||
 				    owner->second.Team != activity->GetTeamOfPlayer(slot->second)) result.Reason = "object_not_owned";
 				else {
-					auto* object = request.ObjectId > static_cast<std::uint64_t>(std::numeric_limits<long>::max()) ? nullptr :
-					    g_MovableMan.FindObjectByUniqueID(static_cast<long>(request.ObjectId));
+					auto* object = g_MovableMan.FindObjectByUniqueID(owner->second.RuntimeId);
 					if (!object || object->IsSetToDelete()) result.Reason = "object_missing";
 					else if (object->GetTeam() != owner->second.Team || object->GetRootParent() != object ||
 					    !(g_MovableMan.IsActor(object) || g_MovableMan.IsDevice(object) || g_MovableMan.IsParticle(object))) result.Reason = "object_attached";
@@ -434,7 +433,11 @@ void WorldStateServerSession::ProcessConstruction(const WorldStateTransport::Rec
 						result.Reason = "invalid_preset";
 					else result.Accepted = editor->PlaceNetworkObject(preset, Vector(request.X, request.Y), request.Rotation, request.HFlipped,
 					    result.ChargedCost, result.ObjectId, result.Reason);
-					if (result.Accepted && result.ObjectId) m_ConstructionOwners[result.ObjectId] = {client, result.SceneRevision, activity->GetTeamOfPlayer(slot->second)};
+					if (result.Accepted && result.ObjectId) {
+						const long runtimeId = static_cast<long>(result.ObjectId);
+						result.ObjectId = m_SnapshotBuilder.GetOrAssignNetworkId(runtimeId);
+						m_ConstructionOwners[result.ObjectId] = {client, result.SceneRevision, activity->GetTeamOfPlayer(slot->second), runtimeId};
+					}
 				} else result.Accepted = editor->InstallNetworkBrain(Vector(request.X, request.Y), request.Rotation, request.HFlipped, result.Reason);
 				if (result.Accepted) result.Accepted = activity->SetNetworkConstructionReady(slot->second, false, result.Reason);
 			} else result.Reason = "editor_unavailable";

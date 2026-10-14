@@ -3471,7 +3471,16 @@ void RunGameLoop() {
 						const int saved = g_FrameMan.SaveScreenToPNGBlocking(image);
 						uiTest.Log << "construction_object_preview_capture=" << (saved == 0 ? "passed" : "failed") << '\n' << std::flush;
 						if (saved == 0) {
-							if (uiTest.ConstructionExpectedAffordable) { if (worldStateConstructionMenu->RemoveLastObject(*worldStateClient)) uiTest.ConstructionTestStage = 13; }
+							if (uiTest.ConstructionExpectedAffordable) {
+								const auto id = worldStateConstructionMenu->LastPlacedObjectId();
+								const auto object = std::find_if(snapshot.Objects.begin(), snapshot.Objects.end(), [&](const auto& candidate) { return candidate.NetworkId == id; });
+								if (object != snapshot.Objects.end()) {
+									const Vector position(object->PositionX, object->PositionY);
+									RTEAssert(worldStateConstructionMenu->FindOwnedObjectAt(*worldStateClient, position) == id, "Cursor did not select owned construction object");
+									RTEAssert(worldStateConstructionMenu->FindOwnedObjectAt(*worldStateClient, Vector(0, 0)) == 0, "Cursor selected a distant object");
+									if (worldStateConstructionMenu->RemoveObjectAt(*worldStateClient, position)) uiTest.ConstructionTestStage = 13;
+								}
+							}
 							else { uiTest.ConstructionTestStage = 14; uiTest.ConstructionActionUpdate = uiTest.SimulationUpdates; }
 						}
 					} else if (uiTest.ConstructionTestStage == 13 && !worldStateConstructionMenu->IsPending() && worldStateConstructionMenu->LastAccepted() &&
@@ -3480,6 +3489,7 @@ void RunGameLoop() {
 						           return object.ClassName == "HDFirearm" && object.ModuleName == "Ronin.rte" && object.PresetName == "AK-47" && object.Team == snapshot.Players[slot].Team;
 					           }) && snapshot.TeamFunds[snapshot.Players[slot].Team] == uiTest.ConstructionInitialFunds - uiTest.ConstructionObjectCost) {
 						uiTest.Log << "construction_object_removal=passed\n" << std::flush;
+						uiTest.Log << "construction_cursor_removal=passed\n" << std::flush;
 						uiTest.ConstructionTestStage = 14; uiTest.ConstructionActionUpdate = uiTest.SimulationUpdates;
 					} else if (uiTest.ConstructionTestStage == 14 && uiTest.SimulationUpdates >= uiTest.ConstructionActionUpdate + 30) {
 						const auto* block = dynamic_cast<const SceneObject*>(g_PresetMan.GetEntityPreset("TerrainObject", "Concrete Block", "Base.rte"));

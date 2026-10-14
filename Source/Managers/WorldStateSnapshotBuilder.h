@@ -10,10 +10,12 @@
 namespace RTE {
 
 	/// Captures the current authoritative simulation state in the world-state wire model.
-	/// Object IDs are taken from the engine's unique, server-local runtime IDs.
+	/// Stable network IDs are mapped from unique server-local runtime IDs.
 	class WorldStateSnapshotBuilder {
 	public:
 		WorldStateProtocol::Snapshot Capture(std::uint32_t tick);
+		/// Used by authoritative commands and capture on the simulation thread.
+		std::uint64_t GetOrAssignNetworkId(long runtimeId);
 		std::uint32_t RefreshSceneRevision() { return CaptureIdentity().SceneRevision; }
 
 	private:

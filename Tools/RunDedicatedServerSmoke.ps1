@@ -485,7 +485,7 @@ try {
         if ($CheckDeployment -and $clientNetwork -notmatch '(?m)^client_local_simulation_ticks=0') { throw 'Replica client executed local simulation.' }
         if ($CheckDeployment -and $clientReport -match '(?m)^construction_deployment_ui=passed purchased=1' -and $clientReport -notmatch '(?m)^construction_inventory_gift_ui=passed') { throw 'Inventory gift was not applied to the native client actor.' }
         $constructionPurchased = $constructionPurchased -or $clientReport -match '(?m)^construction_object_ui=passed purchased=1'
-        if ($CheckConstruction -and $clientReport -match '(?m)^construction_object_ui=passed purchased=1' -and $clientReport -notmatch '(?m)^construction_object_removal=passed') { throw 'Purchased object removal was not verified.' }
+        if ($CheckConstruction -and $clientReport -match '(?m)^construction_object_ui=passed purchased=1' -and ($clientReport -notmatch '(?m)^construction_object_removal=passed' -or $clientReport -notmatch '(?m)^construction_cursor_removal=passed')) { throw 'Purchased object removal was not verified.' }
         if ($CheckConstruction -and ($clientReport -notmatch '(?m)^construction_terrain_ui=passed' -or $clientReport -notmatch '(?m)^construction_terrain_capture=passed')) { throw 'Construction terrain apply/render capture was not verified.' }
         if ($RequireControlledActor -and $clientNetwork -notmatch 'controlled_actor=[1-9]') { throw 'Client never received a controlled actor.' }
         if ($CheckLatePlayerJoin -and ($clientNetwork -notmatch 'scene_revision=1 .*controlled_actor=[1-9]' -or $clientNetwork -match 'scene_revision=([2-9]|[1-9][0-9]+) ')) { throw 'Late admission did not preserve the running scene revision.' }

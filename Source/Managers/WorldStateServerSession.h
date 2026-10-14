@@ -53,7 +53,7 @@ namespace RTE {
 		};
 		std::unordered_map<std::string, ConstructionReply> m_LastConstructionByClient;
 		std::unordered_map<std::string, std::chrono::steady_clock::time_point> m_LastConstructionTimeByClient;
-		struct ConstructionOwner { std::string Client; std::uint32_t Revision; int Team; };
+		struct ConstructionOwner { std::string Client; std::uint32_t Revision; int Team; long RuntimeId; };
 		std::unordered_map<std::uint64_t, ConstructionOwner> m_ConstructionOwners;
 		std::uint32_t m_ConstructionOwnerRevision = 0;
 		std::unordered_map<std::string, WorldStateProtocol::ConstructionCatalog> m_LastConstructionCatalog;

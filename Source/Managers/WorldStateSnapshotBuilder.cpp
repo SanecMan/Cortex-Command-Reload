@@ -27,6 +27,13 @@ using namespace RTE;
 static_assert(Activity::NoActivity == WorldStateProtocol::c_NoActivity && Activity::Over == WorldStateProtocol::c_MaxActivityState);
 static_assert(Activity::MaxTeamCount == WorldStateProtocol::c_TeamCount);
 
+std::uint64_t WorldStateSnapshotBuilder::GetOrAssignNetworkId(long runtimeId) {
+	if (runtimeId <= 0) return 0;
+	auto [entry, inserted] = m_NetworkIdsByRuntimeId.try_emplace(runtimeId, m_NextNetworkId);
+	if (inserted && ++m_NextNetworkId == 0) m_NextNetworkId = 1;
+	return entry->second;
+}
+
 WorldStateProtocol::Snapshot WorldStateSnapshotBuilder::CaptureIdentity() {
 	WorldStateProtocol::Snapshot snapshot;
 	Activity* activity = g_ActivityMan.GetActivity();
@@ -91,14 +98,7 @@ WorldStateProtocol::Snapshot WorldStateSnapshotBuilder::Capture(std::uint32_t ti
 			continue;
 		}
 		liveRuntimeIds.insert(uniqueId);
-		auto [networkIdEntry, inserted] = m_NetworkIdsByRuntimeId.try_emplace(uniqueId, m_NextNetworkId);
-		if (inserted) {
-			++m_NextNetworkId;
-			if (m_NextNetworkId == 0) {
-				m_NextNetworkId = 1;
-			}
-		}
-		const std::uint64_t networkId = networkIdEntry->second;
+		const std::uint64_t networkId = GetOrAssignNetworkId(uniqueId);
 		if (!includedObjectIds.insert(networkId).second) {
 			continue;
 		}
@@ -239,7 +239,7 @@ WorldStateProtocol::Snapshot WorldStateSnapshotBuilder::Capture(std::uint32_t ti
 		}
 	}
 	for (auto networkIdEntry = m_NetworkIdsByRuntimeId.begin(); networkIdEntry != m_NetworkIdsByRuntimeId.end();) {
-		if (!liveRuntimeIds.contains(networkIdEntry->first)) {
+		if (!liveRuntimeIds.contains(networkIdEntry->first) && !g_MovableMan.FindObjectByUniqueID(networkIdEntry->first)) {
 			networkIdEntry = m_NetworkIdsByRuntimeId.erase(networkIdEntry);
 		} else {
 			++networkIdEntry;

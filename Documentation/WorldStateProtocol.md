@@ -305,10 +305,23 @@ items and terrain objects cannot be removed through this path.
 
 Ownership records clear on scene revision change, connection teardown and Stop.
 Dead records are pruned before placement. At most 4096 live construction records
-are retained; further placement is refused. The client remembers its latest
-acknowledged movable ID; Delete requests removal of that object. It does not yet
-provide arbitrary cursor-based selection or undo of terrain edits, and reconnect
-does not recover old placement permissions.
+are retained; further placement is refused. Construction result/request ObjectId
+now uses the snapshot network ID, while the server owner record separately holds
+the native runtime ID. Both placement acknowledgement and snapshot capture use
+the same builder mapping. Live objects retain their mapping even when temporarily
+absent from the captured roots (for example, items in a resident brain inventory).
+Old clients that treat acknowledged IDs as opaque continue to echo them normally;
+new cursor selection requires the matching updated server.
+
+The client remembers acknowledged ownership IDs for the current connection and
+scene. Delete selects the nearest currently replicated owned top-level object
+within 24 pixels of the cursor, using wrapped scene distance and a network-ID tie
+break. It can request any remembered object, not only the last placement.
+Selecting a foreign/unacknowledged or distant object does not send a request.
+RemoveLastObject remains available internally. Removing an older object preserves
+the latest-placement shortcut. Terrain undo and reconnect permission recovery
+remain unavailable; multiple-placement cursor selection still needs focused
+runtime coverage.
 
 The device-free brain-start fixture now checks real removal, response replay,
 an unknown uint64 ID, repeated removal with a fresh request ID, replicated absence
@@ -317,6 +330,17 @@ exercise an actual second peer requesting the first peer's recorded placement ID
 nor inventory/terrain cleanup. The graphical construction fixture uses the same
 client removal method and requires removal success for its paid purchase; it
 calls methods directly rather than synthesizing a physical Delete key.
+
+ConstructionCursorIdentity passed the updated graphical cursor-selection/removal
+and nondefault-price fixture in 51.41 seconds with 62 server updates after
+disconnect. It matched the acknowledged ID to the actual snapshot object, selected
+its position, refused a distant cursor position, removed it and observed its
+absence without refund. The initial cursor test exposed native/network ID mixing
+and was stopped; it is not a passing result. ConstructionCursorHeadless passed
+in 25.48 seconds with 128 further ticks, foreign-peer removal refusal, response
+replay, deployment loadout, inventory gift and attached-object removal refusal.
+These tests used Meson binaries; the root Final delivery has not yet been updated
+for cursor selection.
 
 `ConstructionRemoval` passed with two clients in 63.24 seconds, real purchase and
 removal, distinct controlled actors and 128 further server ticks, with video off.
