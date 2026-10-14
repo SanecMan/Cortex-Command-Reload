@@ -53,8 +53,15 @@ of PNGs found 11 filled bar pixels near (184,301) at progress 0.350056 and 22
 near (400,304) at progress 0.750019, matching the HUD's inclusive 28-pixel formula.
 The bar changed palette index 77 to 13 due to existing one-handed reload blink.
 Camera positions differ between frames; this is a HUD-content check, not an
-identical-frame render comparison. The latest guard still needs native Final
-delivery validation.
+identical-frame render comparison.
+
+Native `Final|x64` rebuilt successfully with the screenshot-error guard.
+`ReloadHudV26Delivered` passed on the root client/server pair in 32.99 seconds,
+with progress 0.350296 followed by 0.750019, both captured HUD images, clean
+client exits and 63 updates after disconnect. Both delivered screenshots were
+inspected and showed the changing reload bar. Linux CI run `38503760116`
+validates the diagnostic commit `67fb1533d69` separately; it does not perform
+this Windows visual check.
 This does not yet replicate fire/recoil timing,
 arbitrary weapon Lua state or all Activity-specific HUD elements.
 

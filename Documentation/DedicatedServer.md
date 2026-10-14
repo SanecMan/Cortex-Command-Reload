@@ -2,6 +2,13 @@
 
 ## Connect from the main menu
 
+For a disposable authoritative reload/HUD test on Windows, run
+`Tools/RunDedicatedServerSmoke.ps1 -CheckMenuConnection -CheckReloadHud`.
+The server creates a player-controlled actor, uses the normal Reload path and
+then changes server timer progress. The client saves `debug-run-reload-hud-35.png`
+and `debug-run-reload-hud-75.png` inside the selected debug output prefix. This
+fixture modifies only its temporary runtime session, not saved game content.
+
 Choose **Multiplayer** in the main menu, enter the server's IPv4 address or
 hostname and UDP port (default `8000`), then click **Connect**. The menu remains
 responsive while it waits for the first valid world snapshot (up to 15 seconds).
