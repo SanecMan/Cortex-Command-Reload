@@ -393,6 +393,13 @@ The replicated NPC may retain AI controller mode while client simulation is
 skipped. Linux deployment/config/gifting run `38599673678` succeeded for
 `9f6fbb78aeb`.
 
+Native Final compiled and linked. `DeploymentVisualDelivered` passed against
+the delivered root binaries in 55.50 seconds with both clients, native inventory
+gift application, rendering captures, strict attachments/menu/audio and 62
+further server updates. Full headless content/UTF-8/objective/spawn regression
+also passed in 50.24 seconds with 127 ticks (`DeploymentVisualFullRegression`).
+Linux run `38602303397` is in progress for commit `cccaf4305c8`.
+
 ### Brain placement and native start
 
 `SceneEditorGUI::InstallNetworkBrain` clones the server's selected brain, existing
