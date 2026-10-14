@@ -38,7 +38,12 @@ Native MSBuild `Final|x64` compiled and linked successfully; the root client and
 matching server passed `SoundLoopsV23Delivered` in 32.29 seconds. Both clients
 restored the pre-existing paused loop at cursor 29 ms, passed owner-lifetime
 checks, received Stop and exited cleanly; the server continued 62 updates.
-Linux CI run `38491505316` verifies the v23 commit separately.
+Linux CI run `38491505316` for `7eee7ebae2b` passed the server-only build and GCC
+sound codec/capture tests, including the active-loop baseline regression.
+Build-tree and extracted-package runs passed in 13.29/9.67 seconds with two
+external clients, input and UTF-8 screen messages, no video initialization,
+UTF-8 configuration and clean SIGTERM shutdown. This verifies headless logical
+sound state; the FMOD late-join playback test ran on Windows separately.
 
 `-CheckStaggeredSound` checks a different ordering: client one connects first,
 then receives Play and bus pause; client two connects afterwards and receives
@@ -50,6 +55,14 @@ received voice ID 2 exactly once: cursor 0 for client one, cursor 29 ms for clie
 two. This demonstrates targeted baseline delivery without an extra Play sent
 to the existing peer; it does not compare recorded waveforms or FMOD channel
 positions over the network.
+
+Native `Final|x64` was rebuilt with the per-fixture Play receipt markers and the
+matching root client/server pair passed `SoundStaggeredV23Delivered` in 49.04
+seconds. Again, each client received exactly one voice-2 Play (cursor 0 versus
+29 ms), both received Stop and exited cleanly, and the server continued 62
+updates after disconnect. The second client's stress screenshot was inspected:
+the terrain and HUD rendered, with the expected spectator presentation for this
+Activity. This image check does not demonstrate control of two independent actors.
 
 ## Playback cursor groundwork
 
