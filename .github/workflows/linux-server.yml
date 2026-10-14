@@ -43,6 +43,10 @@ jobs:
         run: python Tools/check_tracy_build.py --compile-commands build-server/compile_commands.json --expect disabled
       - name: Compile
         run: meson compile -C build-server -j 2
+      - name: Verify Army loadouts and player admission
+        run: |
+          meson compile -C build-server ArmyAdmissionTest -j 2
+          meson test -C build-server --no-rebuild army-admission
       - name: Verify screen text codec
         run: |
           g++-13 -std=c++20 -Wall -Wextra -I Source/System Tools/WorldStateScreenTextTest.cpp -o build-server/world-state-screen-text-test
@@ -132,6 +136,10 @@ jobs:
           --game-dir . --output-prefix LinuxLatePlayerCI --timeout 300
           --probe-clients --probe-seconds 12 --second-client-delay 3 --require-control --require-players 2
           --activity-class GAScripted --activity "Bunker Breach" --scene "Zekarra Mining Outpost"
+      - name: Verify late Army participants
+        run: |
+          python Tools/run_server_smoke.py --exe build-server/CortexCommandServer --game-dir . --output-prefix LinuxArmyLateCI --timeout 300 --probe-clients --probe-seconds 12 --second-client-delay 3 --require-control --require-players 2 --activity-class GAScripted --activity "One-Man Army" --scene "Ketanot Hills"
+          python Tools/run_server_smoke.py --exe build-server/CortexCommandServer --game-dir . --output-prefix LinuxArmyDiggersLateCI --timeout 300 --probe-clients --probe-seconds 12 --second-client-delay 3 --require-control --require-players 2 --activity-class GAScripted --activity "One-Man Army (Diggers Only)" --scene "Fredeleig Plains"
       - name: Package server
         run: |
           mkdir -p build-server/package
@@ -161,6 +169,8 @@ jobs:
             ScreenShots/LinuxRosterRestartCI/
             ScreenShots/LinuxDisconnectedRosterCI/
             ScreenShots/LinuxLatePlayerCI/
+            ScreenShots/LinuxArmyLateCI/
+            ScreenShots/LinuxArmyDiggersLateCI/
             build-server/meson-logs/
             build-server/runtime-dependencies.txt
             build-server/package-runtime-dependencies.txt

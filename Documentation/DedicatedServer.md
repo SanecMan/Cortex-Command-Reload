@@ -262,6 +262,41 @@ Portable checks use `--require-control` without `--restart-with-clients`, plus
 `--second-client-delay 3 --probe-seconds 12`. They require distinct actors and
 unchanged scene revision 1. Linux CI runs this scenario separately.
 
+One-Man Army and One-Man Army (Diggers Only) also handle `OnPlayerJoined` while
+the match is running. The same difficulty-based loadout selector is used at
+startup and on admission. The setup function's optional last argument restricts
+admission to the new slot; initial calls with three arguments still initialize
+all active humans. Joining does not reset survival timers, team funds or existing
+players, and does not create a new brain after the match ends.
+
+`ArmyLateBefore` failed because the second probe never received control.
+The corrected device-free runs passed with a delayed second peer and no restart:
+`ArmyLateAfter` (23.60 seconds, actors 1/320, 132 further ticks) and
+`ArmyDiggersLateAfter` (23.96 seconds, actors 1/687, 128 further ticks).
+The delivered native Final binaries passed both graphical scenarios through
+the menu with strict sampled attachments and audio shutdown:
+`ArmyLateVisual` (51.06 seconds, 64 further updates) and
+`ArmyDiggersLateVisual` (56.46 seconds, 63 further updates). Final screenshots
+were inspected and showed the assigned soldier and survival countdown.
+These checks use neutral inputs; they do not establish combat balance or
+movement/shooting coverage for every difficulty or faction.
+
+`Tools/ArmyAdmissionTest.cpp` loads the actual activity scripts into LuaJIT and
+checks the previous loadout groups for every integer difficulty from 0 to 100,
+the single-slot admission filter, unchanged all-player initialization and the
+running-state guard. Build and run it with the project's LuaJIT dependency:
+
+```text
+meson compile -C build-server ArmyAdmissionTest
+meson test -C build-server --no-rebuild army-admission
+```
+
+The target is not installed or built by default. Windows Meson test passed;
+Linux CI explicitly builds/runs it and both delayed Army connection scenarios.
+The client/server Meson build also completed, and `ArmyEngineRegression` passed
+device-free content, UTF-8 and objective checks in 19.33 seconds with 128 further
+ticks after disconnect.
+
 ### Native objective-point replication (v29)
 
 Activity goals created through `AddObjectivePoint` are now captured by the host

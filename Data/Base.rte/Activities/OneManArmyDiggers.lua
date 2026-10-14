@@ -28,30 +28,46 @@ function OneManArmy:OnSave()
 	self:SaveNumber("enemySpawnTimeLimit", self.enemySpawnTimeLimit);
 end
 
+function OneManArmy:GetHumanLoadoutGroups()
+	if self.Difficulty <= GameActivity.CAKEDIFFICULTY then
+		return "Actors - Heavy", "Weapons - Heavy", "Weapons - Explosive";
+	elseif self.Difficulty <= GameActivity.EASYDIFFICULTY then
+		return "Actors - Heavy", "Weapons - Primary", "Weapons - Light";
+	elseif self.Difficulty <= GameActivity.MEDIUMDIFFICULTY then
+		return "Actors - Light", "Weapons - Primary", "Weapons - Secondary";
+	elseif self.Difficulty <= GameActivity.HARDDIFFICULTY then
+		return "Actors - Light", "Weapons - Light", "Weapons - Secondary";
+	elseif self.Difficulty <= GameActivity.NUTSDIFFICULTY then
+		return "Actors - Light", "Weapons - Secondary", "Weapons - Secondary";
+	elseif self.Difficulty <= GameActivity.MAXDIFFICULTY then
+		return "Actors - Light", "Weapons - Secondary", "Tools";
+	end
+	return "Actors - Light", "Weapons - Primary", "Weapons - Secondary";
+end
+
+function OneManArmy:OnPlayerJoined(player)
+	if self.ActivityState == Activity.RUNNING then
+		local actorGroup, primaryGroup, secondaryGroup = self:GetHumanLoadoutGroups();
+		self:SetupHumanPlayerBrains(actorGroup, primaryGroup, secondaryGroup, player);
+	end
+end
+
 function OneManArmy:StartNewGame()
 	self:SetTeamFunds(1000000, self.CPUTeam);
 	self:SetTeamFunds(0, Activity.TEAM_1);
 
-	local actorGroup = "Actors - Light";
-	local primaryGroup = "Weapons - Primary";
-	local secondaryGroup = "Weapons - Secondary";
+	local actorGroup, primaryGroup, secondaryGroup = self:GetHumanLoadoutGroups();
 
 	if self.Difficulty <= GameActivity.CAKEDIFFICULTY then
 		self.timeLimit = 5 * 60000 + 5000;
 		self.timeDisplay = "five minutes";
 		self.baseSpawnTime = 6000;
 
-		actorGroup = "Actors - Heavy";
-		primaryGroup = "Weapons - Heavy";
-		secondaryGroup = "Weapons - Explosive";
 	elseif self.Difficulty <= GameActivity.EASYDIFFICULTY then
 		self.timeLimit = 5 * 60000 + 5000;
 		self.timeDisplay = "five minutes";
 		self.baseSpawnTime = 5500;
 
-		actorGroup = "Actors - Heavy";
-		primaryGroup = "Weapons - Primary";
-		secondaryGroup = "Weapons - Light";
 	elseif self.Difficulty <= GameActivity.MEDIUMDIFFICULTY then
 		self.timeLimit = 5 * 60000 + 5000;
 		self.timeDisplay = "five minutes";
@@ -62,22 +78,16 @@ function OneManArmy:StartNewGame()
 		self.timeDisplay = "six minutes";
 		self.baseSpawnTime = 4500;
 
-		primaryGroup = "Weapons - Light";
-		secondaryGroup = "Weapons - Secondary";
 	elseif self.Difficulty <= GameActivity.NUTSDIFFICULTY then
 		self.timeLimit = 8 * 60000 + 5000;
 		self.timeDisplay = "eight minutes";
 		self.baseSpawnTime = 4000;
 
-		primaryGroup = "Weapons - Secondary";
-		secondaryGroup = "Weapons - Secondary";
 	elseif self.Difficulty <= GameActivity.MAXDIFFICULTY then
 		self.timeLimit = 10 * 60000 + 5000;
 		self.timeDisplay = "ten minutes";
 		self.baseSpawnTime = 3500;
 
-		primaryGroup = "Weapons - Secondary";
-		secondaryGroup = "Tools";
 	end
 	self.enemySpawnTimeLimit = 500;
 	
@@ -119,7 +129,7 @@ function OneManArmy:StartNewGame()
 	self:SetupHumanPlayerBrains(actorGroup, primaryGroup, secondaryGroup);
 end
 
-function OneManArmy:SetupHumanPlayerBrains(actorGroup, primaryGroup, secondaryGroup)
+function OneManArmy:SetupHumanPlayerBrains(actorGroup, primaryGroup, secondaryGroup, onlyPlayer)
 	-- Default actors if no tech is chosen
 	local defaultActor = ("Soldier Light");
 	local defaultPrimary = ("Ronin/SPAS 12");
@@ -127,7 +137,7 @@ function OneManArmy:SetupHumanPlayerBrains(actorGroup, primaryGroup, secondaryGr
 	local defaultTertiary = ("Ronin/Molotov Cocktail");
 
 	for player = Activity.PLAYER_1, Activity.MAXPLAYERCOUNT - 1 do
-		if self:PlayerActive(player) and self:PlayerHuman(player) then
+		if (onlyPlayer == nil or player == onlyPlayer) and self:PlayerActive(player) and self:PlayerHuman(player) then
 			if not self:GetPlayerBrain(player) then
 				local team = self:GetTeamOfPlayer(player);
 				local foundBrain = MovableMan:GetUnassignedBrain(team);

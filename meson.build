@@ -291,6 +291,13 @@ endif
 
 
 #### Installing #####
+army_admission_test = executable(
+  'ArmyAdmissionTest', 'Tools/ArmyAdmissionTest.cpp',
+  dependencies:luajit_dep, build_by_default:false, install:false,
+  win_subsystem:'console',
+)
+test('army-admission', army_admission_test, workdir:meson.project_source_root())
+
 base_exclude_files = [
   'Base.rte/Settings.ini',
   'Launch Actor Editor.bat',
