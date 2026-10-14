@@ -255,7 +255,7 @@ objective/spawn regression passed in 38.66 seconds with 129 further ticks
 Native Final compiled and linked. `ConstructionRemovalDelivered` passed against
 the delivered root binaries in 55.46 seconds with two clients, removal/absence
 checks, native start, strict attachments/menu/audio and 64 further updates.
-Linux CI run `38586735265` is in progress for commit `fcce5202a34`.
+Linux CI run `38586735265` succeeded for commit `fcce5202a34`.
 
 ### Cross-peer removal authorization fixture
 
