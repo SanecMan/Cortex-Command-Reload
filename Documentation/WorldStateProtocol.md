@@ -1,5 +1,37 @@
 # World-state protocol
 
+## v27 firearm flash and device recoil presentation under validation
+
+Protocol 27 extends device presentation with the authoritative firearm FireFrame
+flag and the device Recoiled flag plus finite two-dimensional recoil offset.
+Offsets are sent only when recoil is present; absent recoil requires zero offsets.
+FireFrame is valid only on HDFirearm. Absent devices cannot carry any visual flags.
+The decoder clears its destination before reading, including omitted fields.
+Matching client/server binaries are required.
+
+Capture reads native getters. Replica application changes only visual flags and
+sprite recoil; it does not fire a round, add physical recoil impulse, consume a
+magazine, invoke Lua or play duplicate audio. Muzzle-flash attachment frame and
+pose continue through the existing attachment tree, while HDFirearm::Draw uses
+the replicated FireFrame to decide whether that attachment should be visible.
+Local weapons and their .rte/Lua API retain their existing simulation behavior.
+
+The portable codec test passes round trips, invalid recoil fields, illegal class
+and absent flags, and every truncated prefix of a valid packet. Native tests now
+exercise fire/recoil on and off on an equipped gun while retaining the weapon
+and magazine pointers. MSVC and MinGW GCC codec tests passed. Both Meson
+executables compiled and linked. `DeviceVisualV27Headless` passed in 18.31
+seconds with two separate clients, 128 observed ticks, input and UTF-8 text,
+without video initialization. `DeviceVisualV27Inventory` passed in 30.52 seconds
+with two menu-connected clients, inventory changes and the native fire/recoil
+on/off attachment tests. Both clients exited successfully; the server continued
+62 updates after disconnect. Native Final and Linux verification are pending.
+
+This is snapshot presentation, not a reliable shot-event stream. A shot entirely
+between snapshot captures can still be missed visually. Event history/counters
+and shot age are needed to close that timing gap; arbitrary weapon Lua state,
+screen shake and full Activity-specific presentation are also unproven.
+
 ## v26 device activation and reload presentation under validation
 
 Development sources add DeviceVisualState to world/inventory objects and native

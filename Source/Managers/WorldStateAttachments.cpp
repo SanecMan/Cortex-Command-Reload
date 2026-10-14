@@ -326,6 +326,7 @@ bool TestNative() {
 	auto* sourceGun = dynamic_cast<HDFirearm*>(source->GetFGArm()->GetHeldDevice());
 	sourceGun->SetInheritsRotAngle(false); sourceGun->SetRotAngle(1.1F); sourceGun->GetMagazine()->SetRoundCount(7);
 	sourceGun->SetReplicaActivationVisual(true); sourceGun->SetReplicaReloadVisual(true, 0.35F);
+	sourceGun->SetReplicaFireVisual(true); sourceGun->SetRecoil(Vector(), Vector(-0.75F, 0.125F), true);
 	const auto near = [](float left, float right) { return std::abs(left - right) < 0.0001F; };
 	auto matches = [&]() {
 		source->CorrectAttachableAndWoundPositionsAndRotations();
@@ -347,14 +348,17 @@ bool TestNative() {
 	if (!matches()) return false;
 	auto* targetGun = dynamic_cast<HDFirearm*>(target->GetFGArm()->GetHeldDevice());
 	if (!targetGun || !targetGun->IsActivated() || !targetGun->IsReloading() || !near(targetGun->GetReloadProgress(), 0.35F)) return false;
+	if (!targetGun->FiredFrame() || !targetGun->IsRecoiled() || !near(targetGun->GetRecoilOffset().m_X, -0.75F) || !near(targetGun->GetRecoilOffset().m_Y, 0.125F)) return false;
 	Arm* retainedArm = target->GetFGArm();
 	HeldDevice* retainedGun = retainedArm->GetHeldDevice();
 	Magazine* retainedMagazine = dynamic_cast<HDFirearm*>(retainedGun)->GetMagazine();
 	source->SetRotAngle(-0.5F); source->GetFGArm()->SetRotAngle(1.2F); sourceGun->GetMagazine()->SetRoundCount(-1);
 	sourceGun->SetReplicaActivationVisual(false); sourceGun->SetReplicaReloadVisual(true, 0.75F);
+	sourceGun->SetReplicaFireVisual(false); sourceGun->SetRecoil(Vector(), Vector(), false);
 	if (!matches() || target->GetFGArm() != retainedArm || retainedArm->GetHeldDevice() != retainedGun ||
 	    dynamic_cast<HDFirearm*>(retainedGun)->GetMagazine() != retainedMagazine) return false;
 	if (targetGun->IsActivated() || !targetGun->IsReloading() || !near(targetGun->GetReloadProgress(), 0.75F)) return false;
+	if (targetGun->FiredFrame() || targetGun->IsRecoiled() || targetGun->GetRecoilOffset() != Vector()) return false;
 	sourceGun->SetReplicaReloadVisual(false, 1);
 	if (!matches() || targetGun->IsReloading() || targetGun->GetReloadProgress() != 1) return false;
 	Retire(*source, source->GetFGArm());

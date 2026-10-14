@@ -20,6 +20,11 @@ through the menu and rendering authoritative reload progress at 35% and 75%
 visually inspected for the restored reload/ammo icons and Cyrillic screen text.
 The delivered root `Final|x64` client and matching server also passed
 `HudIconUTF8Delivered` (33.95 seconds, two clients, 63 updates after disconnect).
+Linux CI `38505177883` for `e8f030257c9` passed GCC font decoding, server build,
+device-free self-tests, two separate clients and extracted-package startup.
+Build-tree/package runs took 13.34/9.67 seconds and verified UTF-8 config/input/
+screen text, no video initialization and clean SIGTERM shutdown. These durations
+describe checks, not a performance benchmark or a Linux visual rendering test.
 
 Absolute resource paths remain absolute when resolved by PresetMan. They are
 normalized to generic separators and passed through the same UTF-8/legacy-path

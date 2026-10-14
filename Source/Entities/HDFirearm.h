@@ -460,6 +460,9 @@ namespace RTE {
 		/// @return Returns true at least one round has already been fired during the current frame.
 		bool FiredFrame() const { return m_FireFrame; }
 
+		// Network presentation only: never fires rounds, audio or script callbacks.
+		void SetReplicaFireVisual(bool fired) { m_FireFrame = fired; }
+
 		/// Gets whether this HDFirearm is ready to be fired.
 		/// @return Whether this HDFirearm is ready to pop another Round.
 		bool CanFire() const { return m_LastFireTmr.IsPastSimMS(GetMSPerRound()); }

@@ -20,7 +20,7 @@
 namespace RTE::WorldStateProtocol {
 
 inline constexpr std::uint32_t c_Magic = 0x31524343; // "CCR1" on the wire.
-inline constexpr std::uint16_t c_Version = 26;
+inline constexpr std::uint16_t c_Version = 27;
 inline constexpr std::size_t c_TeamCount = 4;
 inline constexpr std::int8_t c_NoActivity = -1;
 inline constexpr std::int8_t c_MaxActivityState = 6;
@@ -469,14 +469,18 @@ inline bool DecodeInputCommand(std::span<const std::uint8_t> packet, InputComman
 
 namespace Detail {
 inline void WriteDeviceVisual(std::vector<std::uint8_t>& packet, const DeviceVisualState& state) {
-	WriteUnsigned(packet, (state.Present ? 1 : 0) | (state.Activated ? 2 : 0) | (state.Reloading ? 4 : 0), 1);
+	WriteUnsigned(packet, (state.Present ? 1 : 0) | (state.Activated ? 2 : 0) | (state.Reloading ? 4 : 0) | (state.FireFrame ? 8 : 0) | (state.Recoiled ? 16 : 0), 1);
 	if (state.Present) WriteFloat(packet, state.ReloadProgress);
+	if (state.Recoiled) { WriteFloat(packet, state.RecoilOffsetX); WriteFloat(packet, state.RecoilOffsetY); }
 }
 inline bool ReadDeviceVisual(std::span<const std::uint8_t> packet, std::size_t& offset, DeviceVisualState& state) {
 	std::uint64_t flags = 0;
-	if (!ReadUnsigned(packet, offset, 1, flags) || flags > 7 || (!(flags & 1) && flags)) return false;
+	if (!ReadUnsigned(packet, offset, 1, flags) || flags > 31 || (!(flags & 1) && flags)) return false;
+	state = {};
 	state.Present = (flags & 1) != 0; state.Activated = (flags & 2) != 0; state.Reloading = (flags & 4) != 0;
-	return !state.Present || ReadFloat(packet, offset, state.ReloadProgress);
+	state.FireFrame = (flags & 8) != 0; state.Recoiled = (flags & 16) != 0;
+	if (state.Present && !ReadFloat(packet, offset, state.ReloadProgress)) return false;
+	return !state.Recoiled || (ReadFloat(packet, offset, state.RecoilOffsetX) && ReadFloat(packet, offset, state.RecoilOffsetY));
 }
 inline bool WriteAttachments(std::vector<std::uint8_t>& packet, const ObjectState& object) {
 	WriteUnsigned(packet, object.HasAttachmentState, 1);

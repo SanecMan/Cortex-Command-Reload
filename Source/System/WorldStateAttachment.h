@@ -29,11 +29,16 @@ inline constexpr std::size_t c_MaxAttachments = 256, c_MaxAttachmentDepth = 16;
 struct DeviceVisualState {
     bool Present = false, Activated = false, Reloading = false;
     float ReloadProgress = 1;
+    bool FireFrame = false, Recoiled = false;
+    float RecoilOffsetX = 0, RecoilOffsetY = 0;
     bool operator==(const DeviceVisualState&) const = default;
 };
 inline bool ValidDeviceVisual(const DeviceVisualState& state, const std::string& className) {
     if (!std::isfinite(state.ReloadProgress) || state.ReloadProgress < 0 || state.ReloadProgress > 1) return false;
-    if (!state.Present) return !state.Activated && !state.Reloading && state.ReloadProgress == 1;
+    if (!std::isfinite(state.RecoilOffsetX) || !std::isfinite(state.RecoilOffsetY)) return false;
+    if (!state.Recoiled && (state.RecoilOffsetX != 0 || state.RecoilOffsetY != 0)) return false;
+    if (state.FireFrame && className != "HDFirearm") return false;
+    if (!state.Present) return !state.Activated && !state.Reloading && !state.FireFrame && !state.Recoiled && state.ReloadProgress == 1;
     if (state.Reloading) return className == "HDFirearm";
     return state.ReloadProgress == 1;
 }
